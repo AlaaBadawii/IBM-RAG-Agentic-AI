@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Book & Movie Advisor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      background: #f7f8fa;
+      color: #1f2328;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container { max-width: 860px; margin: 0 auto; }
+
+    /* ── Header ── */
+    header { text-align: center; margin-bottom: 2rem; }
+    header h1 { font-size: 1.8rem; font-weight: 700; }
+    header p  { color: #57606a; margin-top: 0.3rem; }
+
+    /* ── Input card ── */
+    .input-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    label { display: block; font-weight: 600; margin-bottom: 0.4rem; }
+
+    textarea {
+      width: 100%;
+      min-height: 90px;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+    }
+    textarea:focus { outline: 2px solid #3b82d4; border-color: transparent; }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+
+    select {
+      padding: 0.5rem 0.8rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      background: #fff;
+    }
+    select:focus { outline: 2px solid #3b82d4; border-color: transparent; }
+
+    button {
+      padding: 0.55rem 1.4rem;
+      background: #3b82d4;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover  { background: #2d6bbf; }
+    button:disabled { background: #93b8e8; cursor: not-allowed; }
+
+    /* ── Spinner ── */
+    #spinner {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      color: #57606a;
+      font-size: 14px;
+      margin-top: 1rem;
+    }
+    .spin {
+      width: 18px; height: 18px;
+      border: 3px solid #e5e7eb;
+      border-top-color: #3b82d4;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Error ── */
+    #error-msg {
+      display: none;
+      background: #fff3f3;
+      border: 1px solid #f5a0a0;
+      color: #b91c1c;
+      padding: 0.7rem 1rem;
+      border-radius: 6px;
+      margin-top: 1rem;
+      font-size: 14px;
+    }
+
+    /* ── Results ── */
+    #results { display: none; margin-top: 0.5rem; }
+
+    .meta {
+      font-size: 13px;
+      color: #57606a;
+      margin-bottom: 1rem;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    /* book cards get a warm left border, movie cards get a cool one */
+    .card.book  { border-left: 4px solid #d97706; }
+    .card.movie { border-left: 4px solid #3b82d4; }
+
+    .card-title { font-size: 1rem; font-weight: 700; }
+
+    .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .badge {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    .badge-type-book  { background: #fef3c7; color: #92400e; }
+    .badge-type-movie { background: #dbeafe; color: #1e40af; }
+    .badge-genre      { background: #f3f4f6; color: #374151; }
+
+    .card-why { font-size: 13px; color: #374151; }
+
+    .mood-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 13px;
+      color: #57606a;
+    }
+    .mood-bar-bg {
+      flex: 1;
+      height: 6px;
+      background: #e5e7eb;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .mood-bar-fill {
+      height: 100%;
+      background: #3b82d4;
+      border-radius: 3px;
+    }
+
+    .card-find {
+      font-size: 12px;
+      color: #57606a;
+      border-top: 1px solid #f3f4f6;
+      padding-top: 0.5rem;
+      margin-top: auto;
+    }
+    .card-find span { font-weight: 600; color: #1f2328; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header>
+      <h1>📚 Book &amp; Movie Advisor</h1>
+      <p>Describe your mood or interests and get 3 tailored recommendations.</p>
+    </header>
+
+    <div class="input-card">
+      <label for="mood">What's your mood or what are you in the mood for?</label>
+      <textarea
+        id="mood"
+        placeholder="e.g. I want something thrilling and fast-paced for a rainy evening…"
+        maxlength="500"
+      ></textarea>
+
+      <div class="controls">
+        <select id="model">
+          <optgroup label="Meta">
+            <option value="llama">Llama 3.1 8B</option>
+            <option value="llama-70b">Llama 3.3 70B</option>
+          </optgroup>
+          <optgroup label="Mistral">
+            <option value="mistral">Mistral 7B</option>
+          </optgroup>
+          <optgroup label="DeepSeek">
+            <option value="deepseek">DeepSeek V3.5</option>
+            <option value="deepseek-r1">DeepSeek R1</option>
+          </optgroup>
+          <optgroup label="Google">
+            <option value="gemma">Gemma 3 4B</option>
+            <option value="gemma-27b">Gemma 3 27B</option>
+          </optgroup>
+          <optgroup label="Alibaba">
+            <option value="qwen">Qwen3 8B</option>
+          </optgroup>
+          <optgroup label="Microsoft">
+            <option value="phi">Phi-4 Reasoning</option>
+          </optgroup>
+        </select>
+        <button id="submit-btn">Get Recommendations</button>
+      </div>
+
+      <div id="spinner">
+        <div class="spin"></div>
+        Thinking…
+      </div>
+
+      <div id="error-msg"></div>
+    </div>
+
+    <div id="results">
+      <div class="meta" id="meta-line"></div>
+      <div class="cards" id="cards-container"></div>
+    </div>
+
+  </div>
+
+  <script>
+    const btn        = document.getElementById("submit-btn");
+    const moodInput  = document.getElementById("mood");
+    const modelSel   = document.getElementById("model");
+    const spinner    = document.getElementById("spinner");
+    const errorDiv   = document.getElementById("error-msg");
+    const resultsDiv = document.getElementById("results");
+    const metaLine   = document.getElementById("meta-line");
+    const cardsDiv   = document.getElementById("cards-container");
+
+    btn.addEventListener("click", async () => {
+      const mood  = moodInput.value.trim();
+      const model = modelSel.value;
+
+      if (!mood) {
+        showError("Please describe your mood before submitting.");
+        return;
+      }
+
+      // Reset UI
+      hideError();
+      resultsDiv.style.display = "none";
+      spinner.style.display    = "flex";
+      btn.disabled             = true;
+
+      try {
+        const res = await fetch("/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mood, model }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showError(data.error || "Something went wrong. Please try again.");
+          return;
+        }
+
+        renderCards(data.recommendations, data.model, data.duration_ms);
+
+      } catch (err) {
+        showError("Network error: " + err.message);
+      } finally {
+        spinner.style.display = "none";
+        btn.disabled          = false;
+      }
+    });
+
+    function renderCards(recommendations, model, durationMs) {
+      const modelLabels = {
+        "llama":       "Llama 3.1 8B",
+        "llama-70b":   "Llama 3.3 70B",
+        "mistral":     "Mistral 7B",
+        "deepseek":    "DeepSeek V3.5",
+        "deepseek-r1": "DeepSeek R1",
+        "gemma":       "Gemma 3 4B",
+        "gemma-27b":   "Gemma 3 27B",
+        "qwen":        "Qwen3 8B",
+        "phi":         "Phi-4 Reasoning",
+      };
+      const modelLabel = modelLabels[model] || model;
+      metaLine.textContent =
+        `3 recommendations · Model: ${modelLabel} · ${durationMs.toLocaleString()} ms`;
+
+      cardsDiv.innerHTML = recommendations.map(r => {
+        const typeClass  = r.type === "book" ? "book" : "movie";
+        const typeBadge  = r.type === "book" ? "badge-type-book" : "badge-type-movie";
+        const barWidth   = Math.round((r.mood_match / 10) * 100);
+
+        return `
+          <div class="card ${typeClass}">
+            <div class="card-title">${escHtml(r.title)}</div>
+            <div class="badges">
+              <span class="badge ${typeBadge}">${escHtml(r.type)}</span>
+              <span class="badge badge-genre">${escHtml(r.genre)}</span>
+            </div>
+            <div class="card-why">${escHtml(r.why_you_ll_love_it)}</div>
+            <div class="mood-row">
+              Mood match
+              <div class="mood-bar-bg">
+                <div class="mood-bar-fill" style="width:${barWidth}%"></div>
+              </div>
+              ${r.mood_match}/10
+            </div>
+            <div class="card-find">📍 <span>${escHtml(r.where_to_find_it)}</span></div>
+          </div>`;
+      }).join("");
+
+      resultsDiv.style.display = "block";
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function showError(msg) {
+      errorDiv.textContent    = msg;
+      errorDiv.style.display  = "block";
+    }
+
+    function hideError() {
+      errorDiv.style.display  = "none";
+      errorDiv.textContent    = "";
+    }
+  </script>
+</body>
+</html>

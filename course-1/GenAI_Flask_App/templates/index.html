@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GenAI Playground · OpenRouter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-mark">⌁</span>
+                <span class="brand-name">GenAI Playground</span>
+            </div>
+            <span class="brand-sub">via OpenRouter</span>
+        </header>
+
+        <main class="chat">
+            <div id="messages" class="messages">
+                <div id="empty-state" class="empty-state">
+                    <p>Pick a model on the right, then send a message.</p>
+                    <p class="empty-state-hint">Every reply comes back as structured JSON: a summary, a sentiment score, and a suggested response.</p>
+                </div>
+            </div>
+
+            <form id="chat-form" class="composer">
+                <select id="model-select" class="model-select">
+                    <option value="llama">Llama 3.3 70B</option>
+                    <option value="granite">Granite 3.3 8B</option>
+                    <option value="mistral">Mistral Small 3.1</option>
+                </select>
+                <textarea
+                    id="message-input"
+                    class="message-input"
+                    placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"
+                    rows="1"
+                    required
+                ></textarea>
+                <button type="submit" id="send-btn" class="send-btn">Send</button>
+            </form>
+        </main>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

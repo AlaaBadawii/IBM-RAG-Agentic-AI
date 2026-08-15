@@ -1,0 +1,15 @@
+Flask
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langchain-chroma
+langchain-huggingface
+
+chromadb
+sentence-transformers
+
+pydantic
+python-dotenv
+requests
+

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Email Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="header">
+        <h1>AI Email Assistant</h1>
+        <p>Generate polished, structured emails with LangChain + OpenRouter</p>
+    </header>
+
+    <main class="container">
+        <form id="email-form" class="card form-card">
+            <div class="field">
+                <label for="topic">Topic</label>
+                <textarea id="topic" name="topic" rows="4" placeholder="Describe what you need to write about..." required></textarea>
+            </div>
+
+            <div class="field-row">
+                <div class="field">
+                    <label for="tone">Tone</label>
+                    <select id="tone" name="tone">
+                        <option value="casual">Casual</option>
+                        <option value="friendly">Friendly</option>
+                        <option value="professional" selected>Professional</option>
+                        <option value="formal">Formal</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label for="email_type">Email type</label>
+                    <select id="email_type" name="email_type">
+                        <option value="general" selected>General</option>
+                        <option value="complaint">Complaint</option>
+                        <option value="apology">Apology</option>
+                        <option value="follow-up">Follow-up</option>
+                        <option value="meeting-request">Meeting request</option>
+                        <option value="internship-application">Internship application</option>
+                        <option value="thank-you">Thank-you</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label for="model">Model</label>
+                    <select id="model" name="model">
+                        {% for key in models %}
+                        <option value="{{ key }}" {% if loop.first %}selected{% endif %}>{{ key|title }}</option>
+                        {% endfor %}
+                        <option value="all">Compare All</option>
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" id="generate-btn" class="btn">Generate Email</button>
+        </form>
+
+        <div id="spinner" class="spinner hidden" aria-label="Loading"></div>
+
+        <section id="results" class="results hidden">
+            <h2>Result</h2>
+            <div id="result-cards"></div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
