@@ -1,88 +1,79 @@
 # IBM RAG and Agentic AI Professional Certificate
 
-This repository contains my hands-on work while completing IBM's **RAG and Agentic AI Professional Certificate** (Coursera). It is an engineering learning portfolio, not the official IBM course material — I work through each course's guided projects, then rebuild them from scratch and extend them, swapping the proprietary IBM watsonx.ai stack for free alternatives (OpenRouter + local Hugging Face models) so everything runs on a normal machine.
+> All projects listed here are both IBM practical labs and self-build projects as practice on what I learn through the program.
 
-The goal is practical, working understanding of:
+---
+
+## About the Program
+
+**IBM RAG and Agentic AI Professional Certificate** — a 10-course specialization on Coursera by IBM Skills Network.
+
+> Build real-world AI with RAG and agentic AI. Use AI tools to streamline automation, drive innovation & take your career further, faster.
+
+**Instructors:** IBM Skills Network Team (Wojciech 'Victor' Fulmyk, Ricky Shi)
+
+**Program stats:** 10-course series · 4.6 rating (1,126 reviews) · 105,310+ enrolled · Advanced level · Flexible schedule (8 weeks at 3 hours/week)
+
+---
+
+## What You'll Learn
+
+- Build job-aligned GenAI skills and hands-on experience to create RAG, multimodal, and agentic AI applications employers need
+- Design and chain AI tools with LangChain for modular, reusable gen AI workflows
+- Implement function calling, RAG, and vector stores to build intelligent, context-aware applications
+- Create autonomous AI agents using LangGraph, CrewAI, and AG2 for real-world impact
+
+## Skills You'll Gain
+
+AI Security · AI Integrations · Retrieval-Augmented Generation · Software Development · Generative AI Agents · Agentic systems · LLM Application · Multimodal Prompts · Prompt Patterns · Tool Calling · Vector Databases · Generative AI · AI Workflows · Model Context Protocol · Agentic Workflows · OpenAI API · Prompt Engineering · LangGraph · AI Orchestration · LangChain · AI Agents · Agentic Workflows
+
+---
+
+## Courses in the Program
+
+| # | Course | Duration | Status |
+|---|---|---|---|
+| 1 | Develop Generative AI Applications: Get Started | 10 hours | **Completed** |
+| 2 | Build RAG Applications: Get Started | 7 hours | **Completed** |
+| 3 | Vector Databases for RAG: An Introduction | 9 hours | **Completed** |
+| 4 | Advanced RAG with Vector Databases and Retrievers | 8 hours | Not Started |
+| 5 | Build Multimodal Generative AI Applications | 8 hours | Not Started |
+| 6 | Fundamentals of Building AI Agents | 11 hours | Not Started |
+| 7 | Agentic AI with LangChain and LangGraph | 11 hours | Not Started |
+| 8 | Agentic AI with LangGraph, CrewAI, AutoGen and BeeAI | 13 hours | Not Started |
+| 9 | Build AI Agents using MCP | 10 hours | Not Started |
+| 10 | RAG and Agentic AI Capstone Project | 14 hours | Not Started |
+
+---
+
+## What This Repository Contains
+
+This repository contains my hands-on work while completing the IBM RAG and Agentic AI Professional Certificate. It is an engineering learning portfolio — I work through each course's guided labs, then rebuild them from scratch and extend them, swapping the proprietary IBM watsonx.ai stack for free alternatives (OpenRouter + local Hugging Face models) so everything runs on a normal machine.
+
+The goal is a practical, working understanding of:
 
 - LLM applications and prompt engineering
 - LangChain (LCEL, chains, structured output)
 - Retrieval-Augmented Generation (RAG)
 - Embeddings and vector databases
 - AI agents, agentic workflows, and multi-agent systems
-- MCP and related agent infrastructure (upcoming courses)
-
-Everything below that claims something was "implemented" is grounded in code that actually lives in `course-1/` and `course-2/`. Topics listed as *planned* are from the certificate's own syllabus and have **not** been implemented here yet.
+- MCP and related agent infrastructure
 
 ---
 
-## Progress
-
-**Progress: 2 / 10 completed — Course 3 in progress**
-
-```
-[██████░░░░]  2 / 10 completed
-```
-
-| # | Course | Status |
-|---|---|---|
-| 1 | Develop Generative AI Applications: Get Started | **Completed** |
-| 2 | Build RAG Applications: Get Started | **Completed** |
-| 3 | Vector Databases for RAG: An Introduction | **In Progress** |
-| 4 | Advanced RAG with Vector Databases and Retrievers | Not Started |
-| 5 | Build Multimodal Generative AI Applications | Not Started |
-| 6 | Fundamentals of Building AI Agents | Not Started |
-| 7 | Agentic AI with LangChain and LangGraph | Not Started |
-| 8 | Agentic AI with LangGraph, CrewAI, AutoGen and BeeAI | Not Started |
-| 9 | Build AI Agents using MCP | Not Started |
-| 10 | RAG and Agentic AI Capstone Project | Not Started |
-
-> Note: `course-3/` does not exist in this repository yet — the directory will be created when I begin the Course 3 labs. Courses 1 and 2 are fully completed; Courses 4–10 have not been started.
-
----
-
-## Learning Roadmap
-
-The certificate (and this repository) progresses in roughly this order. This is the **course roadmap** — only the first two stages have been completed in code so far:
-
-```
-LLM Applications
-      ↓
-Prompt Engineering / LangChain
-      ↓
-RAG                                    ← completed (Course 2)
-      ↓
-Embeddings / Vector Databases          ← in progress (Course 3)
-      ↓
-Advanced Retrieval
-      ↓
-Multimodal AI
-      ↓
-AI Agents / Tool Calling
-      ↓
-Agentic Workflows
-      ↓
-Multi-Agent Systems
-      ↓
-MCP
-      ↓
-Capstone
-```
-
----
-
-## Courses
+## Course Summaries
 
 ### Course 1 — Develop Generative AI Applications: Get Started
-
-**Status: Completed**
 
 IBM's course focuses on the fundamentals of building generative AI applications: LLM APIs, prompt templates, few-shot prompting, LangChain chains (LCEL), and forcing models to produce structured output. The guided project is a Flask + LangChain app that returns structured JSON instead of free text.
 
 **Repository work** — I rebuilt the guided project and then built two more applications in the same style, all using OpenRouter instead of watsonx.ai:
 
-- **GenAI Flask App** (`course-1/GenAI_Flask_App/`) — the course guided project rebuilt: type a message, pick a model (Llama / Granite / Mistral), get back a validated JSON response (`summary`, `sentiment`, `response`). A single shared `ChatPromptTemplate` + `JsonOutputParser` pipe replaced the course's three per-model raw-text templates. Includes a Flask-free CLI sanity check (`llm_test.py`).
-- **AI Email Assistant** (`course-1/AI_Email_Assistant/`) — generates polished emails (subject + body + improvement suggestions) as structured JSON. Adds a **Compare All** mode that runs the same prompt across four models in parallel and shows per-model latency, length, and a subject-quality score. Modular layout: `config` / `model` / `parser` / `prompts` / `services`. The detailed build log in `plan.md` documents real bugs I hit (wrong OpenRouter base URL causing DNS failures, intermittent `OutputParserException` on markdown-wrapped JSON, dependency drift between langchain versions).
-- **Book/Movie Advisor** (`course-1/Book_Movie_Advisor/`) — takes a free-text mood and returns exactly 3 structured recommendation cards via a Pydantic `RecommendationList` schema. Selectable among a configurable set of OpenRouter models.
+- **GenAI Flask App** (`Develop_Generative_AI_Applications_Get_Started/GenAI_Flask_App/`) — the course guided project rebuilt: type a message, pick a model (Llama / Granite / Mistral), get back a validated JSON response (`summary`, `sentiment`, `response`). A single shared `ChatPromptTemplate` + `JsonOutputParser` pipe replaced the course's three per-model raw-text templates. Includes a Flask-free CLI sanity check (`llm_test.py`).
+- **AI Email Assistant** (`Develop_Generative_AI_Applications_Get_Started/AI_Email_Assistant/`) — generates polished emails (subject + body + improvement suggestions) as structured JSON. Adds a **Compare All** mode that runs the same prompt across four models in parallel and shows per-model latency, length, and a subject-quality score. Modular layout: `config` / `model` / `parser` / `prompts` / `services`. The detailed build log in `plan.md` documents real bugs I hit (wrong OpenRouter base URL causing DNS failures, intermittent `OutputParserException` on markdown-wrapped JSON, dependency drift between langchain versions).
+- **Book/Movie Advisor** (`Develop_Generative_AI_Applications_Get_Started/Book_Movie_Advisor/`) — takes a free-text mood and returns exactly 3 structured recommendation cards via a Pydantic `RecommendationList` schema. Selectable among a configurable set of OpenRouter models.
+
+See [`Develop_Generative_AI_Applications_Get_Started/README.md`](Develop_Generative_AI_Applications_Get_Started/README.md) for the full course-level overview.
 
 **Key things learned**
 
@@ -96,21 +87,24 @@ IBM's course focuses on the fundamentals of building generative AI applications:
 
 ### Course 2 — Build RAG Applications: Get Started
 
-**Status: Completed**
-
 IBM's course introduces RAG: document loading, chunking/splitting, embeddings, vector stores, retrieval, similarity search, and query engines — taught through LlamaIndex and Gradio. The progression is from a plain LLM app toward a retrieval-augmented one.
 
 **Repository work**
 
-- **LinkedIn Icebreaker Bot** (`course-2/icebreaker/`) — a from-scratch rebuild of the course's LlamaIndex lab, with the provider swapped from watsonx to **OpenRouter (LLM) + local Hugging Face embeddings** (`all-MiniLM-L6-v2`, free and offline). A complete RAG pipeline built file-by-file:
+- **LinkedIn Icebreaker Bot** (`Build_RAG_Applications_Get_Started/icebreaker/`) — a from-scratch rebuild of the course's LlamaIndex lab, with the provider swapped from watsonx to **OpenRouter (LLM) + local Hugging Face embeddings** (`sentence-transformers/all-MiniLM-L6-v2`, free and offline). A complete RAG pipeline built file-by-file:
   - `modules/data_extraction.py` — profile data loading (mock JSON or the discontinued ProxyCurl API).
   - `modules/data_processing.py` — `SentenceSplitter` chunking, `VectorStoreIndex` construction, and an embedding-integrity check.
   - `modules/query_engine.py` — generation via a LlamaIndex query engine, plus a **hand-written retrieval** path (`as_retriever()` → top-k nodes → context assembly) to expose every RAG stage explicitly.
   - `main.py` (CLI) and `app.py` (Gradio UI with runtime model switching and per-session indexes).
-  - A ~1400-line `PLAN.md` walking through the build, and the pinned `requirements.txt` (`llama-index-core 0.14.x`).
-- **RAG Lab** (`course-2/PersonalBrandingAgent/RAG_Lab.ipynb`) — the completed course notebook *"Summarize Private Documents Using RAG, LangChain, and LLMs"*: `TextLoader` → `CharacterTextSplitter` (chunk_size=1000) → `HuggingFaceEmbeddings` + Chroma → watsonx LLM → `RetrievalQA`, `ConversationBufferMemory`, `ConversationalRetrievalChain`, and a "wrap it into an agent" function. Includes source-return and model-swap exercises.
-- **Personal Branding Agent** (`course-2/PersonalBrandingAgent/`) — a production-oriented extension of the course's RAG material (detailed below). This is where the RAG concepts are being applied to a real project.
-- **Gradio demos** (`course-2/Gradio/`) — a `gr.Interface` sentence builder and a transformers/torchvision image-captioning demo, for Gradio UI practice.
+  - A detailed `PLAN.md` walking through the build, and the pinned `requirements.txt` (`llama-index-core 0.14.x`).
+- **Personal Branding Agent** (`Build_RAG_Applications_Get_Started/PersonalBrandingAgent/`) — a production-oriented extension of the course's RAG material. The **knowledge base** (a structured `data/` corpus) and the **LinkedIn OAuth integration** are complete; the ingest → retrieve → generate → evaluate → publish pipeline is defined in `PLAN.md` (10 phases) and being built incrementally.
+  - `data/` — structured personal knowledge base with 9 data categories and evidence state tracking
+  - `Auth_handling/` — LinkedIn OAuth 2.0 flow with token refresh and post publishing via the LinkedIn REST API
+  - `docs/` — architecture docs, phase docs, ADRs
+  - `RAG_Lab.ipynb` — completed IBM course RAG notebook (reference)
+- **Gradio demos** (`Build_RAG_Applications_Get_Started/Gradio/`) — a `gr.Interface` sentence builder and a transformers/torchvision image-captioning demo, for Gradio UI practice.
+
+See [`Build_RAG_Applications_Get_Started/README.md`](Build_RAG_Applications_Get_Started/README.md) for the full course-level overview.
 
 **Key things learned**
 
@@ -119,34 +113,30 @@ IBM's course introduces RAG: document loading, chunking/splitting, embeddings, v
 - Embeddings turn text into vectors so similarity search can be semantic, not keyword-based.
 - LlamaIndex's `VectorStoreIndex`/`as_query_engine` hides retrieval; `as_retriever()` exposes it — good for learning what the abstraction is doing.
 - Retrieval quality is upstream of generation quality: garbage in → grounded-but-wrong answers out.
-- Provider-agnostic frameworks (LlamaIndex) mean swapping watsonx for OpenRouter only touches the factory files.
+- Provider-agnostic frameworks mean swapping watsonx for OpenRouter only touches the factory files.
 
 ---
 
 ### Course 3 — Vector Databases for RAG: An Introduction
 
-**Status: In Progress**
-
 IBM's course teaches vector databases from the inside out: how embeddings become vector representations, vector collections, adding/updating/deleting documents, similarity search, and distance metrics — with hands-on ChromaDB labs.
 
-**Completed so far**
+**Repository work** — three projects demonstrating semantic search with metadata filtering:
 
-No dedicated Course 3 work has been committed to this repository yet — the `course-3/` directory does not exist. The only vector-database experience present so far is incidental to Course 2:
+- **Books Advanced Search** (`Vector_Databases_for_RAG_An_Introduction/Books_Advanced_Search/`) — a modular Python application storing 8 book records in ChromaDB with layered architecture (data → documents → vector_store → repository → search service). Four search exercises: similarity search, genre filtering (`$in`), rating filtering (`$gte`), combined semantic + metadata search. Persistent ChromaDB storage via `chromadb.PersistentClient`.
+- **Job Description Matcher** (`Vector_Databases_for_RAG_An_Introduction/job_description_matcher/`) — stores ~30 job descriptions in ChromaDB with rich metadata, enables semantic search with metadata filtering, and includes evaluation metrics (Hit@K, Precision@K).
+- **Similarity Search on Employee Records** (`Vector_Databases_for_RAG_An_Introduction/Similarity_Search_on_Employee_Records/`) — employee similarity search with metadata filtering using department, experience, location, and combined semantic + metadata queries.
 
-- Chroma used in the completed RAG lab (`Chroma.from_documents`).
-- LlamaIndex's in-memory `VectorStoreIndex` used in the Icebreaker Bot.
-- A persistent Chroma store *planned* (not yet built) for the Personal Branding Agent.
+See [`Vector_Databases_for_RAG_An_Introduction/README.md`](Vector_Databases_for_RAG_An_Introduction/README.md) for the full course-level overview.
 
-**Still to learn in Course 3**
+**Key concepts practiced**
 
-- ChromaDB collections and CRUD (add / update / delete documents)
-- Vector representations and embeddings in depth
-- Similarity search and distance metrics (cosine, Euclidean, dot product)
-- Vector-database internals and how search scales
-- Dedicated recommendation / search experiments
-- RAG experiments built directly on a vector database
-
-I will create `course-3/` when I start the labs.
+- ChromaDB collections — creating, ingesting, and querying a persistent vector store
+- SentenceTransformer embeddings — converting text to vectors with `SentenceTransformerEmbeddingFunction`
+- Cosine distance — 0 = identical, 1 = opposite
+- Metadata filtering — `where` clauses with `$in`, `$gte`, `$lte`, `$and`, `$or`
+- Combined search — `where` in `collection.query()` to filter semantic results
+- Document construction — combining multiple fields into effective searchable text strings
 
 ---
 
@@ -160,9 +150,9 @@ I will create `course-3/` when I start the labs.
 | 7 | Agentic AI with LangChain and LangGraph | Workflow graphs, state, tool use in LangGraph |
 | 8 | Agentic AI with LangGraph, CrewAI, AutoGen and BeeAI | Multi-agent frameworks and orchestration |
 | 9 | Build AI Agents using MCP | Model Context Protocol, FastMCP, tool servers |
-| 10 | RAG and Agentic AI Capstone Project | A full end-to-end agentic RAG project |
+| 10 | RAG and Agentic AI Capstone Project | Full end-to-end agentic RAG project |
 
-None of these have been started. No projects for these courses exist in the repository.
+None of these have been started. No projects for these courses exist in the repository yet.
 
 ---
 
@@ -187,16 +177,15 @@ Only technologies actually used in this repository are listed as demonstrated.
 - Document loading (`TextLoader`) and chunking (`CharacterTextSplitter`, `SentenceSplitter`)
 - Embeddings via local Hugging Face `sentence-transformers` (`all-MiniLM-L6-v2`)
 - LlamaIndex: `VectorStoreIndex`, `SentenceSplitter`, query engines, retrievers
-- Retrieval chains: `RetrievalQA`, `ConversationalRetrievalChain`, `ConversationBufferMemory`
+- Retrieval chains: `RetrievalQA`, `ConversationBufferMemory`, `ConversationalRetrievalChain`
 - Grounded prompting ("use only the information provided in the context")
 - Manual retrieval with explicit top-k node assembly
 
 ### Vector Databases
 
-- **Chroma** — used in the completed RAG lab; persistent Chroma *planned* for the Personal Branding Agent
-- LlamaIndex in-memory vector store / `VectorStoreIndex`
+- **ChromaDB** — collections, CRUD, persistence, `query()` with `where` filters
+- **sentence-transformers** (`all-MiniLM-L6-v2`) — 384-dim embeddings, cosine distance
 - Embedding verification (checking every node got a non-null vector)
-- Note: dedicated vector-database work is the subject of Course 3 (in progress)
 
 ### LinkedIn Integration (applied in the Personal Branding Agent)
 
@@ -211,15 +200,12 @@ Technologies from the certificate syllabus that are **not yet demonstrated** in 
 
 ## Projects and Experiments
 
-The most technically meaningful work in the repository.
-
 ### GenAI Flask App — structured JSON output via LCEL
 
 A Flask app where you type a message and receive a validated JSON object (`summary`, `sentiment` 0–100, `response`) from a selectable model. Rebuild of the IBM guided project, with watsonx swapped for OpenRouter.
 
 **Concepts:** prompt templates, LCEL chains, structured output, provider abstraction.
-**Technologies:** Flask, LangChain (`ChatPromptTemplate`, `JsonOutputParser`), Pydantic, OpenRouter (`ChatOpenAI` + `base_url`).
-**What I learned:** the chain `prompt_template | model | json_parser` is the whole backend; format instructions injected into the prompt make free-text models conform to a schema. A shared chat template replaced three per-model token-wrapped templates once the provider exposed chat-completions.
+**Technologies:** Flask, LangChain (`ChatPromptTemplate`, `JsonOutputParser`), Pydantic, OpenRouter.
 
 ### AI Email Assistant — multi-model generation + comparison
 
@@ -227,7 +213,6 @@ Generates complete emails (subject, body, tone, improvement suggestions) as stru
 
 **Concepts:** few-shot prompting for JSON, model evaluation (latency/length/quality), parallel frontend fan-out, XSS-safe rendering.
 **Technologies:** Flask, LangChain LCEL, Pydantic, OpenRouter, vanilla JS (`Promise.all`).
-**What I learned:** evaluation can be a cheap heuristic stand-in before real judges; the backend stays simple when the frontend fans out per model; dict-key names in `MODELS` (internal) vs. values (provider slugs) is an easy source of confusion.
 
 ### Book/Movie Advisor — structured recommendation generation
 
@@ -235,7 +220,6 @@ Free-text mood → exactly 3 recommendation cards, validated by a nested Pydanti
 
 **Concepts:** nested structured output, `Literal` type constraints, few-shot format locking.
 **Technologies:** Flask, LangChain, Pydantic, OpenRouter.
-**What I learned:** constraining "exactly 3 items" is done in the prompt *and* the schema; `int` scores (mood_match 0–10) need explicit schema descriptions or models drift out of range.
 
 ### LinkedIn Icebreaker Bot — a RAG app built from scratch
 
@@ -243,7 +227,6 @@ A complete LlamaIndex RAG application rebuilt from the course lab: load a Linked
 
 **Concepts:** full RAG pipeline, sentence splitting, semantic retrieval, grounding, provider-agnostic design.
 **Technologies:** LlamaIndex (core 0.14.x), `llama-index-llms-openrouter`, `llama-index-embeddings-huggingface`, `sentence-transformers`, Gradio.
-**What I learned:** building each stage by hand (extract → split → embed → index → retrieve → generate) demystifies what query engines do under the hood; runtime model switching is just re-reading the model ID from config at call time; verifying embeddings catches silent indexing failures.
 
 ### Personal Branding Agent — RAG applied to a real project (in progress)
 
@@ -251,14 +234,34 @@ A production-oriented agent that generates, evaluates, and publishes authentic L
 
 **Concepts:** evidence-grounded generation, deterministic agent workflows with quality gates (PASS / REVISE / REJECT), metadata-aware retrieval, human-in-the-loop publishing, audit trails.
 **Technologies:** LangChain + Chroma (planned), `sentence-transformers`, OpenRouter, Flask (planned), LinkedIn OAuth (`Auth_handling/`).
-**What I learned so far:** RAG is a capability of an agent, not the agent itself; separating knowledge / reasoning / generation / evaluation / tools / observability keeps each evolvable; a working OAuth + publish path is the hard external-integration part, and it exists.
 
 ### Gradio experiments
 
 A sentence-builder `gr.Interface` (sliders, dropdowns, checkboxes) and a transformers/torchvision image demo — hands-on practice with Gradio's component model.
 
 **Concepts:** Gradio interfaces, image preprocessing (resize/crop/normalize), Hugging Face model inference.
-**Technologies:** Gradio, transformers, torchvision.
+**Technologies:** Gradio, transformers, torch.
+
+### Books Advanced Search — semantic search with ChromaDB
+
+Modular ChromaDB application with layered architecture. Four exercises: similarity search, genre filtering, rating filtering, combined semantic + metadata search.
+
+**Concepts:** ChromaDB collections, embeddings, cosine distance, metadata filtering, separation of concerns.
+**Technologies:** ChromaDB, `sentence-transformers` (`all-MiniLM-L6-v2`).
+
+### Job Description Matcher — semantic search with evaluation
+
+Semantic job search with ~30 records, metadata filtering, and evaluation metrics (Hit@K, Precision@K).
+
+**Concepts:** ChromaDB query with `where`, evaluation metrics, search experimentation.
+**Technologies:** ChromaDB, `sentence-transformers`.
+
+### Similarity Search on Employee Records — ChromaDB fundamentals
+
+Employee similarity search demonstrating pure similarity search, metadata filtering, and combined semantic + metadata queries.
+
+**Concepts:** ChromaDB `query()` and `get()`, cosine distance, metadata operators.
+**Technologies:** ChromaDB, `sentence-transformers`.
 
 ---
 
@@ -279,7 +282,7 @@ Practical engineering lessons emerging from the completed courses:
 
 ## Relationship to My AI Engineering Work
 
-This IBM repository is one part of a broader progression toward AI engineering. In parallel, I maintain a **separate repository focused on building AI agents from scratch** (`~/LLMs/AI-Agents/`), where I implement the underlying mechanics directly:
+This IBM repository is one part of a broader progression toward AI engineering. In parallel, I maintain a **separate repository focused on building AI agents from scratch**, where I implement the underlying mechanics directly:
 
 - agent loops (call LLM → parse → execute tools → repeat)
 - decorator-based tool registries and tool schemas
@@ -310,30 +313,33 @@ Build production-oriented AI systems
 
 ```text
 IBM/
-├── course-1/                                # COMPLETED
-│   ├── GenAI_Flask_App/                     # Flask + LangChain structured JSON output
-│   ├── AI_Email_Assistant/                  # multi-model email generator + Compare All
-│   └── Book_Movie_Advisor/                  # mood → structured recommendations
-├── course-2/                                # COMPLETED
-│   ├── icebreaker/                          # LlamaIndex RAG app (CLI + Gradio)
-│   └── PersonalBrandingAgent/               # RAG + LinkedIn OAuth agent (in progress)
-│       ├── data/                            # structured personal knowledge base
-│       ├── Auth_handling/                   # LinkedIn OAuth + publish scripts
-│       ├── docs/                            # architecture / phases / evaluation / ADRs
-│       ├── PLAN.md                          # 10-phase roadmap
-│       └── RAG_Lab.ipynb                    # completed course RAG notebook
-│   └── Gradio/                              # Gradio UI practice demos
-├── course-3/                                # NOT CREATED YET (in progress)
-├── .env.example                             # OPENROUTER_API_KEY=your_key_here
-├── .gitignore                               # .env, venvs, __pycache__
-└── README.md                                # this file
+├── Develop_Generative_AI_Applications_Get_Started/    # Course 1 — COMPLETED
+│   ├── GenAI_Flask_App/                             # Flask + LangChain structured JSON output
+│   ├── AI_Email_Assistant/                          # multi-model email generator + Compare All
+│   └── Book_Movie_Advisor/                          # mood → structured recommendations
+├── Build_RAG_Applications_Get_Started/                # Course 2 — COMPLETED
+│   ├── icebreaker/                                  # LlamaIndex RAG app (CLI + Gradio)
+│   ├── PersonalBrandingAgent/                       # RAG + LinkedIn OAuth agent (in progress)
+│   │   ├── data/                                    # structured personal knowledge base
+│   │   ├── Auth_handling/                           # LinkedIn OAuth + publish scripts
+│   │   ├── docs/                                    # architecture / phases / evaluation / ADRs
+│   │   ├── PLAN.md                                  # 10-phase roadmap
+│   │   └── RAG_Lab.ipynb                            # completed course RAG notebook
+│   └── Gradio/                                      # Gradio UI practice demos
+├── Vector_Databases_for_RAG_An_Introduction/          # Course 3 — COMPLETED
+│   ├── Books_Advanced_Search/                       # ChromaDB semantic book search
+│   ├── job_description_matcher/                     # Job description semantic search + evaluation
+│   └── Similarity_Search_on_Employee_Records/       # Employee similarity search
+├── .env.example                                     # OPENROUTER_API_KEY=your_key_here
+├── .gitignore                                       # .env, venvs, __pycache__
+└── README.md                                        # this file
 ```
 
 ---
 
 ## Setup
 
-Each project is self-contained with its own `requirements.txt` (or pinned environment) and uses environment variables for secrets. **Never commit `.env` files.**
+Each project is self-contained with its own `requirements.txt` and uses environment variables for secrets. **Never commit `.env` files.**
 
 1. Create and activate a virtual environment in the project directory:
 
@@ -358,37 +364,45 @@ cp .env.example .env
 
 | Project | Variables |
 |---|---|
-| `course-1/GenAI_Flask_App/` | `OPENROUTER_API_KEY`, optional `OPENROUTER_SITE_URL`, `OPENROUTER_SITE_NAME` |
-| `course-1/AI_Email_Assistant/` | `OPENROUTER_API_KEY` |
-| `course-1/Book_Movie_Advisor/` | `OPENROUTER_API_KEY` |
-| `course-2/icebreaker/` | `OPENROUTER_API_KEY`, optional `LLM_MODEL_ID`, `PROXYCURL_API_KEY` |
-| `course-2/PersonalBrandingAgent/` | `OPENAI_API_KEY` (OpenRouter key, per its `config.py`), `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` |
+| `Develop_Generative_AI_Applications_Get_Started/GenAI_Flask_App/` | `OPENROUTER_API_KEY`, optional `OPENROUTER_SITE_URL`, `OPENROUTER_SITE_NAME` |
+| `Develop_Generative_AI_Applications_Get_Started/AI_Email_Assistant/` | `OPENROUTER_API_KEY` |
+| `Develop_Generative_AI_Applications_Get_Started/Book_Movie_Advisor/` | `OPENROUTER_API_KEY` |
+| `Build_RAG_Applications_Get_Started/icebreaker/` | `OPENROUTER_API_KEY`, optional `LLM_MODEL_ID` |
+| `Build_RAG_Applications_Get_Started/PersonalBrandingAgent/` | `OPENAI_API_KEY` (OpenRouter key per its `config.py`), `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` |
+| `Vector_Databases_for_RAG_An_Introduction/Books_Advanced_Search/` | None required |
+| `Vector_Databases_for_RAG_An_Introduction/job_description_matcher/` | None required |
+| `Vector_Databases_for_RAG_An_Introduction/Similarity_Search_on_Employee_Records/` | None required |
 
-> Example only: `OPENROUTER_API_KEY=your_key_here` — get a free key at <https://openrouter.ai/keys>.
+> Example: `OPENROUTER_API_KEY=your_key_here` — get a free key at <https://openrouter.ai/keys>.
 
 ### Running the apps
 
 ```bash
 # Course 1 — Flask apps (default port 5000)
-cd course-1/GenAI_Flask_App && python llm_test.py    # sanity check, no Flask
-cd course-1/GenAI_Flask_App && python app.py         # or the other course-1 apps
+cd Develop_Generative_AI_Applications_Get_Started/GenAI_Flask_App && python llm_test.py   # sanity check, no Flask
+cd Develop_Generative_AI_Applications_Get_Started/GenAI_Flask_App && python app.py         # chat UI
+cd Develop_Generative_AI_Applications_Get_Started/AI_Email_Assistant && python app.py      # email generator
+cd Develop_Generative_AI_Applications_Get_Started/Book_Movie_Advisor && python app.py      # recommender
 
 # Course 2 — Icebreaker (LlamaIndex RAG)
-cd course-2/icebreaker && python main.py --mock      # CLI with mock data
-cd course-2/icebreaker && python app.py              # Gradio UI (port 5000)
+cd Build_RAG_Applications_Get_Started/icebreaker && python main.py --mock      # CLI with mock data
+cd Build_RAG_Applications_Get_Started/icebreaker && python app.py              # Gradio UI (port 7860)
 
 # Course 2 — Gradio demos
-cd course-2/Gradio && python app.py                  # sentence builder (port 7860)
+cd Build_RAG_Applications_Get_Started/Gradio && python app.py                  # sentence builder (port 7860)
+cd Build_RAG_Applications_Get_Started/Gradio && python main.py                 # image captioning (port 7860)
 
-# Course 2 — Personal Branding Agent
-cd course-2/PersonalBrandingAgent && python Auth_handling/linkedin_oauth_setup.py   # one-time OAuth
+# Course 3 — ChromaDB apps
+cd Vector_Databases_for_RAG_An_Introduction/Books_Advanced_Search && python3 -m app.run_search
+cd Vector_Databases_for_RAG_An_Introduction/Similarity_Search_on_Employee_Records && python similarity_employeedata.py
 ```
 
 Notes:
 
-- The Icebreaker Bot's free OpenRouter models rotate; if you hit "model not found", update `LLM_MODEL_ID` in `config.py` or use `openrouter/free`.
+- Free OpenRouter models rotate; if you hit "model not found," update `LLM_MODEL_ID` in config or use `openrouter/free`.
 - The first run of the Icebreaker downloads the local embedding model (~80 MB); afterwards it works offline.
-- The RAG lab notebook (`RAG_Lab.ipynb`) targets IBM watsonx.ai inside the Coursera/Skills Network environment — it is retained as a reference and does not run locally without IBM credentials.
+- The RAG lab notebook (`RAG_Lab.ipynb`) targets IBM watsonx.ai inside the Coursera/Skills Network environment — retained as a reference, does not run locally without IBM credentials.
+- Course 3 projects use `all-MiniLM-L6-v2` embeddings downloaded automatically on first run.
 
 ---
 
@@ -396,13 +410,13 @@ Notes:
 
 **Completed**
 
-- Course 1 — Develop Generative AI Applications: Get Started
-- Course 2 — Build RAG Applications: Get Started
+- Course 1 — Develop Generative AI Applications: Get Started (3 projects)
+- Course 2 — Build RAG Applications: Get Started (icebreaker bot, Gradio demos, Personal Branding Agent foundation)
+- Course 3 — Vector Databases for RAG: An Introduction (3 ChromaDB search projects)
 
 **In Progress**
 
-- Course 3 — Vector Databases for RAG: An Introduction (`course-3/` to be created)
-- Personal Branding Agent (RAG pipeline to be built per `PLAN.md`)
+- Personal Branding Agent — RAG pipeline (ingest → retrieve → generate → evaluate → publish) per `PLAN.md` (10 phases)
 
 **Upcoming**
 
