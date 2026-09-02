@@ -1,0 +1,3 @@
+COLLECTION_NAME = "books"
+PERSIST_DIRECTORY = "storage/chroma"
+EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
