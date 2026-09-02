@@ -35,7 +35,7 @@ AI Security · AI Integrations · Retrieval-Augmented Generation · Software Dev
 |---|---|---|---|
 | 1 | Develop Generative AI Applications: Get Started | 10 hours | **Completed** |
 | 2 | Build RAG Applications: Get Started | 7 hours | **Completed** |
-| 3 | Vector Databases for RAG: An Introduction | 9 hours | **Completed** |
+| 3 | Vector Databases for RAG: An Introduction | 9 hours | **In Progress** |
 | 4 | Advanced RAG with Vector Databases and Retrievers | 8 hours | Not Started |
 | 5 | Build Multimodal Generative AI Applications | 8 hours | Not Started |
 | 6 | Fundamentals of Building AI Agents | 11 hours | Not Started |
