@@ -1,0 +1,42 @@
+# Environment variables (never commit API keys)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+.venv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ChromaDB persistent data
+storage/chroma/
+*.sqlite3
+
+# Generated/test files
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Jupyter notebooks
+*.ipynb
+
+# Data (keep the dataset, but ignore any processed/generated data)
+data/*.processed
