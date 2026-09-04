@@ -13,8 +13,9 @@ def main():
         print("Loading food database...")
 
         # Load food data from file
-        global food_items
+        global food_items, search_history
         food_items = load_food_data("data/FoodDataSet.json")
+        search_history = []
         print(f"✅ Loaded {len(food_items)} food items successfully")
 
         # Create and populate search collection
