@@ -1,9 +1,7 @@
 import json
 import logging
-import re
 
 import chromadb
-import numpy as np
 from chromadb.utils import embedding_functions
 
 # Initialize ChromaDB client

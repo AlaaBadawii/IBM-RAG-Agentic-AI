@@ -70,7 +70,6 @@ def interactive_food_chatbot(collection):
 
             # Handle food search
             else:
-                search_history.append(user_input)
                 handle_food_search(collection, user_input)
 
         except KeyboardInterrupt:
@@ -98,6 +97,8 @@ def show_help_menu():
 
 def handle_food_search(collection, query):
     """Handle food search queries and display results"""
+    
+    search_history.append(query)  # Store the query in search history
     print(f"\n🔎 Searching for: '{query}'")
     print("   Please wait...")
 
@@ -160,7 +161,7 @@ def show_search_history():
 
     print("\n📜 Search History:")
     print("-" * 30)
-    for idx, query in enumerate(search_history, start=1):
+    for idx, query in enumerate(search_history[-10:], start=1):
         print(f"{idx}. {query}")
     print("-" * 30)
 

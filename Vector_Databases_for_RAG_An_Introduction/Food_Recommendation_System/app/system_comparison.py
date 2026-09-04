@@ -1,9 +1,9 @@
 import time
-import os
-import sys
 
 from shared_functions import *
-from shared_functions import populate_similarty_collection as populate_similarity_collection
+from shared_functions import (
+    populate_similarty_collection as populate_similarity_collection,
+)
 
 
 def main():
