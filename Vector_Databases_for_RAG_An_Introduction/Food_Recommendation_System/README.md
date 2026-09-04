@@ -52,8 +52,10 @@ The project contains three food search systems of increasing sophistication:
 
 - **Semantic similarity search** — find food by meaning using `all-MiniLM-L6-v2` embeddings (384 dimensions)
 - **Metadata filtering** — filter results by cuisine type and calorie count using ChromaDB `where` clauses
-- **Interactive CLI chatbot** — command-line interface for food search
+- **Interactive CLI chatbot** — command-line interface for food search with search history
 - **Advanced search interface** — interactive menu system with filtering options
+- **Calorie budget checker** — interactive tool to find foods within a calorie budget
+- **Result limiter** — tool to test how different result limits affect search quality
 - **RAG pipeline** — retrieve relevant food items and generate conversational recommendations
 - **System comparison** — side-by-side benchmark of all three approaches
 
@@ -176,6 +178,24 @@ python system_comparison.py
 
 Tests all three systems with the query "chocolate dessert" and reports response times.
 
+### Calorie Checker
+
+```bash
+cd app
+python calorie_checker.py
+```
+
+Interactive tool that asks for a calorie budget, then searches for foods within that budget using metadata filtering. Shows which foods fit and which are over budget.
+
+### Result Limiter
+
+```bash
+cd app
+python result_limiter.py
+```
+
+Tool to test how different result limits affect search quality. Compares results for limits of 1, 3, 5, and 10, and allows interactive testing with custom queries.
+
 ### Interactive Search Chatbot
 
 ```bash
@@ -183,7 +203,7 @@ cd app
 python interactive_search.py
 ```
 
-Type food queries and get instant results. Type `quit` to exit.
+Provides a command-line chatbot interface. Type food queries and get instant results. Type `history` to view the last 10 searches. Type `quit` to exit.
 
 ### Advanced Search Interface
 
@@ -247,10 +267,12 @@ Food_Recommendation_System/
 └── app/
     ├── __pycache__/         # Python bytecode (not committed)
     ├── shared_functions.py  # Core functions: data loading, collection creation, search
-    ├── interactive_search.py     # Interactive CLI chatbot
+    ├── interactive_search.py     # Interactive CLI chatbot with search history
     ├── advanced_search.py        # Advanced search with filtering
     ├── enhanced_rag_chatbot.py   # RAG chatbot with LLM
-    └── system_comparison.py      # Side-by-side comparison
+    ├── system_comparison.py      # Side-by-side comparison
+    ├── calorie_checker.py        # Interactive calorie budget checker
+    └── result_limiter.py         # Result limit testing tool
 ```
 
 ---
@@ -268,6 +290,8 @@ See **[PLAN.md](PLAN.md)** for a detailed step-by-step learning lab that covers:
 7. RAG Chatbot
 8. Testing and Benchmarking
 9. Running All Three Systems
+10. Calorie Budget Checker
+11. Result Limiter Tool
 
 ---
 

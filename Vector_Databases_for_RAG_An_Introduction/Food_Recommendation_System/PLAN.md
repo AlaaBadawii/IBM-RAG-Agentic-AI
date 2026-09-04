@@ -115,10 +115,12 @@ The project uses `data/FoodDataSet.json`, a JSON array containing food records. 
 |---|---|
 | `data/FoodDataSet.json` | The food dataset |
 | `app/shared_functions.py` | Core functions: data loading, collection creation, population, search |
-| `app/interactive_search.py` | Interactive CLI food search chatbot |
+| `app/interactive_search.py` | Interactive CLI food search chatbot with search history |
 | `app/advanced_search.py` | Advanced search with filtering and interactive menus |
 | `app/enhanced_rag_chatbot.py` | RAG chatbot with LLM integration |
 | `app/system_comparison.py` | Side-by-side comparison of all three systems |
+| `app/calorie_checker.py` | Interactive calorie budget checker tool |
+| `app/result_limiter.py` | Result limit testing tool |
 
 ---
 
@@ -603,7 +605,138 @@ You should see the RAG chatbot generating a conversational response based on the
 
 ---
 
-## 12. Phase 8 — Testing and Benchmarking
+## 14. Phase 10 — Calorie Budget Checker
+
+### 1. What are we learning?
+
+**Practical application of metadata filtering** — combining semantic search with calorie constraints to create a practical tool. The `calorie_checker.py` demonstrates how `perform_similarity_search_with_metadata()` can be used to filter results by maximum calories.
+
+### 2. What are we building?
+
+The `calorie_checker()` function in `calorie_checker.py`:
+1. Prompts the user for a calorie budget
+2. Loads the food dataset and creates a collection
+3. Enters an interactive loop where the user can search for foods
+4. Uses `perform_similarity_search_with_metadata()` with `max_calories` to find foods within budget
+5. Also shows regular results to indicate what's over budget
+6. Displays calorie information and remaining budget
+
+### 3. How does it work?
+
+```text
+User sets calorie budget (e.g., 500 cal)
+    ↓
+User searches for food (e.g., "chocolate")
+    ↓
+perform_similarity_search_with_metadata(query, max_calories=500)
+    ↓
+Results within budget are marked as fitting (🟢)
+Results over budget are shown separately (🔴)
+```
+
+### 4. How do you verify it?
+
+```bash
+cd app
+python calorie_checker.py
+```
+
+Type a calorie budget, then search for foods to see which fit and which don't.
+
+### 5. What should you understand?
+
+- `perform_similarity_search_with_metadata()` with `max_calories` filters results server-side
+- The tool combines two types of results: filtered (within budget) and unfiltered (all results)
+- The budget check is done by ChromaDB's `where` clause, not by post-processing
+
+---
+
+## 15. Phase 11 — Result Limiter Tool
+
+### 1. What are we learning?
+
+**Understanding result limits** — how the number of results returned affects the quality and usefulness of search results. The `result_limiter.py` demonstrates the relationship between `n_results` and search quality.
+
+### 2. What are we building?
+
+The `test_result_limits()` function in `result_limiter.py`:
+1. Loads the food dataset and creates a collection
+2. Tests a query ("spicy chicken") with different result limits (1, 3, 5, 10)
+3. Shows the quality metrics (average score, best score, worst score)
+4. Provides an interactive mode where the user can test their own queries
+
+### 3. How does it work?
+
+```text
+Query: "spicy chicken"
+    ↓
+Test limit=1 → Show result with score
+Test limit=3 → Show results with quality metrics
+Test limit=5 → Show results with quality metrics
+Test limit=10 → Show results with quality metrics
+    ↓
+Interactive mode: User enters custom query and limit
+```
+
+### 4. How do you verify it?
+
+```bash
+cd app
+python result_limiter.py
+```
+
+You should see results for each limit with quality metrics, then be able to test your own queries.
+
+### 5. What should you understand?
+
+- Higher `n_results` means more results but potentially lower average similarity
+- The `similarity_score` (1 - distance) indicates how closely a result matches the query
+- Quality metrics help understand the distribution of results
+- The best result is always in position 1 (highest similarity score)
+
+---
+
+## 16. Phase 12 — Interactive Search with History
+
+### 1. What are we learning?
+
+**User experience enhancements** — the `interactive_search.py` now includes a search history feature that tracks the user's queries. This demonstrates how to add practical utility to a search system.
+
+### 2. What are we building?
+
+The `interactive_search.py` has been updated with:
+1. A `search_history` list that tracks all queries
+2. A `show_search_history()` function that displays the last 10 searches
+3. A `history` command that triggers the history display
+4. The `handle_food_search()` function now appends each query to the history
+
+### 3. How does it work?
+
+```text
+User types "chocolate dessert" → search_history.append("chocolate dessert")
+User types "Italian food" → search_history.append("Italian food")
+User types "history" → show_search_history() displays last 10 queries
+```
+
+### 4. How do you verify it?
+
+```bash
+cd app
+python interactive_search.py
+```
+
+Type several queries, then type `history` to see the last 10 searches.
+
+### 5. What should you understand?
+
+- Search history is a simple but useful UX feature
+- The history is stored in memory during the session
+- Only the last 10 searches are displayed to keep the output manageable
+- The history feature demonstrates the `history` command pattern for CLI applications
+
+---
+
+## 18. Phase 15 — Running All Three Systems
 
 ### 1. What are we learning?
 
@@ -627,6 +760,7 @@ This tests all three systems with the same query ("chocolate dessert") and repor
 - **Correctness**: Does the search return relevant food items?
 - **Performance**: Are response times reasonable (< 0.1 seconds)?
 - **Filtering**: Does the advanced search correctly filter by cuisine and calories?
+- **Calorie Checker**: Does the calorie budget filter work correctly?
 - **RAG**: Does the chatbot generate a coherent response based on retrieved data?
 
 ### 4. Expected Results
@@ -635,6 +769,7 @@ When searching for "chocolate dessert":
 - **Interactive Search**: Returns chocolate-related items with similarity scores
 - **Advanced Search**: Returns chocolate items + filtered Indian cuisine options
 - **RAG Chatbot**: Generates a conversational recommendation
+- **Calorie Checker**: Returns foods within the budget
 
 ### 5. Benchmarking
 
@@ -642,13 +777,14 @@ When searching for "chocolate dessert":
 Interactive Search: ~0.035s
 Advanced Search:    ~0.054s
 RAG Chatbot:        ~0.032s
+Calorie Checker:    ~0.050s (includes collection creation)
 ```
 
 Response times vary based on system load and embedding model download status.
 
 ---
 
-## 13. Phase 9 — Running All Three Systems
+## 18. Phase 15 — Running All Three Systems
 
 ### 1. System Comparison
 
@@ -694,17 +830,19 @@ Each system demonstrates a different level of sophistication:
 
 ---
 
-## 14. Architecture Overview
+## 19. Architecture Overview
 
 ### Module Responsibilities
 
 | Module | Responsibility |
 |---|---|
 | `shared_functions.py` | Core functionality: data loading, collection creation, population, search |
-| `interactive_search.py` | Interactive CLI chatbot for food search |
+| `interactive_search.py` | Interactive CLI chatbot with search history |
 | `advanced_search.py` | Advanced search with filtering and interactive menus |
 | `enhanced_rag_chatbot.py` | RAG chatbot with LLM integration |
 | `system_comparison.py` | Side-by-side comparison of all three systems |
+| `calorie_checker.py` | Interactive calorie budget checker |
+| `result_limiter.py` | Result limit testing tool |
 
 ### Data Flow
 
@@ -742,7 +880,9 @@ app/ (applications)
     ├── interactive_search.py
     ├── advanced_search.py
     ├── enhanced_rag_chatbot.py
-    └── system_comparison.py
+    ├── system_comparison.py
+    ├── calorie_checker.py
+    └── result_limiter.py
 ```
 
 ### Future Refactoring Opportunities
@@ -773,7 +913,7 @@ This is a planned future improvement, not a current implementation.
 
 ---
 
-## 15. Environment Variables
+## 20. Environment Variables
 
 ### Required Variables
 
@@ -793,7 +933,7 @@ The `.env` file is loaded by the system to configure the LLM connection. The `sy
 
 ---
 
-## 16. ChromaDB `where` Filter Operators
+## 21. ChromaDB `where` Filter Operators
 
 | Operator | Meaning | Example |
 |---|---|---|
@@ -805,7 +945,7 @@ The `.env` file is loaded by the system to configure the LLM connection. The `sy
 
 ---
 
-## 17. Summary: Implemented vs. Future Work
+## 22. Summary: Implemented vs. Future Work
 
 ### Implemented
 
@@ -813,8 +953,10 @@ The `.env` file is loaded by the system to configure the LLM connection. The `sy
 - ✅ ChromaDB collection creation with embedding function
 - ✅ Semantic similarity search
 - ✅ Metadata filtering (cuisine, calories)
-- ✅ Interactive CLI chatbot
+- ✅ Interactive CLI chatbot with search history
 - ✅ Advanced search with filtering
+- ✅ Calorie budget checker tool
+- ✅ Result limiter testing tool
 - ✅ RAG chatbot with LLM integration
 - ✅ System comparison tool
 - ✅ Proper document/metadata distinction
@@ -824,8 +966,9 @@ The `.env` file is loaded by the system to configure the LLM connection. The `sy
 - `shared_functions.py` contains a typo in the function name (`populate_similarty_collection`) — this is a historical artifact that must be referenced when importing
 - The `advanced_search.py` has its own `populate_similarity_collection` function that passes nested dictionaries as metadata, which ChromaDB rejects — use `shared_functions.py`'s `populate_similarty_collection` instead
 - The `enhanced_rag_chatbot.py` has import issues with `advanced_search.populate_similarity_collection` and `ibm_watsonx_ai` dependencies
-- The `system_comparison.py` has data path issues when run from different directories
+- The `interactive_search.py` and `shared_functions.py` have `import re` and `import numpy as np` removed as they are no longer needed (already cleaned up)
 - `system_comparison.py` calls `perform_filtered_similarity_search` which doesn't exist as a standalone function — use `perform_similarity_search_with_metadata` instead
+- The `calorie_checker.py` uses `load_food_data("FoodDataSet.json")` with a relative path — should use `data/FoodDataSet.json` for consistency
 
 ### Optional Extensions (implement after completing the core lab)
 
@@ -846,7 +989,7 @@ The `.env` file is loaded by the system to configure the LLM connection. The `sy
 
 ---
 
-## 18. Quick Reference — Key Files and Functions
+## 23. Quick Reference — Key Files and Functions
 
 | File | Function / Class | Purpose |
 |---|---|---|
@@ -855,14 +998,16 @@ The `.env` file is loaded by the system to configure the LLM connection. The `sy
 | `shared_functions.py` | `populate_similarty_collection(collection, food_items)` | Populate collection with food data and embeddings |
 | `shared_functions.py` | `perform_similarity_search(collection, query, n_results)` | Semantic similarity search |
 | `shared_functions.py` | `perform_similarity_search_with_metadata(collection, query, cuisine_filter, max_calories, n_results)` | Semantic search with metadata filtering |
-| `interactive_search.py` | `main()` | Interactive CLI food search chatbot |
+| `interactive_search.py` | `main()`, `show_search_history()` | Interactive CLI chatbot with search history |
 | `advanced_search.py` | `main()` | Advanced search with filtering |
 | `enhanced_rag_chatbot.py` | `main()` | RAG chatbot with LLM integration |
 | `system_comparison.py` | `main()` | Side-by-side comparison of all three systems |
+| `calorie_checker.py` | `calorie_checker()` | Interactive calorie budget checker |
+| `result_limiter.py` | `test_result_limits()` | Result limit testing tool |
 
 ---
 
-## 19. What You Learned
+## 24. What You Learned
 
 Here is a summary of the concepts and skills practiced:
 
@@ -879,7 +1024,7 @@ Here is a summary of the concepts and skills practiced:
 
 ---
 
-## 20. Quick Start
+## 25. Quick Start
 
 ```bash
 # Install dependencies
@@ -888,11 +1033,17 @@ pip install chromadb sentence-transformers torch
 # Verify the system works
 python app/system_comparison.py
 
-# Try the interactive chatbot
+# Try the interactive chatbot (with search history)
 python app/interactive_search.py
 
 # Try the advanced search
 python app/advanced_search.py
+
+# Try the calorie budget checker
+python app/calorie_checker.py
+
+# Try the result limiter tool
+python app/result_limiter.py
 
 # Try the RAG chatbot (requires LLM setup)
 python app/enhanced_rag_chatbot.py
@@ -900,6 +1051,6 @@ python app/enhanced_rag_chatbot.py
 
 ---
 
-## 21. Disclaimer / Learning Context
+## 26. Disclaimer / Learning Context
 
 This is a practice/learning project developed while studying RAG and Agentic AI concepts through IBM's learning path. It is not officially developed, endorsed, or certified by IBM. The implementation reflects personal learning and experimentation with vector databases and retrieval-augmented generation.
