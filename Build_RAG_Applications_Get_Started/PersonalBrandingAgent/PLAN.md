@@ -59,22 +59,26 @@ plan. Components are marked `NOT STARTED` unless actually present.
 | Area | Status | Evidence |
 |---|---|---|
 | Structured knowledge base (`data/`) | **DONE** | All categories present: completed/in-progress projects & courses, certificates, evidence (with evidence states), stories/lessons, vision, writing style, public positioning, audits |
-| Configuration (`config.py`) | **DONE (basic)** | Env loading, model ID, gen params, embedding model, Chroma dir, chunk params |
-| Dependency management (`requirements.txt`) | **DONE (basic)** | Flask, langchain*, chromadb, sentence-transformers, pydantic, python-dotenv, requests |
-| Secrets / `.gitignore` | **DONE (basic)** | `.env`, `Auth_handling/linkedin_tokens.json`, `chroma_db/`, `__pycache__/`, `*.pyc` ignored |
-| LinkedIn OAuth (`Auth_handling/`) | **DONE (working)** | `linkedin_oauth_setup.py`, `test_post.py`, `test_credentials.py`, saved tokens |
-| Ingestion pipeline | **NOT STARTED** | No `ingest.py` / no `chroma_db/` |
-| Retrieval engine | **NOT STARTED** | No `retriever.py` |
+| Configuration (`app/config.py`) | **DONE** | Env loading (OpenRouter key via `OPENAI_API_KEY`/`OPENROUTER_API_KEY`), model id, OpenAI-compatible gen params, embedding model, absolute Chroma dir, chunk params, retrieval defaults. Root `config.py` re-exports. |
+| Dependency management (`requirements.txt`) | **DONE** | Pinned to installed LangChain 1.x stack; includes `rank_bm25`, `pytest` |
+| Secrets / `.gitignore` | **DONE** | `.env`, `Auth_handling/linkedin_tokens.json`, `chroma_db/`, `__pycache__/`, `*.pyc`, `.pytest_cache/`, `venv/`, `logs/` ignored; logging redacts secret values |
+| LinkedIn OAuth (`Auth_handling/`) | **DONE (working)** | `linkedin_oauth_setup.py`, `test_post.py`, `test_credentials.py`, saved tokens. Untouched in the retrieval milestone. |
+| Package structure (`app/`) | **DONE** | `app/config.py`, `app/paths.py`, `app/errors.py`, `app/logging_config.py` (Phase 1 core; CLIs work from any CWD) |
+| Ingestion pipeline | **DONE** | `app/ingestion/` (loader, metadata, chunker, pipeline): recursive discovery, path/heading-derived metadata, deterministic ids, content-hash idempotency, change + stale handling. `python -m app.ingestion.pipeline` → 71 files / 342 chunks; second run is a no-op. |
+| Retrieval engine | **DONE** | `app/retrieval/engine.py` facade with 6 strategies: vector, metadata (explicit filters), bm25, multi_query (OpenRouter, with deterministic fallback), hybrid (RRF), reranked (local cross-encoder) |
+| Retrieval comparison playground | **DONE** | `python -m app.retrieval.compare "question"` — all strategies side-by-side with deterministic WHY explanations |
+| Retrieval evaluation | **DONE (v1)** | `python -m app.retrieval.evaluation` — 12-query gold set, Hit@5 + MRR + latency per strategy; findings in `docs/retrieval/evaluation.md` |
+| Retrieval learning docs | **DONE** | `docs/retrieval/` (5 corpus-specific documents) |
 | Branding context engine | **NOT STARTED** | Raw material exists in `data/` (writing_style, vision_goals, public_positioning) |
 | Generation | **NOT STARTED** | No `generator.py` / no `prompts/` |
-| Evaluation | **NOT STARTED** | No evaluation module |
-| Agent core / workflow | **NOT STARTED** | No `app/` package |
+| Evaluation (content quality) | **NOT STARTED** | Retrieval evaluation exists; content gates do not |
+| Agent core / workflow | **NOT STARTED** | Retrieval engine is a facade, deliberately not an agent |
 | LinkedIn tool integration layer | **NOT STARTED** | OAuth scripts exist; no clean tool interface |
 | Autonomous execution | **NOT STARTED** | No scheduler / trigger |
 | Observability / memory | **NOT STARTED** | No history store |
-| Web app / API | **NOT STARTED** | No `app.py`, no `templates/` |
-| Tests | **NOT STARTED** | No `tests/` |
-| Documentation (`docs/`) | **DONE** | This roadmap + phase/architecture/evaluation/operations docs |
+| Web app / API | **NOT STARTED** | No `app.py`, no `templates/`; Flask in requirements only |
+| Tests | **DONE (retrieval layers)** | 70 tests across config/paths/logging/ingestion/metadata/chunker/retrieval/fusion/evaluation — offline (fakes for embeddings/LLM/reranker), stable across `PYTHONHASHSEED` |
+| Documentation (`docs/`) | **DONE (partial)** | Roadmap + phases 1–2 + architecture + retrieval docs. Phases 3–10 and `docs/evaluation/`, `docs/operations/` docs do not exist yet. |
 
 > `RAG_Lab.ipynb` is a historical course lab and is retained as a reference; it
 > is not part of the production pipeline.
@@ -86,9 +90,9 @@ dependency; a phase is complete only when its acceptance criteria pass.
 
 | # | Phase | Purpose | Status |
 |---|---|---|---|
-| 1 | Foundation | Package structure, config, logging, errors, secrets, testing base | **PENDING** |
-| 2 | Knowledge Ingestion | `data/` → clean, chunked, metadata-tagged, embedded → ChromaDB | **PENDING** |
-| 3 | Retrieval Engine | Semantic + metadata-aware retrieval, filters, retrieval evaluation | **PENDING** |
+| 1 | Foundation | Package structure, config, logging, errors, secrets, testing base | **CORE DONE** (config/paths/errors/logging/CLIs + tests; no `app/api/` entrypoint yet) |
+| 2 | Knowledge Ingestion | `data/` → clean, chunked, metadata-tagged, embedded → ChromaDB | **DONE** (idempotent, change-aware, stale-aware; 71 files → 342 chunks) |
+| 3 | Retrieval Engine | Semantic + metadata-aware retrieval, filters, retrieval evaluation | **DONE (v1, beyond plan)** — also BM25, multi-query, hybrid RRF, reranking, comparison playground, gold-set evaluation. Harder gold set + recall metrics remain. |
 | 4 | Branding Context Engine | Evidence + positioning + voice assembled into structured LLM context | **PENDING** |
 | 5 | Content Generation | LCEL chain producing candidate LinkedIn posts from structured context | **PENDING** |
 | 6 | Content Evaluation | Grounding / voice / positioning / repetition / quality gates | **PENDING** |
@@ -204,10 +208,13 @@ The project is complete when all of the following hold:
   - `rag-architecture.md`
   - `linkedin-integration.md`
   - `data-flow.md`
-- Phases: `docs/phases/phase-01..phase-10`
-- Evaluation: `docs/evaluation/` (`retrieval-evaluation.md`, `content-evaluation.md`, `quality-gates.md`)
+- Retrieval milestone (implemented): `docs/retrieval/` (README + 5 concept
+  documents grounded in this corpus)
+- Phases: `docs/phases/phase-01-foundation.md`, `docs/phases/phase-02-ingestion.md`
+  (phase-03..phase-10 documents do not exist yet)
+- Evaluation: `docs/evaluation/` (directory exists, documents not yet written)
 - Decisions: `docs/decisions/ADRs/`
-- Operations: `docs/operations/` (`local-development.md`, `environment.md`, `security.md`)
+- Operations: `docs/operations/` (directory exists, documents not yet written)
 
 ## How to Proceed
 

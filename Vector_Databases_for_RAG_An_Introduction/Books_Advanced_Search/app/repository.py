@@ -58,9 +58,9 @@ class BookRepository:
             ids=[book_id],
         )
 
-    def get_books(self, book_id):
-        """Retrieve a book from the repository by its ID."""
-        result = self.collection.get(ids=[book_id])
+    def get_books(self):
+        """Retrieve all books from the repository."""
+        result = self.collection.get()
 
         if result["ids"] and result["documents"] and result["metadatas"]:
             return {
@@ -71,21 +71,38 @@ class BookRepository:
 
         return None
 
-    def search_books(self, query, n_results=3):
+    def search_books(self, query, n_results=3, where: dict | None = None):
         """Search for books based on semantic similarity."""
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=n_results,
-        )
 
-        return [
-            {
-                "id": results["ids"][0][i],
-                "document": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-            }
-            for i in range(len(results["ids"][0]))
-        ]
+        if where is None:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+            )
+        else:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                where=where,
+            )
+
+        if (
+            results["ids"]
+            and results["documents"]
+            and results["metadatas"]
+            and results["distances"] is not None
+        ):
+            return [
+                {
+                    "id": results["ids"][0][i],
+                    "document": results["documents"][0][i],
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i],
+                }
+                for i in range(len(results["ids"][0]))
+            ]
+
+        return None
 
     def update_book(self, book_id, updated_book):
         """Update an existing book in the repository."""

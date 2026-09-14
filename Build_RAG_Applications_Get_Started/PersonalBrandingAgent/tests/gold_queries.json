@@ -1,0 +1,53 @@
+{
+  "description": "Gold retrieval evaluation set for the PersonalBrandingAgent knowledge base. Each entry: a query and the source files (paths relative to data/) that a good retrieval strategy should surface. Queries are deliberately varied: semantic, exact terminology, evidence-focused, project-focused, story-focused, metadata-filterable, and broad.",
+  "queries": [
+    {
+      "query": "What is my preferred LinkedIn writing style and tone?",
+      "relevant_sources": ["writing_style/alaa_writing_style.md"]
+    },
+    {
+      "query": "How should I position myself professionally as a backend AI engineer?",
+      "relevant_sources": ["vision_goals/my_vision.md", "public_positioning/portfolio.md"]
+    },
+    {
+      "query": "What happened when I implemented Quizey exam versioning?",
+      "relevant_sources": ["stories_lessons/quizey_exam_versioning.md", "evidence/projects/quizey_v2.md"]
+    },
+    {
+      "query": "Quizey attempt state machine",
+      "relevant_sources": ["stories_lessons/quizey_attempt_state_machine.md"]
+    },
+    {
+      "query": "What evidence supports my database experience with PyMongo and MongoDB?",
+      "relevant_sources": ["evidence/backend/databases.md", "completed_projects/mongodb_pymongo_crud_service.md", "certificates/educba_pymongo-advanced.md"]
+    },
+    {
+      "query": "What lessons did I learn from Kubernetes and typos in my first deployment?",
+      "relevant_sources": ["stories_lessons/kubernetes_first_step_typos.md", "in_progress_projects/kubernetes_manara_lab.md"]
+    },
+    {
+      "query": "Why should I never trust an LLM's arithmetic?",
+      "relevant_sources": ["stories_lessons/never_trust_llm_arithmetic.md"]
+    },
+    {
+      "query": "Which projects demonstrate that I can build AI agents from scratch without frameworks?",
+      "relevant_sources": ["completed_projects/ai_agents_from_scratch.md", "evidence/ai/ai_agents_from_scratch.md", "stories_lessons/build_mechanics_before_frameworks.md"]
+    },
+    {
+      "query": "What is my experience with CI/CD using Jenkins and GitHub Actions?",
+      "relevant_sources": ["completed_projects/ci_cd_jenkins_github_actions.md", "stories_lessons/ci_failures_are_environment_not_code.md", "stories_lessons/containerized_ci_for_reproducibility.md"]
+    },
+    {
+      "query": "How do I test every AI step with a fake LLM?",
+      "relevant_sources": ["stories_lessons/test_every_ai_step_with_a_fake_llm.md"]
+    },
+    {
+      "query": "What certificates have I earned from IBM, Vanderbilt, and Anthropic?",
+      "relevant_sources": ["certificates/ibm_develop-genai-applications-get-started.md", "certificates/vanderbilt_ai_agents_and_agentic_ai_with_python_and_generative_ai.md", "certificates/anthropic_ai-fluency-framework-and-foundations.md", "certificates/vanderbilt_ai-agents-and-agentic-ai-architecture-in-python.md"]
+    },
+    {
+      "query": "What am I currently learning about RAG and agentic AI?",
+      "relevant_sources": ["in_progress_courses/ibm_rag_and_agentic_ai.md", "in_progress_courses/ibm_genai_llm_rag.md", "evidence/ai/rag_learning_and_application.md"]
+    }
+  ]
+}
