@@ -1,0 +1,7 @@
+gradio>=5.0
+requests>=2.31
+python-dotenv>=1.0
+gTTS>=2.5
+
+# Tests only
+pytest>=7.0
