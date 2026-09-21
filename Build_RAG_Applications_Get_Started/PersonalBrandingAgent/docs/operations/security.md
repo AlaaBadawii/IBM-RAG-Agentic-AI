@@ -77,18 +77,28 @@ A model id, a chunk size, or a collection name grants nothing. The distinction
 is what keeps the autonomous workflows of Steps 11–12 safe to schedule from an
 environment file that is never committed.
 
-### Derived runtime state — gitignored, not secret
+### Runtime state — gitignored, not secret
 
-| Path | Why it is excluded |
-|---|---|
-| `chroma_db/` | Derived vector store; rebuildable from `data/` |
-| `logs/` | Log files; may contain operational detail |
-| `.venv/` | Local environment; reproducible from `requirements.txt` |
-| `__pycache__/`, `*.pyc`, `.pytest_cache/` | Build artifacts |
+| Path | Why it is excluded | Rebuildable? |
+|---|---|---|
+| `chroma_db/` | Derived vector store | **Yes** — re-ingest from `data/` |
+| `state_db/` | Operational state: runs, publish intents, publications, failures, notifications, locks | **No** — authoritative |
+| `logs/` | Log files; may contain operational detail | No, and not needed |
+| `.venv/` | Local environment | Yes — from `requirements.txt` |
+| `__pycache__/`, `*.pyc`, `.pytest_cache/` | Build artifacts | Yes |
 
-These are excluded because they are derived or machine-local, not because they
-are confidential. `logs/` is excluded partly *because* log content is one of the
-places a secret could leak into — see §4.
+None of these are excluded because they are confidential. `logs/` is excluded
+partly *because* log content is one of the places a secret could leak into —
+see §4.
+
+**The distinction that matters is rebuildability, not confidentiality.**
+`chroma_db/` can be thrown away and recreated from `data/`. `state_db/` cannot:
+it holds the local publication history, which is authoritative precisely
+because LinkedIn does not grant the read access that would allow it to be
+reconstructed (`PLAN.md` §5.1). Deleting `state_db/` loses the record of what
+was published and the write-ahead intents that prevent publishing it twice.
+It is gitignored so it does not enter source control — not so it can be
+discarded.
 
 ---
 
@@ -160,11 +170,13 @@ Coverage:
 
 ```text
 .env                                 → .gitignore:1:.env
-Auth_handling/linkedin_tokens.json   → .gitignore:2:Auth_handling/linkedin_tokens.json
+Auth_handling/linkedin_tokens.json   → .gitignore:2:…
 chroma_db/                           → .gitignore:3:chroma_db/
-logs/                                → .gitignore:9:logs/
-.venv/                               → .gitignore:8:.venv/
-__pycache__/, *.pyc, .pytest_cache/  → .gitignore:4-6
+state_db/                            → .gitignore:4:state_db/
+__pycache__/, *.pyc                  → .gitignore:5-6
+.pytest_cache/                       → .gitignore:7
+.venv/                               → .gitignore:9:.venv/
+logs/                                → .gitignore:10:logs/
 ```
 
 Before committing anything that touches configuration, confirm the boundary still

@@ -27,25 +27,26 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 1 — Introduce Persistent Operational State (SQLite)
+    Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Step 0 COMPLETED. The environment is reproducible and the test baseline
-    is restored. Steps 1–14 have not been started.
+    Steps 0 and 1 COMPLETED. The environment is reproducible, the test
+    baseline is restored, and the operational state store exists. Steps 2–14
+    have not been started.
 
 Last Completed Step:
-    Step 0 — Restore a Reproducible, Testable Environment
+    Step 1 — Introduce Persistent Operational State (SQLite)
 
 Next Step:
-    Step 1 — Introduce Persistent Operational State (SQLite)
+    Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Step 0 has since been implemented, verified, and
-committed; every later step remains untouched.
+analysis of the repository. Steps 0 and 1 have since been implemented,
+verified, and committed; every later step remains untouched.
 
 ---
 
@@ -56,7 +57,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | Step | Name | Status |
 |---|---|---|
 | 0 | Restore a Reproducible, Testable Environment | COMPLETED |
-| 1 | Introduce Persistent Operational State (SQLite) | NOT STARTED |
+| 1 | Introduce Persistent Operational State (SQLite) | COMPLETED |
 | 2 | Define the Personal Knowledge Source Registry & Project Lifecycle | NOT STARTED |
 | 3 | Build Incremental Knowledge Synchronization | NOT STARTED |
 | 4 | Build the Personal Branding Context & Evidence Layer | NOT STARTED |
@@ -77,6 +78,103 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 1 — Introduce Persistent Operational State (SQLite)
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/state/` — the new lowest layer of the application, depending on
+  nothing above it. Five modules: `enums.py` (controlled vocabularies),
+  `models.py` (typed row models + UTC helpers), `schema.py` (DDL and the
+  forward-only migration runner), `store.py` (`StateStore`), and `__init__.py`.
+- Single-file SQLite store at `<PROJECT_ROOT>/state_db/operational_state.db`,
+  created automatically on first use, with foreign keys and WAL mode set on
+  every connection, `busy_timeout` bounded at 5 s, and all timestamps stored
+  as UTC ISO-8601 with microseconds.
+- Nine tables: `workflow_runs`, `sync_checkpoints`, `source_lifecycle`,
+  `publish_intents`, `publications`, `publication_evidence`,
+  `operational_failures`, `notifications`, `locks`.
+- A `schema_version` ledger and a forward-only migration runner. It is
+  idempotent, refuses a store written by a newer build, and refuses a
+  non-contiguous migration history rather than applying a migration out of
+  order. Each migration runs in its own transaction.
+- **Correctness expressed as database constraints, not application checks:**
+  one publish intent per run (`MAX_PUBLISHES_PER_RUN = 1`); one *unresolved*
+  intent per content hash across runs; one publication per intent; run
+  outcome and publish state restricted to their vocabularies; a run has an
+  outcome exactly when it has finished; `published` ⟺ a LinkedIn post id is
+  present; lifecycle and delivery states restricted to their vocabularies; a
+  checkpoint revision and its timestamp travel together; one holder per lock.
+- Typed operations only — no SQL leaves the package. Runs, checkpoints,
+  lifecycle, intents (`create_publish_intent`, `mark_attempt_started`,
+  `record_publication`, which resolves the intent in the same transaction),
+  failures with occurrence counting, notifications, and locks with stale
+  recovery.
+- Added `StateStoreError` and `StateConstraintError` to `app/errors.py`;
+  `STATE_DB_DIR` / `STATE_DB_PATH` to `app/paths.py`; `state_db/` to
+  `.gitignore`.
+
+Verified:
+- Acceptance: the store is created on first use from an unrelated CWD, at a
+  gitignored location (`git check-ignore` confirms the rule), and every
+  guarantee above is additionally proven by **raw SQL through an independent
+  connection** — so none of them can be passing merely because Python checked
+  first.
+- One-publish-per-run is rejected by the database, not by application logic.
+- Fails closed at every boundary: an unusable location raises at construction
+  (so no store object exists to ignore), a closed store raises on every
+  operation, and a writer that cannot get the lock within the bounded timeout
+  raises a typed `StateStoreError` rather than a raw `sqlite3` error. There is
+  no path that records a publication without its write-ahead intent.
+- Milestone: a run record written by one `StateStore` is read back intact by a
+  new `StateStore` after the first is closed.
+- The state layer never loads the knowledge layer: a subprocess asserts that
+  using the store imports neither `chromadb`, `langchain_chroma`,
+  `sentence_transformers`, `app.ingestion`, nor `app.retrieval`. Operational
+  data cannot reach the Chroma collection because the code that could write to
+  it is never imported.
+
+Tests:
+- `tests/test_state_schema.py` (22 tests) and `tests/test_state_store.py`
+  (49 tests) — **71 new tests**, none of them touching the network.
+- Regression: `.venv/bin/python -m pytest tests/ -q` → **150 passed**, zero
+  collection errors, zero failures (79 pre-existing + 71 new). No existing test
+  was modified, weakened, or skipped.
+- `PYTHONNOUSERSITE=1` was used throughout.
+
+Commit:
+- `Step 1: introduce persistent operational state (SQLite)` — the commit
+  carrying this record. The subject is used instead of a hash because the hash
+  cannot contain itself; find it with `git log --oneline --grep="^Step 1:"`.
+
+Important notes:
+- **Two constraints are deliberately stricter than the roadmap's wording**, and
+  both are relaxable later by a forward migration:
+  - `PLAN.md` says "at most one publication per content hash **per time
+    window**". Implemented as one unresolved intent per content hash, with no
+    window: publishing identical text again is never desirable, and the intent
+    is written *before* the API call, which is the only point at which the
+    constraint can prevent the publish rather than merely record it after the
+    fact.
+  - "At most one **active** publish intent per run" is implemented as one
+    intent per run, flat. `MAX_PUBLISHES_PER_RUN = 1` is a hard invariant, and
+    retries belong across runs (each 8-hour run is a new run), not within one.
+- `workflow_runs.workflow` and `operational_failures.error_category` are
+  intentionally **not** CHECK-constrained. Their vocabularies belong to Steps
+  11 and 5/8; fixing them here would only force a migration later. The two
+  vocabularies the roadmap insists on — run outcome and publish state — are
+  constrained.
+- A `failed` intent drops out of the content-hash index (an attempt that
+  definitely did not publish must not burn the content), while
+  `unknown_requires_review` stays in it. This is what makes the ambiguous case
+  safe: the one outcome where a post may exist is the one that blocks a retry.
+- No CLI was added. The store is a library; Steps 11–12 own the entry points.
+- No new configuration key was added — `DEFAULT_LOCK_TTL_SECONDS` is a default
+  parameter in `app/state/store.py` because Step 12 owns the configured value.
+- `state_db/` was created and removed again during verification; no runtime
+  state is committed. It will be created for real the first time a workflow
+  runs.
 
 ### Step 0 — Restore a Reproducible, Testable Environment
 
@@ -179,12 +277,12 @@ Important notes:
 ## Current Step
 
 ```text
-Step 1 — Introduce Persistent Operational State (SQLite)
+Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 1. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 2. It is not
 duplicated here.
 
 ---
@@ -310,6 +408,12 @@ not a specification.
 | Decision | Rationale (short) | Detail |
 |---|---|---|
 | **Operational state stays separate from Chroma** | Published posts must never become evidence about the user | `PLAN.md` §6 |
+| **Operational state lives in one SQLite store at `state_db/`** | A single-file store, created on first use, is the whole runtime for one user on one machine; it is gitignored but, unlike `chroma_db/`, **not rebuildable** — local publication history is authoritative | Step 1, `app/state/`, `docs/operations/security.md` |
+| **Correctness lives in database constraints, not in callers** | One publish intent per run and one unresolved intent per content hash are enforced by SQLite, so a workflow cannot forget to check and a second publish is refused by the database | Step 1, `app/state/schema.py` |
+| **The state store fails closed** | An unusable location raises at construction, a closed store raises on every operation, and no publication can be recorded without its write-ahead intent — so a store failure stops a publish instead of permitting one | Step 1, `app/state/store.py` |
+| **`published` if and only if LinkedIn returned a post id** | The proven path reads the id from the response; a response without one is a failure or an ambiguity, never a success. Enforced by a CHECK constraint | Step 1, `app/state/schema.py` |
+| **An intent and its publication resolve in one transaction** | The two can never disagree about what happened; the write-ahead intent is the only duplicate protection that exists without read-back | Step 1 (schema + store), used by Step 6 |
+| **Evidence references are stored as source path + content hash** | The corpus is resynchronized every 24 h; without the hash a later audit cannot distinguish "grounded in evidence that has since changed" from "never grounded" | Step 1 (table), written by Step 6 |
 | **Local publication history is authoritative** | LinkedIn read access (`r_member_social`) is restricted to approved users; there is no read-back | `PLAN.md` §5.1 |
 | **Publishing history is NOT indexed into Chroma (V1)** | Avoids a generated post becoming evidence for the next one; deterministic SQLite queries answer the Agent instead | `PLAN.md` §6.1 |
 | **Git detects change; it does not replace ingestion** | The existing content-hash pipeline already guarantees correctness — git only narrows the candidate set | `PLAN.md` Step 3 |
@@ -334,24 +438,28 @@ not a specification.
 
 ## Next Step
 
-### Step 1 — Introduce Persistent Operational State (SQLite)
+### Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
 
-The next implementation task is defined in `PLAN.md` §8, Step 1.
+The next implementation task is defined in `PLAN.md` §8, Step 2.
 
-Every target behavior above retrieval depends on durable operational state.
-Step 1 introduces the application-owned state store (SQLite) and its schema,
-deliberately **before** any intelligence, because a system that cannot record
-what it did cannot be audited, de-duplicated, or recovered.
+Synchronization needs a precise, explicit definition of *what* is
+synchronized. The declared workspace roots are **places to look, not sources to
+ingest**: they contain ~35 repositories, virtual environments, coursework, and
+`~/LLMs/IBM` — the monorepo that contains this application itself.
 
-Constraints carried in from Step 0 and the architecture:
+Constraints carried in from Steps 0–1 and the architecture:
 
-- Operational state must **never** be mixed into the Chroma collection
-  (`PLAN.md` §6).
-- Publishing history is **not** indexed into Chroma in V1 (`PLAN.md` §6.1).
-- Chroma is untouched by this step.
-
-The environment is now reproducible and the baseline is green, so Step 1 is
-verifiable on a trustworthy foundation.
+- Step 2 must **complete the workspace inspection** before writing the registry;
+  the inspection recorded in `PLAN.md` §5.3 was performed at limited depth and
+  is a starting point, not a substitute. `~/ALX` (~21 entries) needs deliberate
+  triage.
+- The registry is **configuration** (committed, human-editable); its runtime
+  state belongs in the Step 1 store. `sync_checkpoints` and `source_lifecycle`
+  already exist and are waiting for it.
+- **The application cannot ingest itself**, proven by test.
+- Lifecycle is explicit and persisted, never inferred from inactivity; a
+  `COMPLETED` source with new commits produces a review signal.
+- `data/` is not restructured, and ingestion/retrieval are untouched.
 
 ---
 
