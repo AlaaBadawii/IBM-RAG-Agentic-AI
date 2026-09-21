@@ -27,32 +27,35 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 3 — Build Incremental Knowledge Synchronization
+    Step 4 — Build the Personal Branding Context & Evidence Layer
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0, 1 and 2 COMPLETED. The environment is reproducible, the test
-    baseline is restored, the operational state store exists, and the source
-    registry now defines exactly which directories are evidence about the
-    user. Steps 3–14 have not been started.
+    Steps 0–3 COMPLETED. The environment is reproducible, the operational state
+    store exists, the source registry defines exactly which directories are
+    evidence about the user, and synchronization is now incremental — a
+    24-hour run does work proportional to what changed rather than to the size
+    of 29 sources. Steps 4–14 have not been started.
 
 Last Completed Step:
-    Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
+    Step 3 — Build Incremental Knowledge Synchronization
 
 Next Step:
-    Step 3 — Build Incremental Knowledge Synchronization
+    Step 4 — Build the Personal Branding Context & Evidence Layer
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0, 1 and 2 have since been implemented,
-verified, and committed; every later step remains untouched.
+analysis of the repository. Steps 0–3 have since been implemented, verified,
+and committed; every later step remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
 Declared roots:       9          (inspected, never ingested)
 Not registered:      10          (with the evidence behind each decision)
+Sources synchronized: 0          (the mechanism exists; no real source has been
+                                  run through it yet — see Known Issue #7)
 ```
 
 ---
@@ -66,7 +69,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 0 | Restore a Reproducible, Testable Environment | COMPLETED |
 | 1 | Introduce Persistent Operational State (SQLite) | COMPLETED |
 | 2 | Define the Personal Knowledge Source Registry & Project Lifecycle | COMPLETED |
-| 3 | Build Incremental Knowledge Synchronization | NOT STARTED |
+| 3 | Build Incremental Knowledge Synchronization | COMPLETED |
 | 4 | Build the Personal Branding Context & Evidence Layer | NOT STARTED |
 | 5 | Harden the LinkedIn Integration for Autonomous Use | NOT STARTED |
 | 6 | Build Persistent Publishing, Idempotency & Recovery | NOT STARTED |
@@ -85,6 +88,208 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 3 — Build Incremental Knowledge Synchronization
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/sync/` — eight modules behind one narrow public surface
+  (`app/sync/__init__.py`): `enums.py` (`ChangeType`, `RevisionKind`,
+  `SyncStatus`, `SyncErrorCategory`), `namespace.py` (how a source file is
+  named in Chroma), `models.py` (`ChangedPath`, `SourceSyncResult`,
+  `SyncRunResult`), `revision.py` (what revision a source is at, and what
+  changed), `relevance.py` (the relevance policy and the rename policy),
+  `candidates.py` (changed paths → files to index, keys to remove),
+  `synchronizer.py` (orchestration, checkpoints, failure isolation), and
+  `__init__.py`.
+- **The pipeline is called, never reimplemented.** `app/ingestion/pipeline.py`
+  gained one seam — a candidate mode — and one indexing loop. Corpus mode
+  (`candidates is None`) is byte-for-byte its former behaviour. There is still
+  exactly one place where a file becomes vectors, one place that hashes, and
+  one stale-removal mechanism.
+- **Revision resolution** (`revision.py`): a git source resolves to a commit
+  via `rev-parse --verify --quiet <ref>^{commit}`; a filesystem source, or a
+  git repository with **no commits** (the registry contains one:
+  `exit-project-studyflow`), resolves to a content digest — a sha256 over
+  `(relative path, sha256(file bytes))` for every admitted file. The digest
+  includes the path, deliberately: without history, a file renamed with
+  unchanged bytes must still register as a change.
+- **Change detection** uses git's own `diff --name-status -M -z` with
+  `core.quotepath=false`, so added / modified / deleted / renamed / copied all
+  come from the version control system rather than from filename heuristics.
+  The `-z` token stream is parsed strictly: a truncated stream is an error, not
+  a smaller change set.
+- **Relevance** reuses Step 2's matcher and its deny-wins rule verbatim
+  (`decide()` names the vetoing exclusion and its stated reason). Every changed
+  path carries its verdict into the result, including the ones rejected.
+  No LLM is involved anywhere in relevance.
+- **Checkpoints** live in the Step 1 store, in `sync_checkpoints`, and only
+  `record_sync_success` ever sets `last_revision`. A revision with no relevant
+  paths still advances the checkpoint (the revision *was* processed; leaving it
+  would re-diff the same commit for ever), while a **failed** source never
+  advances — the next run retries exactly the range that failed.
+- **Source keys are namespaced** as `@source/<name>/<relative path>`. The
+  corpus and 29 sources share one collection, and the namespace is what makes a
+  scoped stale-removal sweep unable to reach another source's — or the corpus's
+  — keys.
+- Added `SyncError`, `SourceUnavailableError` and `GitError` to
+  `app/errors.py`; `load_all(strict=True)` to `app/ingestion/loader.py` (a
+  candidate set is a *claim about what changed*, and quietly indexing part of
+  one would let a checkpoint advance past a file that never reached the index).
+
+Verified:
+- Acceptance: all 20 criteria pass (checklist below).
+- **Milestone (`PLAN.md` §18): two consecutive synchronizations of an unchanged
+  source leave Chroma byte-identical.** Proven twice — as a test over a
+  temporary repository, and again outside the suite by hashing every stored row
+  (id, document, metadata, vector) with the **real** `all-MiniLM-L6-v2`
+  embeddings: `b7ee94ee…` across three consecutive syncs, `46b8f232…` after a
+  real change settled, with the checkpoint unmoved on each no-change run. The
+  comparison is over stored content, not log output.
+- **Nothing is embedded or written when nothing changed.** A no-change sync
+  performs no pipeline call, no Chroma read, and no state write at all — not
+  even a fresh timestamp, which is asserted against the checkpoint row.
+- The ingestion regression is genuinely untouched: `app/ingestion/` still
+  produces the same ids, metadata, chunking and stale-removal behaviour for
+  `data/`, and the pre-existing test modules for ingestion and retrieval were
+  not modified — only `tests/conftest.py`, additively.
+- **Self-ingestion protection holds at three layers**, proven against the live
+  monorepo shape (a source at an ancestor of this application): the registry's
+  load-time probes, the structural guard during the walk (a symlinked path into
+  the application is refused *while descending*, so `.venv/` and `chroma_db/`
+  cost nothing), and `assert_path_admissible` again at the moment a candidate
+  is built.
+- Failure isolation: one source's ingestion failure, unavailable path, guard
+  refusal, or unrecognised exception is recorded structurally
+  (`phase='sync'`, a typed `error_category`, `retryable`,
+  `requires_human_intervention`, one row per source per category counting
+  occurrences) and the run continues to the next source.
+- Recovery: an interrupted run leaves the checkpoint behind, and the retry
+  produces a collection **byte-identical to a clean first-time synchronization**
+  of the same final state — compared, not asserted.
+
+Tests:
+- `tests/test_sync_revision.py` (26), `tests/test_sync_relevance.py` (21),
+  `tests/test_sync_pipeline.py` (21), `tests/test_sync_synchronizer.py` (26),
+  `tests/test_sync_integration.py` (13) — **107 new tests**. Every git
+  repository, Chroma collection and state store in them is created under
+  `tmp_path`; none reads the user's workspace.
+- Regression: `.venv/bin/python -m pytest tests/ -q` → **333 passed** (226
+  baseline + 107 new), zero collection errors, zero failures. No existing test
+  was modified, weakened, or skipped: `tests/conftest.py` gained 152 lines of
+  purely additive fixtures (a temporary-git-repo factory, a source factory, a
+  temporary state store and Chroma collection, a recording stand-in for the
+  pipeline) with no line removed, and the four pre-existing test modules for
+  ingestion and retrieval are untouched.
+- `PYTHONNOUSERSITE=1` was used throughout.
+
+Commit:
+- `Step 3: add incremental knowledge synchronization` — the commit carrying
+  this record. The subject is used instead of a hash because the hash cannot
+  contain itself; find it with `git log --oneline --grep="^Step 3:"`.
+
+Acceptance criteria:
+- [x] A sync on an unchanged source performs no embedding work and no Chroma
+      writes — and writes nothing to the checkpoint either.
+- [x] The first sync of a source with no checkpoint ingests its full admitted
+      inventory.
+- [x] Changed files are detected, and only they are submitted.
+- [x] A deleted file's content leaves Chroma through the pipeline's own
+      removal path — there is no second deletion mechanism.
+- [x] Renames are handled by the tested policy below, verified against the
+      collection rather than against the plan.
+- [x] A checkpoint advances only after a fully successful synchronization.
+- [x] An interrupted run is safe to re-run, and converges on the state a clean
+      run would have produced.
+- [x] A git failure for one source does not block the others.
+- [x] A `COMPLETED` source with new relevant commits is detected, flagged in
+      the result, and still ingested in full.
+- [x] Relevance rules are enforced with Step 2's matcher, exclude always
+      winning over include.
+- [x] The existing pipeline remains the indexing implementation.
+- [x] No second ingestion pipeline exists.
+- [x] Self-ingestion protection is intact, at all three layers.
+- [x] Focused Step 3 tests pass (107).
+- [x] The ingestion regression passes.
+- [x] The full suite passes (333).
+- [x] The milestone proves no Chroma mutation across consecutive syncs.
+- [x] This document is updated truthfully, including the deviations below.
+- [x] Step 3 is one coherent commit.
+- [x] Step 4 has not been started.
+
+Important notes:
+- **The rename policy purges the old path on *every* rename, including an
+  exact one.** `PLAN.md` §8 warns against a blind delete-then-add because ids
+  are content-addressed and an identical-content rename can reuse them. The
+  policy implemented is: purging the old key happens **first**, then the new key
+  claims the same ids — which leaves the chunk count unchanged and the content
+  retrievable under the new path. Skipping the purge for an exact rename would
+  leave correctness resting on Chroma accepting an `add` over an existing id,
+  which was verified to work but is an undocumented convenience. Git's
+  similarity score is still read and reported (`ChangedPath.is_exact_rename`),
+  and a test asserts on it, but nothing acts on it. This is a deliberate
+  deviation from the wording in `PLAN.md` §8, in the direction of not depending
+  on unspecified behaviour.
+- **Every removal precedes every addition — a rule the scope sweep had to
+  learn.** The pipeline's `purge` was already ordered that way; the *scoped
+  sweep* was not, and an integration test caught the consequence: a full resync
+  submits a renamed file under a new key holding the old key's content address,
+  so a sweep running after indexing deleted the chunks the new key had just
+  claimed, and that cycle then advanced a checkpoint — recording the loss as
+  success. The sweep now runs before indexing. This was found by a test, not by
+  reasoning, and it is pinned by a regression test.
+- **Two admitted files with identical content cannot both be indexed.** They
+  share one content address, and Chroma 1.5.9 does not reject a duplicate id —
+  it silently overwrites. Left alone, which file the index attributes the
+  content to would depend on which run happened last, so the two would trade
+  places on every full rescan. The first candidate submitted keeps the address
+  (sorted path order, on the full resync where collisions actually arise), the
+  second is skipped, counted (`files_skipped_duplicate_content`) and reported
+  with both keys. `PLAN.md` does not mention this case; it is a property of
+  content-addressed ids meeting a real workspace rather than a curated corpus.
+  Corpus mode is unaffected and keeps the behaviour it has always had.
+- **The completed-project review flag is reported, not persisted.**
+  `sync_checkpoints.last_outcome` is CHECK-constrained to `SUCCEEDED`/`FAILED`
+  by Step 1, so persisting a third state would need a schema migration, which is
+  outside Step 3's boundary. The flag is therefore observable in the result
+  (`review_signal`, `plan.disposition == REVIEW_REQUIRED`) and, for failures,
+  in `operational_failures.requires_human_intervention`. Synchronization never
+  writes `source_lifecycle`, and a test asserts that.
+- **The review signal fires on changes since the last processed revision, never
+  on a first sync.** Otherwise the ~20 `COMPLETED` sources would raise a signal
+  storm the first time they were ever synchronized, which is how a review gate
+  stops being a gate. "A `COMPLETED` source with new relevant commits is
+  flagged" holds exactly.
+- **The scoped sweep is enabled only for a full resync.** A sweep's keep-set is
+  a source's entire inventory, so passing it for a diff would delete every file
+  the revision did not happen to touch. One consequence is worth stating: editing
+  the registry to *narrow* a source's includes does not retract already-indexed
+  content until that source next does a full resync (first sync, rewritten
+  history, or a content-digest source whose digest changed).
+- **The failure path is itself raise-proof.** An unrecognised exception is
+  recorded as `UNEXPECTED` rather than escaping, and building a failure result
+  no longer depends on the source's declaration being interpretable — a source
+  declaring a lifecycle outside the four known values is reported as requiring
+  review instead of aborting the run over the other 28. (Through the registry
+  that cannot happen: the loader refuses the value at load time.)
+- **`app/ingestion/` was modified in two places, and only where a seam was
+  required**: candidate mode in `pipeline.py`, and `strict` loading in
+  `loader.py`. No chunking, hashing, embedding, metadata or stale-removal logic
+  was changed, and the corpus path was proven unchanged by its existing tests.
+  One additive change is worth naming precisely rather than calling "no change":
+  `run_ingestion()`'s stats dict gained `files_skipped_duplicate_content`, which
+  is always present and always `0` in corpus mode. The indexing behaviour and
+  the printed CLI report are unchanged.
+- **Nothing was scheduled, notified, or given a CLI.** Step 3 is a library;
+  Step 11 owns entry points and Step 12 owns scheduling. `sync_all()` iterates a
+  registry and nothing else — there is no directory walk, so an unregistered
+  repository cannot become synchronization input, which is a structural
+  guarantee rather than a filtering one.
+- **The corpus has not been resynchronized.** Step 3 delivers the mechanism;
+  running it against the 29 real sources is a runtime operation that writes to
+  the real `chroma_db/`, and it was not performed as part of this step. See
+  Known Issue #7.
 
 ### Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
 
@@ -429,22 +634,31 @@ Important notes:
 ## Current Step
 
 ```text
-Step 3 — Build Incremental Knowledge Synchronization
+Step 4 — Build the Personal Branding Context & Evidence Layer
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 3. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 4. It is not
 duplicated here.
 
-What Step 2 leaves on the table for it:
+What Step 3 leaves on the table for it:
 
-- `load_registry()` returns the validated 29 sources; nothing consumes it yet.
-- `plan_for(source, has_changes=...)` and `review_signal_for(...)` define what
-  lifecycle is allowed to change, and nothing calls them yet.
-- `sync_checkpoints` and `source_lifecycle` exist in the store, empty.
-- Changing files are **candidates**, not decisions: git narrows the set, and the
-  existing content-hash ingestion pipeline still decides what actually changes.
+- `sync_all(registry, context)` performs one full pass over the registered
+  sources and returns a `SyncRunResult` that distinguishes synced / unchanged /
+  failed and carries per-source review signals. Nothing calls it on a schedule
+  yet.
+- `app/sync/__init__.py` re-exports the whole public surface; the ingestion
+  pipeline is reached only through `SyncContext.ingest`, so a caller can point a
+  pass at different embeddings or a different collection without patching
+  anything.
+- The corpus now has two populations in one collection — hand-written
+  `data/` documents and `@source/…` keys — with the namespace keeping them
+  apart. The Context layer is the first consumer that has to treat them as
+  different kinds of evidence.
+- `sync_checkpoints` holds a revision per source after a successful pass, and
+  `operational_failures` holds structured sync failures. Both are readable, and
+  nothing reads them yet.
 
 ---
 
@@ -495,9 +709,11 @@ The Step 2 inspection confirmed the drift and extended it — `~/LLMs/AI-Agents`
 (`~/DevOps/Packt-DevOps-Bootcamp`, `~/LLMs/llm-env`). The full comparison is in
 `docs/architecture/source-registry.md`.
 
-Step 2 makes these paths **declared and checkable** rather than prose, but has
-not resynchronized anything: the corpus still carries the stale revisions.
-Addressed by **Step 3**.
+Step 2 made these paths **declared and checkable** rather than prose. Step 3
+built the mechanism that resynchronizes them, and verified it end to end
+against temporary repositories — but **the real corpus is still stale**, because
+synchronizing 29 real sources is a runtime operation, not an implementation
+step. See Issue #7. The corpus still carries the stale revisions.
 
 ### 3. Uncommitted working-tree changes exist in `Auth_handling/`
 
@@ -566,6 +782,33 @@ Documented in `docs/operations/local-development.md` §4.
 **Step 12** schedules these CLIs and must set `PYTHONPATH` or run from the
 project root. Making the project installable is a candidate follow-up.
 
+### 7. Synchronization has never been run against the real 29 sources
+
+Step 3 implements and verifies incremental synchronization, but the first real
+pass has **not** been performed. Every test — including the milestone — runs
+against temporary repositories under `tmp_path` by requirement, and no
+registered source has a checkpoint row yet.
+
+This is deliberate, not an omission. A real pass writes to the user's own
+`chroma_db/` and inserts rows into `state_db/`, which is a runtime data
+operation rather than an implementation step; and `PLAN.md` Step 3 scopes out
+entry points and scheduling. The three things a first real pass will need, none
+of which exist yet:
+
+1. **An entry point.** `sync_all()` is a library function with no CLI
+   (`PLAN.md` Step 11 owns workflow entry points).
+2. **Acceptance of the first-pass cost.** With no checkpoints, the first pass is
+   a full resync of 29 sources — the one pass whose cost is proportional to the
+   whole workspace rather than to what changed. Step 2 measured the shape of
+   that workspace (36,082 `.py` files under `~/LLMs/IBM` before excludes,
+   93 through the registry's matcher, 17 virtualenvs, ~17 GB).
+3. **A decision about `data/`'s stale revisions (Issue #2).** Synchronizing the
+   sources does not by itself rewrite the hand-written corpus documents that
+   cite dead paths and stale revisions; those are `data/` files, and how the
+   corpus reconciles with its sources is a question for the Context layer.
+
+Until then, `chroma_db/` holds the corpus as it was ingested in Step 0.
+
 ---
 
 ## Important Decisions / Deviations
@@ -585,7 +828,18 @@ not a specification.
 | **Evidence references are stored as source path + content hash** | The corpus is resynchronized every 24 h; without the hash a later audit cannot distinguish "grounded in evidence that has since changed" from "never grounded" | Step 1 (table), written by Step 6 |
 | **Local publication history is authoritative** | LinkedIn read access (`r_member_social`) is restricted to approved users; there is no read-back | `PLAN.md` §5.1 |
 | **Publishing history is NOT indexed into Chroma (V1)** | Avoids a generated post becoming evidence for the next one; deterministic SQLite queries answer the Agent instead | `PLAN.md` §6.1 |
-| **Git detects change; it does not replace ingestion** | The existing content-hash pipeline already guarantees correctness — git only narrows the candidate set | `PLAN.md` Step 3 |
+| **Git detects change; it does not replace ingestion** | The existing content-hash pipeline already guarantees correctness — git only narrows the candidate set. **Implemented** as a candidate mode on the one pipeline, not a second indexer | `PLAN.md` Step 3, `app/ingestion/pipeline.py` |
+| **Source-derived keys are namespaced `@source/<name>/…`** | The corpus and 29 sources share one Chroma collection. The namespace is what makes a scoped stale-removal sweep unable to reach another source's keys — or the corpus's — so it is a correctness device, not a naming convention | Step 3, `app/sync/namespace.py` |
+| **Every removal precedes every addition** | Ids are content-addressed, so a file whose bytes did not change keeps the same ids at a new path. Deleting after adding would remove the chunks the new path had just claimed. The `purge` path was always ordered this way; the scoped sweep was **not**, and an integration test caught it deleting content on a rename and then advancing a checkpoint over the loss | Step 3, `app/ingestion/pipeline.py` |
+| **An exact rename is purged like any other rename** | Correctness could rest on Chroma accepting an `add` over an existing id (it does, verified) or on the documented ordering (purge first, then the new key claims the ids). The second survives a change in the first. Git's similarity score is reported and asserted on, never acted on | Step 3, `app/sync/relevance.py` |
+| **Two files with identical content cannot both be indexed** | They share one content address and Chroma 1.5.9 silently overwrites a duplicate id rather than rejecting it, so which file the index credits would depend on run order. The first in sorted path order keeps it; the second is skipped, counted and reported | Step 3, `app/ingestion/pipeline.py` |
+| **A source's checkpoint advances only on full success** | Only `record_sync_success` sets `last_revision`, so a non-null revision always means "fully processed". A failed source keeps its old revision and the next run retries exactly that range — safe because ingesting the same content twice reaches the same state | Step 3, `app/sync/synchronizer.py` |
+| **A new revision with nothing relevant in it still advances the checkpoint** | The revision *was* processed, and its outcome was "nothing here is evidence". Leaving it behind would re-diff the same irrelevant commit on every future run, for ever | Step 3, `app/sync/synchronizer.py` |
+| **A no-change sync writes nothing at all** | Not the checkpoint, not even a timestamp. An untouched source must not look busy, and an artificial write is the first thing that makes an idempotency claim untestable | Step 3, `tests/test_sync_synchronizer.py` |
+| **Review signals fire on changes since the last processed revision** | A first sync establishes a baseline; firing there would raise a signal storm across ~20 `COMPLETED` sources the first time they were synchronized, which is how a review gate stops being a gate | Step 3, `app/sync/synchronizer.py` |
+| **The completed-project flag is reported, not persisted** | `sync_checkpoints.last_outcome` is CHECK-constrained to `SUCCEEDED`/`FAILED`; a third state needs a Step 1 migration, which is outside Step 3's boundary. The flag lives in the result, and in `operational_failures` for failures. Synchronization never writes `source_lifecycle` | Step 3, `app/sync/synchronizer.py` |
+| **The scoped sweep runs only for a full resync** | A sweep's keep-set is a source's whole inventory, so passing it for a diff would delete every file the revision did not touch. Consequence: narrowing a source's includes does not retract indexed content until the next full resync | Step 3, `app/sync/synchronizer.py` |
+| **The failure path is raise-proof** | A failure path that can itself raise turns one broken source into an aborted run over 28. An unrecognised exception becomes `UNEXPECTED`, and an uninterpretable lifecycle declaration is reported as requiring review rather than propagating | Step 3, `app/sync/synchronizer.py` |
 | **An explicit source registry is required** | Workspace roots contain ~28 repos, 17 virtualenvs (~17 GB), and this application itself; roots are places to inspect, not sources to ingest. **Implemented** as `sources.yaml`: 29 sources, 9 roots, 10 `not_registered`, 3 include profiles | `PLAN.md` Step 2, `docs/architecture/source-registry.md` |
 | **The application must not ingest itself** | `~/LLMs/IBM` contains this project, so its own source, runtime state, `data/` corpus and token file are not professional evidence. Guarded twice — structurally by `is_protected()`, and at load time against concrete probe paths | Step 2, `app/sources/guard.py` |
 | **Exclusion wins over inclusion** | Deny-wins rather than last-rule-wins, so the outcome depends on which rules exist rather than on the order they were written in. An exclusion without a stated reason is refused at load time — an unexplained rule cannot be reviewed, so it never gets removed | Step 2, `app/sources/patterns.py` |
@@ -613,31 +867,32 @@ not a specification.
 
 ## Next Step
 
-### Step 3 — Build Incremental Knowledge Synchronization
+### Step 4 — Build the Personal Branding Context & Evidence Layer
 
-The next implementation task is defined in `PLAN.md` §8, Step 3.
+The next implementation task is defined in `PLAN.md` §8, Step 4.
 
-Step 2 defined *what* is synchronized; Step 3 makes synchronization incremental,
-so a 24-hour run does work proportional to what changed rather than to the size
-of 29 sources.
+Step 3 made the knowledge base current; Step 4 gives the system a durable
+picture of *who the user is professionally* — a context layer over the evidence
+rather than a restatement of it.
 
-Constraints carried in from Steps 0–2:
+Constraints carried in from Steps 0–3:
 
-- **Git detects change; it does not replace ingestion.** The existing
-  content-hash pipeline already guarantees correctness — git only narrows the
-  candidate set (`PLAN.md` §6). Re-ingesting a file whose content did not change
-  must remain a no-op.
-- The registry is **configuration**; its runtime state belongs in the Step 1
-  store. `sync_checkpoints` (last processed revision + timestamp) and
-  `source_lifecycle` already exist and are waiting.
-- A `COMPLETED` source with new commits is **ingested in full and surfaced as
-  `REQUIRES_HUMAN_INTERVENTION`** — `plan_for()` and `review_signal_for()` in
-  `app/sources/lifecycle.py` already express this; Step 3 must call them rather
-  than re-derive the rule.
-- A source that **disappears at runtime** (as distinct from being missing at
-  load time, which is fatal) must be reported as `REQUIRES_HUMAN_INTERVENTION`
-  with the source named, while other sources continue.
-- `data/` is not restructured, and ingestion/retrieval are untouched.
+- **The context layer is a consumer of the index, not a second index.** The
+  collection now holds two populations — hand-written `data/` documents and
+  `@source/<name>/…` keys from 29 registered sources — and the namespace is the
+  only thing that distinguishes them. A context layer that ignores it would
+  treat authored code and curated self-description as the same kind of
+  evidence.
+- **Nothing is inferred from inactivity, and lifecycle is a declaration.**
+  `source_lifecycle` remains empty; synchronization never writes it. A
+  `COMPLETED` project's new commits arrive flagged, not silently absorbed.
+- **Synchronization state belongs in the Step 1 store.** `sync_checkpoints`
+  holds a revision per source; a context layer that needs to know how fresh a
+  source's evidence is should read it rather than re-derive it.
+- **`data/` is not restructured** by Step 4, and ingestion/retrieval remain
+  untouched.
+- Synchronization is not yet scheduled and has not been run for real
+  (Known Issue #7). Step 4 should not assume a populated source index.
 
 ---
 

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import DATA_DIR, EXCLUDE_READMES
+from app.errors import IngestionError
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -65,12 +66,27 @@ def discover_markdown(data_dir: Path = DATA_DIR,
     return files
 
 
-def load_all(files: list[SourceFile]) -> list[tuple[SourceFile, str]]:
-    """Read every discovered file, skipping unreadable ones with a warning."""
+def load_all(files: list[SourceFile], *, strict: bool = False
+             ) -> list[tuple[SourceFile, str]]:
+    """Read every discovered file.
+
+    Args:
+        strict: when False (the default), an unreadable file is skipped with a
+            warning — right for `data/`, a curated corpus where one damaged
+            file should not stop the rest. When True, it raises instead, which
+            is what the synchronization layer needs: a candidate set is a
+            claim *about what changed*, and quietly indexing part of it would
+            let a source's checkpoint advance past a file that never reached
+            the index.
+    """
     loaded = []
     for source in files:
         try:
             loaded.append((source, source.read_text()))
         except OSError as exc:
+            if strict:
+                raise IngestionError(
+                    f"could not read {source.relative_path}: {exc}"
+                ) from exc
             logger.warning("Could not read %s: %s", source.relative_path, exc)
     return loaded

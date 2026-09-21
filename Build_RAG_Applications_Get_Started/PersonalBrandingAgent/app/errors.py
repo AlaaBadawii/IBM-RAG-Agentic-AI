@@ -34,6 +34,36 @@ class RegistryError(AppError):
     """
 
 
+class SyncError(AppError):
+    """Raised when a registered source cannot be synchronized.
+
+    Always scoped to **one source**. The synchronizer records the failure,
+    leaves that source's checkpoint where it was, and continues with the
+    others — a source that cannot be read must not stop the knowledge base
+    from catching up on the twenty-eight that can (``PLAN.md`` Step 3,
+    Failure/recovery).
+    """
+
+
+class SourceUnavailableError(SyncError):
+    """Raised when a registered source is no longer there as registered.
+
+    Its path is gone, it is no longer a directory, or it is declared ``git``
+    and no longer has a repository. ``PLAN.md`` §2 names this case explicitly
+    as ``REQUIRES_HUMAN_INTERVENTION``: nothing the synchronizer can do will
+    fix it, and the registry — which is the user's statement about their own
+    workspace — has to be corrected.
+    """
+
+
+class GitError(SyncError):
+    """Raised when a git command fails or a declared ref does not resolve.
+
+    Distinct from :class:`SourceUnavailableError` because it is usually
+    transient and needs no decision from the user.
+    """
+
+
 class StateStoreError(AppError):
     """Raised when the operational state store is unusable.
 
