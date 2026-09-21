@@ -13,6 +13,12 @@ CHROMA_DIR = PROJECT_ROOT / "chroma_db"
 LOG_DIR = PROJECT_ROOT / "logs"
 GOLD_QUERIES_PATH = PROJECT_ROOT / "tests" / "gold_queries.json"
 
+# The source registry: declarative configuration naming exactly which
+# directories outside this project are evidence about the user. This is
+# *definition*, not state — the last-processed revision for each source lives
+# in the operational store's sync_checkpoints table, never here.
+SOURCES_FILE = PROJECT_ROOT / "sources.yaml"
+
 # Operational state (workflow runs, publish intents, publications, failures,
 # notifications, locks). Deliberately NOT inside chroma_db/: knowledge state
 # and operational state are separate stores with separate authority

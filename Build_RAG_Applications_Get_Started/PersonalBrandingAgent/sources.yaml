@@ -1,0 +1,706 @@
+# Personal Knowledge Source Registry
+# =============================================================================
+# Which directories are evidence about the user, and which are not.
+#
+# This file replaces "the workspace roots" as the input to synchronization.
+# The roots recorded in PLAN.md §5.3 are ~8 directories holding ~28 git
+# repositories, 17 Python virtual environments (~17 GB), coursework,
+# unrelated third-party templates, and this application itself. Ingesting a
+# root wholesale would put all of that into the knowledge base as professional
+# evidence, so every source below is named exactly and no code anywhere
+# recursively scans a root.
+#
+# Grounded in the workspace inspection recorded in
+# docs/architecture/source-registry.md. Every path here was verified to exist,
+# and every lifecycle value was assigned from that inspection — never inferred
+# from a Markdown heading, and never from inactivity (PLAN.md §5.5).
+#
+# Definition vs. state: THIS FILE IS DEFINITION ONLY. The last processed
+# revision for each source, and every lifecycle transition, live in the
+# operational store (state_db/) — sync_checkpoints and source_lifecycle.
+# Writing a revision into this file would make configuration that must be
+# reviewable churn on every run.
+#
+# Reading it: `defaults.exclude` applies to every source; a source's own
+# `exclude` is appended to it. A path is admitted only if it matches at least
+# one include pattern AND no exclude pattern. Exclusions always carry a
+# reason, because an unexplained exclusion cannot be reviewed and therefore
+# never gets removed.
+# =============================================================================
+
+version: 1
+
+
+# --- Include profiles ---------------------------------------------------------
+#
+# Named pattern sets, referenced by YAML alias (`include: *source_code`). They
+# live here so the same list is not written out thirty times, and they are
+# intentionally few: tailoring a profile per language would add ceremony
+# without changing what is admitted, because a stray .js in a Python
+# repository is still the user's work. What must *not* be admitted —
+# virtualenvs, generated vector stores, another cohort's code — is the job of
+# the exclusions below, not of the include lists.
+#
+# This section is read by YAML, not by the loader.
+include_profiles:
+
+  # Authored text: source code, prose, and configuration.
+  source_code: &source_code
+    - "**/*.md"
+    - "**/*.py"
+    - "**/*.c"
+    - "**/*.h"
+    - "**/*.js"
+    - "**/*.jsx"
+    - "**/*.ts"
+    - "**/*.ipynb"
+    - "**/*.html"
+    - "**/*.css"
+    - "**/*.sql"
+    - "**/*.txt"
+    - "**/*.json"
+    - "**/*.csv"
+    - "**/*.yml"
+    - "**/*.yaml"
+    - "**/*.sh"
+    - "**/*.rb"
+    - "**/*.pp"
+    - "**/*.cfg"
+    - "**/*.ini"
+    - "**/*.toml"
+    - "**/*.tf"
+    - "**/Dockerfile"
+    - "**/Jenkinsfile"
+    - "**/Makefile"
+
+  # Prose only, for a source that is a written statement and nothing else.
+  docs_only: &docs_only
+    - "**/*.md"
+    - "**/*.txt"
+
+  # Everything, for the ALX shell repositories: ALX names its scripts without
+  # an extension (`0-hello_world`, `101-metadata`), so no pattern based on
+  # extensions can reach them, and 127 of one repository's files are exactly
+  # that. Used with exclusions strong enough to remove the binary types that
+  # `**/*` would otherwise admit — the only source of its kind here.
+  shell_repo: &shell_repo
+    - "**/*"
+
+
+# --- Exclusions that apply to every source -----------------------------------
+#
+# Universal: no source's object store, bytecode cache, virtual environment, or
+# .env is authored work. Source-specific hazards are written out per source
+# instead, so that reading one source's entry tells you everything about it
+# that is not universally true.
+#
+# Several of these cannot match anything today — no include profile admits a
+# .db file. They are here anyway, and deliberately: widening an include list
+# later must not be able to silently admit a virtualenv or a token file. That
+# reasoning does not extend to per-source rules, so a per-source exclusion that
+# cannot match is not written out at all.
+defaults:
+  exclude:
+    - pattern: "**/.git/"
+      reason: "git object store; revisions are tracked, loose objects are not evidence"
+    - pattern: "**/__pycache__/"
+      reason: "compiled bytecode, regenerated from source on demand"
+    - pattern: "**/*.pyc"
+      reason: "compiled bytecode"
+    - pattern: "**/.pytest_cache/"
+      reason: "test-runner cache"
+    - pattern: "**/.mypy_cache/"
+      reason: "type-checker cache"
+    - pattern: "**/.ruff_cache/"
+      reason: "linter cache"
+    - pattern: "**/node_modules/"
+      reason: "installed dependency tree, not authored code"
+    # The conventional virtualenv names. The non-conventional ones (my_env,
+    # fastapi_venv here) are excluded per source, and validation additionally
+    # refuses to load any registry leaving a virtualenv admissible inside a
+    # source — detected structurally by pyvenv.cfg, not by name.
+    - pattern: "**/.venv/"
+      reason: "Python virtual environment"
+    - pattern: "**/venv/"
+      reason: "Python virtual environment"
+    # A generated vector store is always derived from text that is itself
+    # available as a source, so it can never be evidence — and in a RAG
+    # repository it is large enough to swamp the corpus with its own chunks.
+    - pattern: "**/chroma/"
+      reason: "generated vector database; derived from text, never evidence"
+    - pattern: "**/chroma_db/"
+      reason: "generated vector database; derived from text, never evidence"
+    - pattern: "**/.env"
+      reason: "live credentials; must never enter the corpus"
+    - pattern: "**/.env.*"
+      reason: "environment variants — the real ones carry credentials and a template is not evidence"
+    - pattern: "**/*token*.json"
+      reason: "token files (e.g. LinkedIn OAuth tokens) hold credentials"
+    - pattern: "**/credentials*.json"
+      reason: "credential files"
+    - pattern: "**/*.pem"
+      reason: "private keys and certificates"
+    - pattern: "**/id_rsa*"
+      reason: "SSH private keys"
+    - pattern: "**/instance/"
+      reason: "Flask instance directory; holds generated databases (Quizey V2, taskey)"
+    - pattern: "**/*.db"
+      reason: "database file — runtime state, regenerated by the application"
+    - pattern: "**/*.sqlite"
+      reason: "database file — runtime state"
+    - pattern: "**/*.sqlite3"
+      reason: "database file — runtime state"
+    - pattern: "**/*.swp"
+      reason: "editor swap file, left behind rather than authored"
+    - pattern: "**/.DS_Store"
+      reason: "macOS filesystem metadata"
+    - pattern: "**/.vscode/"
+      reason: "local editor settings"
+    - pattern: "**/.claude/"
+      reason: "local agent-tooling settings"
+    - pattern: "**/.gitignore"
+      reason: "repository plumbing"
+
+
+# --- Declared workspace roots -------------------------------------------------
+#
+# Places to look, never sources to ingest. Recorded here so that the registry
+# can *prove* it honours that rule: loading fails if any source's local_path
+# is one of these.
+workspace_roots:
+  - path: /home/alaabadawii/LLMs/IBM
+    note: "git monorepo (16 commits) that CONTAINS THIS APPLICATION, plus five course directories"
+  - path: /home/alaabadawii/LLMs/AI_Agents
+    note: "git repo (12 commits); 4 subprojects"
+  - path: /home/alaabadawii/LLMs/AI_Hackthon
+    note: "plain directory; one nested repo plus one non-repo lab"
+  - path: /home/alaabadawii/Quizey
+    note: "plain directory; two nested repos"
+  - path: /home/alaabadawii/FastAPI
+    note: "plain directory; a zero-commit repo, a flight of course code, and a virtualenv"
+  - path: /home/alaabadawii/DevOps
+    note: "plain directory; three nested repos plus a plain lab directory"
+  - path: /home/alaabadawii/ALX
+    note: "plain directory; 20 nested repositories, 2 training programs' coursework"
+  - path: /home/alaabadawii/Portfolio
+    note: "git repo (21 commits); static site"
+  # Found during the Step 2 inspection, NOT in PLAN.md §5.3: the corpus claims
+  # MongoDB/PyMongo work, and the path it cites lives outside every root that
+  # document declares. Added so the registry's "roots are places to look" rule
+  # covers it too.
+  - path: /home/alaabadawii/DataBases
+    note: "plain directory; MongoDB/PyMongo practice — discovered from the corpus's own source references"
+
+
+# --- Sources ------------------------------------------------------------------
+sources:
+
+  # ===========================================================================
+  # ~/LLMs/IBM — the monorepo that contains this application
+  # ===========================================================================
+  - name: ibm-genai-coursework
+    type: git
+    local_path: /home/alaabadawii/LLMs/IBM
+    repo_identity: https://github.com/AlaaBadawii/IBM-RAG-Agentic-AI.git
+    ref: main
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      IBM/Simplilearn GenAI course projects — five course directories in one
+      repository. Active because the current work, this application, lives in
+      the same repository and shares its revision.
+    exclude:
+      # The critical one. Without it this source ingests the application's own
+      # source, its planning documents, its runtime state and its credentials,
+      # and the knowledge base starts describing the system as if it were the
+      # user's professional history (PLAN.md §5.3, hazard 1).
+      - pattern: "Build_RAG_Applications_Get_Started/PersonalBrandingAgent/"
+        reason: >
+          this application itself — its source, PLAN.md, chroma_db/, logs/,
+          state_db/, and Auth_handling/ credentials. The system must never
+          ingest itself. A load-time probe check fails the registry if any
+          pattern admits a path from here.
+      - pattern: "Build_Multimodal_Generative_AI_Applications/Style_Finder/"
+        reason: >
+          third-party IBM course template (remote:
+          ibm-developer-skills-network/tyxva-swift-style). All four commits are
+          authored by IBM staff and the ibm-skills-network-bot; the user has
+          none. See not_registered below.
+      - pattern: "Advanced_RAG_with_Vector_Databases_and_Retrievers/youtube-rag-summarizer/my_env/"
+        reason: >
+          a 617 MB virtual environment named my_env. Unconventional name, so
+          the defaults' .venv/ and venv/ patterns do not reach it, and its .py
+          files match the include profile.
+      - pattern: "Build_Multimodal_Generative_AI_Applications/Personal_Storyteller/.venv/"
+        reason: "401 MB virtual environment"
+      - pattern: "Vector_Databases_for_RAG_An_Introduction/Books_Advanced_Search/storage/"
+        reason: >
+          a generated Chroma store under a directory not named chroma_db/, so
+          the defaults do not reach it. Derived from the book text it indexes.
+      - pattern: "**/generated_*.mp3"
+        reason: "audio rendered by the app at runtime, not authored content"
+
+  # ===========================================================================
+  # ~/LLMs/AI_Agents
+  # ===========================================================================
+  - name: ai-agents
+    type: git
+    local_path: /home/alaabadawii/LLMs/AI_Agents
+    repo_identity: https://github.com/AlaaBadawii/AI-Agents.git
+    ref: main
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      Four agent projects. Active: evaluator_core is an in-progress project in
+      the corpus.
+    exclude:
+      - pattern: "Agent_Assistant/venv/"
+        reason: "199 MB virtual environment"
+      - pattern: "Multi_Agents/.venv/"
+        reason: "207 MB virtual environment"
+
+  # ===========================================================================
+  # ~/LLMs/AI_Hackthon
+  # ===========================================================================
+  - name: hackathon-lectures
+    type: git
+    local_path: /home/alaabadawii/LLMs/AI_Hackthon/hackathon_lectures
+    repo_identity: https://github.com/AlaaBadawii/AI_Hackthon.git
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      Hackathon lecture materials (18 commits). Its evaluation/ trees hold some
+      200 generated .jsonl result files and its data/ tree holds uploaded PDFs
+      and a Chroma store; none is authored work, and none is admitted because
+      no include pattern reaches those extensions.
+
+  - name: hackathon-practice-lab
+    type: filesystem
+    local_path: /home/alaabadawii/LLMs/AI_Hackthon/hackathon_practice_lab
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      Hackathon practice lab. Not a repository — its content is in no git
+      history, which is exactly why filesystem sources are first-class here.
+    exclude:
+      - pattern: "build/"
+        reason: "Python build artifacts (bdist, lib); regenerated from src/"
+
+  # ===========================================================================
+  # ~/Quizey
+  # ===========================================================================
+  - name: quizey-v2
+    type: git
+    local_path: /home/alaabadawii/Quizey/Quizey_V2
+    repo_identity: git@github.com:AlaaBadawii/Quizey-V2.git
+    ref: main
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      The current Quizey rewrite — the largest active project. NOTE: the local
+      checkout is currently on feature/stage-2.2-publishing-version-management,
+      not main; synchronization tracks main, so a divergence there is a fact
+      the sync layer must surface rather than resolve silently.
+    exclude:
+      - pattern: "recycle/"
+        reason: >
+          superseded documentation moved aside by the author. Ingesting it
+          would present retired design as current.
+      - pattern: "Images/"
+        reason: "screenshots and diagram exports"
+
+  - name: quizey-platform
+    type: git
+    local_path: /home/alaabadawii/Quizey/Quizey_Platform
+    repo_identity: https://github.com/AlaaBadawii/quizey-platform.git
+    ref: main
+    lifecycle: ACTIVE
+    include: *docs_only
+    description: >
+      The public project page for Quizey (3 commits, README only). The source
+      code is private and lives elsewhere; this repository is the public
+      statement of the product's architecture and status.
+
+  # ===========================================================================
+  # ~/FastAPI
+  # ===========================================================================
+  - name: fastapi-shipment-api
+    type: filesystem
+    local_path: /home/alaabadawii/FastAPI/course_practical_app
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      The FastAPI shipment/seller API. A plain directory — not a repository —
+      whose content is the basis of in_progress_projects/fastapi_shipment_api.md.
+      The corpus cites this work at /home/alaabadawii/FastAPI/app/main.py,
+      which does not exist; the real path is this one.
+
+  - name: exit-project-studyflow
+    type: git
+    local_path: /home/alaabadawii/FastAPI/ExitProject
+    repo_identity: "untracked: no remote and no commits (unborn master)"
+    ref: master
+    lifecycle: PLANNED
+    include: *source_code
+    description: >
+      A repository with ZERO COMMITS — initialized, and holding 11 planning
+      documents plus a StudyFlow scaffold, but no history at all. It is the
+      case that makes 'git source' mean something more than 'has a remote'.
+      Lifecycle PLANNED because the work is designed and not yet started; if
+      it acquires content, plan_for() raises a status-review signal.
+    exclude:
+      - pattern: "studyflow/venv/"
+        reason: "59 MB virtual environment"
+
+  # ===========================================================================
+  # ~/DevOps
+  # ===========================================================================
+  - name: jenkins-practice
+    type: git
+    local_path: /home/alaabadawii/DevOps/jenkins-practice
+    repo_identity: https://github.com/AlaaBadawii/jenkins-practice.git
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: "Jenkins/GitHub Actions CI practice (14 commits)."
+
+  - name: kodekloud-devops-specialization
+    type: git
+    local_path: /home/alaabadawii/DevOps/KodeKloud_devops_pro_specialization
+    repo_identity: https://github.com/AlaaBadawii/KodeKloud_devops_pro_specialization.git
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: "KodeKloud DevOps professional specialization coursework (6 commits)."
+
+  - name: devops-lab
+    type: git
+    local_path: /home/alaabadawii/DevOps/Manara/devops-lap
+    repo_identity: https://github.com/AlaaBadawii/devops-lab.git
+    ref: main
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      Manara DevOps lab (1 commit). A repository nested inside ~/DevOps/Manara,
+      which is itself a plain directory — the nesting works in both directions
+      here.
+
+  - name: kubernetes-lab
+    type: filesystem
+    local_path: /home/alaabadawii/DevOps/Manara/Kubernetes_lab
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      Kubernetes manifests and notes for the Manara lab. A plain directory
+      (not in any repository) that the corpus cites directly
+      (in_progress_projects/kubernetes_manara_lab.md,
+      stories_lessons/kubernetes_first_step_typos.md). The directory also holds
+      a downloaded 129 MB minikube binary, which no include pattern reaches.
+
+  # ===========================================================================
+  # ~/ALX — 20 repositories, triaged individually
+  # ===========================================================================
+  - name: alx-airbnb-clone-v1
+    type: git
+    local_path: /home/alaabadawii/ALX/AirBnB_clone
+    repo_identity: https://github.com/AlaaBadawii/AirBnB_clone.git
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      The original AirBnB clone (48 commits, all authored by the user) — the
+      console/object-model stage. Cited by the corpus for console.py.
+
+  - name: alx-airbnb-clone-v2
+    type: git
+    local_path: /home/alaabadawii/ALX/AirBnB_clone_v2
+    repo_identity: https://github.com/AlaaBadawii/AirBnB_clone_v2.git
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      The version where the Flask/SQLAlchemy web layer and the database storage
+      engine appear. 55 of 150 commits are the user's. Cited by the corpus for
+      web_flask/ and models/engine/db_storage.py.
+
+  - name: alx-backend
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-backend
+    repo_identity: https://github.com/AlaaBadawii/alx-backend
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: "Backend fundamentals curriculum projects (39 commits)."
+
+  - name: alx-backend-javascript
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-backend-javascript
+    repo_identity: https://github.com/AlaaBadawii/alx-backend-javascript
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: "JavaScript/Node backend track (96 commits)."
+
+  - name: alx-backend-python
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-backend-python
+    repo_identity: https://github.com/AlaaBadawii/alx-backend-python
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: "Advanced Python backend track (53 commits)."
+
+  - name: alx-backend-storage
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-backend-storage
+    repo_identity: https://github.com/AlaaBadawii/alx-backend-storage
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: "MySQL/NoSQL storage track (46 commits)."
+
+  - name: alx-backend-user-data
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-backend-user-data
+    repo_identity: https://github.com/AlaaBadawii/alx-backend-user-data
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      Authentication and personal-data track (144 commits), cited by
+      completed_projects/alx_backend_user_data.md.
+
+  - name: alx-system-engineering-devops
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-system_engineering-devops
+    repo_identity: https://github.com/AlaaBadawii/alx-system_engineering-devops
+    ref: master
+    lifecycle: COMPLETED
+    include: *shell_repo
+    description: >
+      Systems/DevOps track — shell, networking, configuration management (258
+      commits). Uses the shell_repo profile because 127 of its files are
+      extensionless ALX shell scripts. Its default branch is master, not main;
+      the two ALX repositories here that still use the older name are this one
+      and alx-higher-level-programming.
+    exclude:
+      # shell_repo admits everything, so the binary types it would otherwise
+      # pick up are named here.
+      - pattern: "**/*.png"
+        reason: "diagram images, not authored text"
+      - pattern: "**/*.jpg"
+        reason: "diagram images, not authored text"
+      - pattern: "**/*.pdf"
+        reason: "exported documents, not authored text"
+      - pattern: "**/*.tar"
+        reason: "archives"
+      - pattern: "**/*.gz"
+        reason: "archives"
+      - pattern: "**/*.zip"
+        reason: "archives"
+
+  - name: alx-files-manager
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-files_manager
+    repo_identity: https://github.com/AlaaBadawii/alx-files_manager
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      The file manager API (2 commits) — Node/Redis/MongoDB, documented in
+      completed_projects/files_manager.md.
+
+  - name: alx-higher-level-programming
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-higher_level_programming
+    repo_identity: https://github.com/AlaaBadawii/alx-higher_level_programming
+    ref: master
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      Python, JavaScript and C across the higher-level programming foundation
+      (274 commits) — genuinely mixed-language, which is why the include
+      profile spans languages rather than naming one. Its default branch is
+      master, not main.
+
+  - name: alx-interview
+    type: git
+    local_path: /home/alaabadawii/ALX/alx-interview
+    repo_identity: https://github.com/AlaaBadawii/alx-interview
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: "Interview algorithm practice (33 commits)."
+
+  - name: alx-program-revision
+    type: git
+    local_path: /home/alaabadawii/ALX/alx_program_Revision
+    repo_identity: https://github.com/AlaaBadawii/alx_program_Revision.git
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      Self-study revision material (10 commits) — the largest single source at
+      roughly 1,600 admitted files, spanning Python, C and SQL. Cited by
+      completed_projects/alx_interview_algorithms.md.
+
+  - name: alx-simple-shell
+    type: git
+    local_path: /home/alaabadawii/ALX/simple_shell
+    repo_identity: https://github.com/FaroukBinLhouita/simple_shell
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      The simple_shell team project — a C program. NOTE: the remote belongs to
+      the user's teammate, not to the user; the corpus records this explicitly
+      and the AUTHORS file lists both. 53 of 101 commits are the user's.
+      Provenance is recorded here rather than assumed from the remote.
+
+  - name: alx-taskey
+    type: git
+    local_path: /home/alaabadawii/ALX/taskey
+    repo_identity: https://github.com/AlaaBadawii/taskey
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      The Taskey Flask task API (28 commits). Its remote URL locally embeds a
+      GitHub personal access token; the identity recorded here is the
+      sanitized form. See the security note at the end of this file.
+
+  - name: alx-quizey
+    type: git
+    local_path: /home/alaabadawii/ALX/Quizey
+    repo_identity: https://github.com/AlaaBadawii/Quizey.git
+    ref: main
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      Quizey V1 — the early version of the current project, and a different
+      repository from Quizey/Quizey_V2. The corpus is emphatic that these are
+      not the same repository; registering both separately is what keeps that
+      distinction machine-readable.
+
+  # ===========================================================================
+  # ~/Portfolio
+  # ===========================================================================
+  - name: portfolio
+    type: git
+    local_path: /home/alaabadawii/Portfolio
+    repo_identity: https://github.com/AlaaBadawii/AlaaBadawii.github.io.git
+    ref: main
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      The public static site (21 commits), published from this repository.
+      Active because it is the outward-facing artifact that changes as new work
+      lands.
+
+  # ===========================================================================
+  # ~/DataBases — found by inspection, not among the roots PLAN.md declares
+  # ===========================================================================
+  - name: databases-mongodb-crud
+    type: filesystem
+    local_path: /home/alaabadawii/DataBases/MongoDB
+    lifecycle: COMPLETED
+    include: *source_code
+    description: >
+      MongoDB/PyMongo practice — the basis of
+      completed_projects/mongodb_pymongo_crud_service.md. A plain directory,
+      not a repository. Included because the corpus's own audit notes that it
+      is the only content under ~/DataBases.
+
+
+# --- Considered and deliberately not registered --------------------------------
+#
+# The registry's exclusions say what a source must not contain. This says
+# which things found in the workspace were looked at and left out — so that
+# "we decided against this" is distinguishable from "we never noticed it".
+# These are the entries most worth disagreeing with, so each carries the
+# evidence behind the decision.
+not_registered:
+  - path: /home/alaabadawii/LLMs/IBM/Build_Multimodal_Generative_AI_Applications/Style_Finder
+    reason: >
+      Third-party IBM course template, not the user's work. All four commits
+      are authored by Enaya Amir (an IBM address) and ibm-skills-network-bot;
+      zero are the user's. The remote is
+      ibm-developer-skills-network/tyxva-swift-style. It is a repository nested
+      inside the IBM monorepo, so the IBM source excludes it explicitly —
+      ingestion would attribute a course template as the user's evidence.
+
+  - path: /home/alaabadawii/ALX/AirBnB_clone_v4
+    reason: >
+      The ALX cohort's shared repository, not the user's work: 1 of its 235
+      commits is the user's, against 90 by alexaorrico and 57 by jzamora5.
+      Worth noting that public_positioning/portfolio.md links to this
+      repository as the user's AirBnB project — a provenance discrepancy the
+      corpus now records but the registry must not act on by ingesting it.
+      (Registering it would attribute 234 other people's commits as this
+      user's professional evidence.)
+
+  - path: /home/alaabadawii/ALX/AirBnB_clone_v3
+    reason: >
+      Cohort shared repository: 17 of 147 commits are the user's. Excluded on
+      the same grounds as v4, at a smaller scale. The corpus cites one path
+      inside it (api/v1/views/); v2 carries the same web-layer work and is
+      registered.
+
+  - path: /home/alaabadawii/ALX/_AirBnB_clone_v2
+    reason: >
+      A duplicate working copy of AirBnB_clone_v2 (34 of 129 commits are the
+      user's), with the underscore prefix conventionally marking a clone. The
+      corpus does not reference it at all. Registering both would put two
+      near-identical versions of one project into the knowledge base.
+
+  - path: /home/alaabadawii/ALX/AirBnB_clone_the_console
+    reason: >
+      A two-commit stub from the start of the AirBnB project, entirely
+      superseded by alx-airbnb-clone-v1 and not referenced by the corpus.
+
+  - path: /home/alaabadawii/ALX/instance
+    reason: >
+      Not a project — the Flask instance directory for the taskey repository,
+      holding taskey.db and a journal file. Runtime state, and never evidence.
+
+  - path: /home/alaabadawii/ALX/snap
+    reason: "Snap package install tree (54/, common/, current/); installed tooling."
+
+  - path: /home/alaabadawii/FastAPI/fastapi_venv
+    reason: "164 MB virtual environment; the reason sources exclude venvs structurally rather than by name."
+
+  - path: /home/alaabadawii/DSA-Python-LeetCode-130
+    reason: >
+      A 7-commit repository of DSA practice (5 authored by the user, 2 by
+      copilot-swe-agent[bot]), found during the inspection. Not among the roots
+      PLAN.md §5.3 declares and not referenced anywhere in the corpus, so it is
+      recorded here rather than registered: adding a new workspace root is a
+      decision for the user, and the registry should not quietly widen the set
+      of things it reads.
+
+  - path: /home/alaabadawii/Cline
+    reason: "Agent-tooling configuration (Hooks, Rules, Workflows); not the user's work."
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+#
+# Lifetimes and review. Lifecycle is declared and may be wrong; that is what
+# the status-review signal is for. A COMPLETED source that acquires changes is
+# still synchronized in full — nothing here can express "ignore forever" — and
+# the change additionally surfaces as REQUIRES_HUMAN_INTERVENTION, asking
+# whether the project is finished after all or the declaration is simply stale.
+#
+# Credentials. Fourteen of the inspected repositories carry a token embedded
+# in their local git remote URL (ALX/taskey among them). Those tokens live in
+# each repository's .git/config, not here, and this file records sanitized
+# identities only — https://github.com/… rather than https://user:token@… .
+# The loader refuses a registry whose identities contain anything that looks
+# like a credential, because this file is committed and those URLs are not.
+#
+# Absolute paths. local_path is written absolutely and this file is
+# machine-specific. That is deliberate: this is a single-user system whose
+# knowledge base is about one person on one machine (PLAN.md §5.1), and a
+# relative path would be a claim about a working directory that does not exist.

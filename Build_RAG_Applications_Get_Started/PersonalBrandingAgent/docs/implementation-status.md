@@ -27,26 +27,33 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
+    Step 3 — Build Incremental Knowledge Synchronization
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0 and 1 COMPLETED. The environment is reproducible, the test
-    baseline is restored, and the operational state store exists. Steps 2–14
-    have not been started.
+    Steps 0, 1 and 2 COMPLETED. The environment is reproducible, the test
+    baseline is restored, the operational state store exists, and the source
+    registry now defines exactly which directories are evidence about the
+    user. Steps 3–14 have not been started.
 
 Last Completed Step:
-    Step 1 — Introduce Persistent Operational State (SQLite)
+    Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
 
 Next Step:
-    Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
+    Step 3 — Build Incremental Knowledge Synchronization
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0 and 1 have since been implemented,
+analysis of the repository. Steps 0, 1 and 2 have since been implemented,
 verified, and committed; every later step remains untouched.
+
+```text
+Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
+Declared roots:       9          (inspected, never ingested)
+Not registered:      10          (with the evidence behind each decision)
+```
 
 ---
 
@@ -58,7 +65,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 |---|---|---|
 | 0 | Restore a Reproducible, Testable Environment | COMPLETED |
 | 1 | Introduce Persistent Operational State (SQLite) | COMPLETED |
-| 2 | Define the Personal Knowledge Source Registry & Project Lifecycle | NOT STARTED |
+| 2 | Define the Personal Knowledge Source Registry & Project Lifecycle | COMPLETED |
 | 3 | Build Incremental Knowledge Synchronization | NOT STARTED |
 | 4 | Build the Personal Branding Context & Evidence Layer | NOT STARTED |
 | 5 | Harden the LinkedIn Integration for Autonomous Use | NOT STARTED |
@@ -78,6 +85,151 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
+
+Status: COMPLETED
+
+Implemented:
+- Completed the workspace inspection **before** writing the registry, at full
+  depth, across all roots plus `~/DataBases` (found by following the corpus's
+  own source references; it is in no root `PLAN.md` declares). Every candidate
+  was characterised by exact path, repository-ness, commit count, authorship,
+  dominant content type, and classification. Recorded in
+  `docs/architecture/source-registry.md`.
+- Wrote `sources.yaml` — the committed registry: **29 sources**, **9 declared
+  workspace roots**, **10 `not_registered` entries**, and 3 named include
+  profiles. Every `local_path` was verified to exist; every `ref` was verified
+  to resolve; every `repo_identity` was checked against the real git remote and
+  sanitized.
+- Created `app/sources/` — six modules with one narrow public surface:
+  `enums.py` (`SourceType`, `SyncDisposition`, `SyncPriority`), `patterns.py`
+  (the matcher), `guard.py` (the self-ingestion guard), `models.py`
+  (`SourceDefinition`, `ExcludeRule`, `Registry`, `NotRegisteredEntry`),
+  `lifecycle.py` (`SyncPlan`, `StatusReviewSignal`), and `registry.py` (loading,
+  parsing, validation, tree scanning).
+- **Inclusion model:** include is a floor, exclude is a veto, and the veto
+  always wins (deny-wins, not last-rule-wins). Directory patterns reach the
+  files beneath them and respect component boundaries (`Agent/` does not match
+  `AgentX/`). Character classes are rejected rather than approximated, because
+  an approximated exclusion is one that excludes nothing and reports nothing.
+- **Self-ingestion guard, two layers:** `is_protected()` answers structurally
+  for any path without consulting the registry and resolves symlinks first;
+  registry validation checks a set of concrete protected probe paths (`.env`,
+  the token file, `chroma_db/`, `state_db/`, `app/`, `PLAN.md`, `sources.yaml`,
+  and `data/` — the corpus is a digest of the sources and must not become its
+  own evidence) and fails the load if any pattern admits one.
+- **Lifecycle model:** `ACTIVE · PAUSED · COMPLETED · PLANNED`, reused from
+  `app.state.enums.LifecycleState` rather than redefined, so the declaration
+  vocabulary and the transition vocabulary cannot drift apart. `SyncDisposition`
+  has **no `skip` member** and every `SyncPlan` carries `ingest=True`, making
+  "ignore forever" unrepresentable rather than merely discouraged.
+- Added `RegistryError` to `app/errors.py`; `SOURCES_FILE` to `app/paths.py`;
+  pinned `PyYAML` in `requirements.txt` (it was installed only as a transitive
+  dependency of the LangChain stack, so the registry could have stopped loading
+  if that stack dropped it).
+
+Verified:
+- Acceptance: all nine criteria pass, each checked programmatically against the
+  committed registry (see *Acceptance criteria* below).
+- **The application cannot ingest itself**, proven by running the real
+  `sources.yaml` patterns against the guard's probes: no source admits any path
+  inside the application.
+- **Missing or invalid input is always reported, never skipped.** 16 distinct
+  refusal cases are tested: nonexistent path, declared type not matching reality
+  in both directions, missing `repo_identity`, missing `ref`, revision fields on
+  a filesystem source, empty include, an exclusion with no reason, a malformed
+  pattern, an unknown lifecycle value, duplicate names, a plain declared root
+  taken as a source, an unaccounted-for nested repository, an unexcluded
+  virtualenv, a `not_registered` path that is also a source, and a credential in
+  a `repo_identity`.
+- **The registry's own enumerations are grounded, not asserted.** Every count in
+  `sources.yaml` was read from git: commit counts for all 25 git sources, and
+  authorship for the disputed ones — `AirBnB_clone_v4` 1 of 235 the user's,
+  `AirBnB_clone_v3` 17 of 147, `_AirBnB_clone_v2` 34 of 129, `simple_shell` 53
+  of 101, `Style_Finder` 0 of 4. Two asserted refs were **wrong and corrected**
+  during verification (`alx-system-engineering-devops` and
+  `alx-higher_level_programming` are on `master`, not `main`).
+- The excludes are proven rather than assumed: a plain `find` reports 36,082
+  `.py` files under `~/LLMs/IBM`; the same walk through the registry's own
+  matcher reports 93.
+- Milestone: registering a real repository and resolving its HEAD works — all
+  25 git sources load, validate, and resolve their declared ref from the
+  real filesystem.
+- No recursive root scanning exists anywhere: the only directory walk in `app/`
+  is the pre-existing one over `data/` in `app/ingestion/loader.py`. The
+  tree scan in `app/sources/registry.py` walks a *named source* under its own
+  excludes, to prove nothing is unaccounted for inside it — it never discovers
+  sources.
+
+Tests:
+- `tests/test_sources_registry.py` — **76 new tests**: pattern admission and its
+  boundaries, the self-ingestion guard (including a symlink that would otherwise
+  launder access), the committed registry itself, every validation refusal,
+  lifecycle dispositions, credential sanitization, virtualenv detection, and
+  nested-repository scanning.
+- Regression: `.venv/bin/python -m pytest -q` → **226 passed** (150 before this
+  step + 76 new), zero collection errors, zero failures. `app/ingestion/` and
+  `app/retrieval/` are byte-for-byte untouched, as are their four test modules.
+  No existing test was modified, weakened, or skipped.
+- `PYTHONNOUSERSITE=1` was used throughout.
+
+Commit:
+- `Step 2: define the personal knowledge source registry` — the commit carrying
+  this record. The subject is used instead of a hash because the hash cannot
+  contain itself; find it with `git log --oneline --grep="^Step 2:"`.
+
+Acceptance criteria:
+- [x] Declared roots are treated as places to inspect, never as sources to
+      ingest — enforced by validation and proven by test.
+- [x] The workspace inspection is completed and its results recorded before the
+      registry was written (`docs/architecture/source-registry.md`).
+- [x] The registry names exact sources; no recursive root scanning occurs
+      anywhere in the codebase.
+- [x] **The application cannot ingest itself**, proven by test against the real
+      `sources.yaml`.
+- [x] A missing or invalid path is reported, never silently skipped — 16
+      refusal cases tested.
+- [x] Both git-backed and filesystem-backed sources are supported, including a
+      repository with zero commits (`exit-project-studyflow`) and plain
+      directories (`kubernetes-lab`, `fastapi-shipment-api`, …).
+- [x] Include/exclude rules are explicit per source, each exclusion carrying a
+      reason.
+- [x] Lifecycle is explicit, persisted, and never inferred from inactivity.
+- [x] A `COMPLETED` source with new commits produces a review signal.
+
+Important notes:
+- **`PAUSED` is registered by no source.** The lifecycle vocabulary has four
+  members because the corpus uses all four, but the inspection found no project
+  the user has paused. `PAUSED` remaining unused is a finding, not an omission —
+  and it stays distinct from *absent*, because "paused" and "never heard of it"
+  are different claims.
+- **One rule in `PLAN.md` was sharpened by the workspace, in the permissive
+  direction.** "A declared root is never a source" cannot hold as written:
+  `~/LLMs/IBM`, `~/LLMs/AI_Agents` and `~/Portfolio` are each both a declared
+  root and a single git repository, and a repository is one revision history —
+  exactly what a source is. The rule enforced is therefore that a **filesystem**
+  source may never be a declared root, which is the actual hazard (sweeping a
+  loose directory). A git source that is not really a repository is caught by a
+  separate check, so the two rules compose rather than overlap.
+- **`~/DataBases` is a root the roadmap does not declare.** It was added because
+  the corpus asserts MongoDB/PyMongo evidence and cites a path outside every
+  declared root. Adding a root is a user-facing decision, so `~/DSA-Python-LeetCode-130`
+  — a real 7-commit repository found during the inspection — was recorded in
+  `not_registered` instead of silently adopted.
+- **14 repositories carry a live token in their local git remote URL.** This
+  makes `sanitize_repo_url()` a requirement rather than a precaution: the
+  registry is committed, remotes are not. No token value appears in
+  `sources.yaml`, and validation fails the load if one would.
+- **Two repositories are on `master`, not `main`.** Both were found by
+  verification after being written as `main` by assumption — which is precisely
+  the failure mode the "inspect, do not invent" instruction exists to prevent.
+- **Virtualenvs are detected structurally**, by `pyvenv.cfg`, not by name: this
+  workspace holds `.venv`, `venv`, `my_env` and `fastapi_venv` across **17
+  environments totalling ~17 GB**.
+- One dead function (`find_nested_repositories`) was removed rather than left as
+  unused public API; `scan_source_tree` is the single entry point and is what
+  validation calls.
 
 ### Step 1 — Introduce Persistent Operational State (SQLite)
 
@@ -277,13 +429,22 @@ Important notes:
 ## Current Step
 
 ```text
-Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
+Step 3 — Build Incremental Knowledge Synchronization
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 2. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 3. It is not
 duplicated here.
+
+What Step 2 leaves on the table for it:
+
+- `load_registry()` returns the validated 29 sources; nothing consumes it yet.
+- `plan_for(source, has_changes=...)` and `review_signal_for(...)` define what
+  lifecycle is allowed to change, and nothing calls them yet.
+- `sync_checkpoints` and `source_lifecycle` exist in the store, empty.
+- Changing files are **candidates**, not decisions: git narrows the set, and the
+  existing content-hash ingestion pipeline still decides what actually changes.
 
 ---
 
@@ -328,7 +489,15 @@ work around it. See *Completed Steps* → Step 0.
 longer exists. 48 of 71 knowledge-base files embed absolute source paths, some
 of them dead.
 
-This is not a one-time cleanup — drift is continuous. Addressed by **Steps 2–3**.
+The Step 2 inspection confirmed the drift and extended it — `~/LLMs/AI-Agents`
+(for `AI_Agents`), `~/Quizey_V2` (for `~/Quizey/Quizey_V2`), `~/FastAPI/app`
+(for `~/FastAPI/course_practical_app`), and two paths that are simply gone
+(`~/DevOps/Packt-DevOps-Bootcamp`, `~/LLMs/llm-env`). The full comparison is in
+`docs/architecture/source-registry.md`.
+
+Step 2 makes these paths **declared and checkable** rather than prose, but has
+not resynchronized anything: the corpus still carries the stale revisions.
+Addressed by **Step 3**.
 
 ### 3. Uncommitted working-tree changes exist in `Auth_handling/`
 
@@ -417,8 +586,14 @@ not a specification.
 | **Local publication history is authoritative** | LinkedIn read access (`r_member_social`) is restricted to approved users; there is no read-back | `PLAN.md` §5.1 |
 | **Publishing history is NOT indexed into Chroma (V1)** | Avoids a generated post becoming evidence for the next one; deterministic SQLite queries answer the Agent instead | `PLAN.md` §6.1 |
 | **Git detects change; it does not replace ingestion** | The existing content-hash pipeline already guarantees correctness — git only narrows the candidate set | `PLAN.md` Step 3 |
-| **An explicit source registry is required** | Workspace roots contain ~35 repos, virtualenvs, and this application itself; roots are places to inspect, not sources to ingest | `PLAN.md` Step 2 |
-| **The application must not ingest itself** | `~/LLMs/IBM` contains this project; its own source and runtime state are not professional evidence | `PLAN.md` Step 2 |
+| **An explicit source registry is required** | Workspace roots contain ~28 repos, 17 virtualenvs (~17 GB), and this application itself; roots are places to inspect, not sources to ingest. **Implemented** as `sources.yaml`: 29 sources, 9 roots, 10 `not_registered`, 3 include profiles | `PLAN.md` Step 2, `docs/architecture/source-registry.md` |
+| **The application must not ingest itself** | `~/LLMs/IBM` contains this project, so its own source, runtime state, `data/` corpus and token file are not professional evidence. Guarded twice — structurally by `is_protected()`, and at load time against concrete probe paths | Step 2, `app/sources/guard.py` |
+| **Exclusion wins over inclusion** | Deny-wins rather than last-rule-wins, so the outcome depends on which rules exist rather than on the order they were written in. An exclusion without a stated reason is refused at load time — an unexplained rule cannot be reviewed, so it never gets removed | Step 2, `app/sources/patterns.py` |
+| **Lifecycle can never change visibility** | `SyncDisposition` has no `skip` member and every `SyncPlan` carries `ingest=True`, so "ignore forever" is unrepresentable rather than discouraged. `COMPLETED` + new commits → ingested in full **and** surfaced as `REQUIRES_HUMAN_INTERVENTION` | Step 2, `app/sources/enums.py`, `lifecycle.py` |
+| **The registry refuses to load rather than drop an entry** | A source silently missing produces no error and no signal — just a knowledge base that quietly stops covering part of the user's work. Validation collects every problem and refuses the whole file | Step 2, `app/sources/registry.py` |
+| **Virtualenvs are detected structurally, not by name** | The workspace contains `.venv`, `venv`, `my_env` and `fastapi_venv`; a name list would miss whichever name comes next, and a missed virtualenv is hundreds of MB of library code in a corpus of the user's own work | Step 2, `pyvenv.cfg` detection |
+| **A repository rooted at a declared root is one source** | `~/LLMs/IBM`, `~/LLMs/AI_Agents` and `~/Portfolio` are each both a root and a single revision history. The rule enforced is that a *filesystem* source may never be a declared root — sweeping a loose directory is the actual hazard | Step 2, `_check_declared_roots` |
+| **`repo_identity` is sanitized, never copied verbatim** | 14 inspected repositories embed a live token in their local git remote; the registry is committed and remotes are not | Step 2, `sanitize_repo_url()` |
 | **LinkedIn publishing has already been manually verified** | A real public post was published via `Auth_handling/`. This is a **pre-existing baseline**, not an implementation result of this roadmap | `PLAN.md` §4 |
 | **No automatic token refresh is assumed** | The saved token has no `refresh_token`; `offline_access` alone is not proof it can work | `PLAN.md` Step 5 |
 | **The Agent remains bounded** | The Agent decides topic/angle/evidence and whether to publish; it never bypasses gates, limits, or recording | `PLAN.md` §7, Step 10 |
@@ -438,27 +613,30 @@ not a specification.
 
 ## Next Step
 
-### Step 2 — Define the Personal Knowledge Source Registry & Project Lifecycle
+### Step 3 — Build Incremental Knowledge Synchronization
 
-The next implementation task is defined in `PLAN.md` §8, Step 2.
+The next implementation task is defined in `PLAN.md` §8, Step 3.
 
-Synchronization needs a precise, explicit definition of *what* is
-synchronized. The declared workspace roots are **places to look, not sources to
-ingest**: they contain ~35 repositories, virtual environments, coursework, and
-`~/LLMs/IBM` — the monorepo that contains this application itself.
+Step 2 defined *what* is synchronized; Step 3 makes synchronization incremental,
+so a 24-hour run does work proportional to what changed rather than to the size
+of 29 sources.
 
-Constraints carried in from Steps 0–1 and the architecture:
+Constraints carried in from Steps 0–2:
 
-- Step 2 must **complete the workspace inspection** before writing the registry;
-  the inspection recorded in `PLAN.md` §5.3 was performed at limited depth and
-  is a starting point, not a substitute. `~/ALX` (~21 entries) needs deliberate
-  triage.
-- The registry is **configuration** (committed, human-editable); its runtime
-  state belongs in the Step 1 store. `sync_checkpoints` and `source_lifecycle`
-  already exist and are waiting for it.
-- **The application cannot ingest itself**, proven by test.
-- Lifecycle is explicit and persisted, never inferred from inactivity; a
-  `COMPLETED` source with new commits produces a review signal.
+- **Git detects change; it does not replace ingestion.** The existing
+  content-hash pipeline already guarantees correctness — git only narrows the
+  candidate set (`PLAN.md` §6). Re-ingesting a file whose content did not change
+  must remain a no-op.
+- The registry is **configuration**; its runtime state belongs in the Step 1
+  store. `sync_checkpoints` (last processed revision + timestamp) and
+  `source_lifecycle` already exist and are waiting.
+- A `COMPLETED` source with new commits is **ingested in full and surfaced as
+  `REQUIRES_HUMAN_INTERVENTION`** — `plan_for()` and `review_signal_for()` in
+  `app/sources/lifecycle.py` already express this; Step 3 must call them rather
+  than re-derive the rule.
+- A source that **disappears at runtime** (as distinct from being missing at
+  load time, which is fatal) must be reported as `REQUIRES_HUMAN_INTERVENTION`
+  with the source named, while other sources continue.
 - `data/` is not restructured, and ingestion/retrieval are untouched.
 
 ---

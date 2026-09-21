@@ -21,6 +21,19 @@ class RetrievalError(AppError):
     """Raised when a retrieval strategy fails (missing index, bad filter...)."""
 
 
+class RegistryError(AppError):
+    """Raised when the source registry cannot be trusted.
+
+    Always fatal to synchronization, never a warning. A registry that loads
+    with an entry silently dropped is worse than one that refuses to load at
+    all: the missing source produces no error, no signal, and a knowledge base
+    that quietly stops covering part of the user's work. So a path that does
+    not exist, a declared type that does not match reality, a malformed
+    pattern, or an exclusion that would admit the application's own internals
+    all stop the load (``PLAN.md`` Step 2, Failure/recovery).
+    """
+
+
 class StateStoreError(AppError):
     """Raised when the operational state store is unusable.
 

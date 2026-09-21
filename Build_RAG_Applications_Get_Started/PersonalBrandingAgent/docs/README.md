@@ -49,7 +49,8 @@ docs/
 │   ├── agent-architecture.md      # Agent responsibilities, workflow, state, tools
 │   ├── rag-architecture.md        # Ingestion, metadata, embeddings, Chroma, retrieval
 │   ├── linkedin-integration.md    # OAuth, LinkedIn tool, publishing, security
-│   └── data-flow.md               # End-to-end flow: knowledge → post → audit
+│   ├── data-flow.md               # End-to-end flow: knowledge → post → audit
+│   └── source-registry.md         # Which directories are evidence: inspection findings + registry format
 ├── retrieval/                     # Retrieval milestone (implemented)
 │   ├── README.md                  # Index + the six strategies in one table
 │   ├── semantic-vs-keyword.md

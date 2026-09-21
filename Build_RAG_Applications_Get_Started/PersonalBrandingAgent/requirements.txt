@@ -18,6 +18,12 @@ pydantic>=2.13,<3
 python-dotenv>=1.2,<2
 requests>=2.34,<3
 
+# Source registry (sources.yaml) — Step 2. Previously present only as a
+# transitive dependency of the LangChain stack, which meant the registry would
+# stop loading if that stack ever dropped it. The registry is committed
+# configuration read on every synchronization, so it is pinned directly.
+PyYAML>=6.0,<7
+
 # Testing
 pytest>=9.1,<10
 
