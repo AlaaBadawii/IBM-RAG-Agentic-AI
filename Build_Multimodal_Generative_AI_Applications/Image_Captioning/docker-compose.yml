@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  vision-app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL}
+    volumes:
+      - ./assets:/app/assets
+    command: uvicorn src.api.app:app --host 0.0.0.0 --port 8000

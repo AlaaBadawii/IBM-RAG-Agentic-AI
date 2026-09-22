@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python -m pytest tests/test_linkedin_credentials.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/test_linkedin_credentials.py::test_expiry_is_derived_from_the_signed_issuance_claim -q)",
+      "Bash(python3 -)",
+      "Bash(.venv/bin/python -m pytest tests/test_linkedin_publisher.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/test_linkedin_client.py tests/test_linkedin_credentials.py tests/test_linkedin_publisher.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/test_logging.py tests/test_paths.py tests/test_config.py tests/test_state_schema.py tests/test_state_store.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/test_state_schema.py -q)",
+      "Bash(.venv/bin/python -m pyflakes app/integrations app/state app/config.py app/paths.py app/logging_config.py tests/test_linkedin_*.py tests/test_logging.py)",
+      "Bash(.venv/bin/python -m flake8 --select=F app/integrations tests/test_linkedin_client.py)",
+      "Bash(.venv/bin/python -m pytest tests/test_linkedin_client.py tests/test_linkedin_credentials.py tests/test_linkedin_publisher.py tests/test_logging.py tests/test_state_schema.py -q)"
+    ]
+  }
+}

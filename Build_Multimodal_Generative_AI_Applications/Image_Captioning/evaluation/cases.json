@@ -1,0 +1,34 @@
+{
+    "cases": [
+        {
+            "image": "image-1.jpg",
+            "task": "captioning",
+            "question": "Describe the photo.",
+            "expected_behavior": "Should return a concise description"
+        },
+        {
+            "image": "image-2.jpg",
+            "task": "counting",
+            "question": "How many cars are in this image?",
+            "expected_behavior": "Should return a number"
+        },
+        {
+            "image": "image-3.jpg",
+            "task": "assessment",
+            "question": "How severe is the damage in this image?",
+            "expected_behavior": "Should assess severity level"
+        },
+        {
+            "image": "image-1.jpg",
+            "task": "extraction",
+            "question": "How much sodium is in this product?",
+            "expected_behavior": "Should extract sodium content"
+        },
+        {
+            "image": "image-2.jpg",
+            "task": "question",
+            "question": "What colors are dominant in this image?",
+            "expected_behavior": "Should identify dominant colors"
+        }
+    ]
+}

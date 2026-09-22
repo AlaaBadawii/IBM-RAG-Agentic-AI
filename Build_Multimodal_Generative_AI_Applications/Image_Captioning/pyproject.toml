@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "image-captioning"
+version = "0.1.0"
+description = "Multimodal Image Understanding with OpenRouter"
+requires-python = ">=3.10"
+
+dependencies = [
+    "openai",
+    "python-dotenv",
+    "Pillow",
+    "requests",
+    "pytest",
+    "fastapi",
+    "uvicorn",
+    "gradio",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
