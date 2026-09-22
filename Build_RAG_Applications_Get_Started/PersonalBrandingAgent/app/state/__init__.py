@@ -38,6 +38,7 @@ from app.state.models import (
     PublishIntent,
     SourceLifecycleState,
     SyncCheckpoint,
+    WorkflowPhase,
     WorkflowRun,
     utc_now_iso,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "SyncOutcome",
     "TABLES",
     "Workflow",
+    "WorkflowPhase",
     "WorkflowRun",
     "content_hash_of",
     "utc_now_iso",

@@ -27,13 +27,13 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
+    Step 12 — Add External Scheduling, Locks & Recovery
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–10 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–11 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
@@ -61,26 +61,33 @@ Overall Progress:
     success. Reasoning failure is a `DO_NOT_PUBLISH` carrying the failure for
     the workflow to notify, never a weaker post. The Agent writes nothing,
     publishes nothing, notifies no one, and has no import path to a store, a
-    publisher, a transport or the corpus. Nothing yet runs any of this on a
-    schedule — Steps 11–14 have not been started.
+    publisher, a transport or the corpus. And now something runs all of it:
+    two separate, separately executable workflows (`python -m
+    app.workflows.sync`, `python -m app.workflows.branding`) sequence the
+    existing layers, record every phase transition and the final outcome on a
+    workflow run, classify the outcome themselves, and notify exactly once on
+    failure — with an ambiguous publication escalated to a person and never
+    retried. Nothing yet runs any of this on a schedule — Steps 12–14 have not
+    been started.
 
 Last Completed Step:
-    Step 10 — Build the Autonomous Branding Agent
+    Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
 
 Next Step:
-    Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
+    Step 12 — Add External Scheduling, Locks & Recovery
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–10 have since been implemented, verified,
-and committed; Step 11 onwards remains untouched.
+analysis of the repository. Steps 0–11 have since been implemented, verified,
+and committed; Step 12 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
 Declared roots:       9          (inspected, never ingested)
 Not registered:      10          (with the evidence behind each decision)
-Sources synchronized: 0          (the mechanism exists; no real source has been
-                                  run through it yet — see Known Issue #7)
+Sources synchronized: 0          (the mechanism exists, and the Step 11 entry
+                                   point now owns running it; no real source has
+                                   been run through it yet — see Known Issue #7)
 ```
 
 ---
@@ -102,7 +109,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 8 | Build Grounded Post Generation | COMPLETED |
 | 9 | Build Evidence Verification & Revision Gates | COMPLETED |
 | 10 | Build the Autonomous Branding Agent | COMPLETED |
-| 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | NOT STARTED |
+| 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | COMPLETED |
 | 12 | Add External Scheduling, Locks & Recovery | NOT STARTED |
 | 13 | End-to-End Autonomous Evaluation | NOT STARTED |
 | 14 | Operational Documentation, Deployment & Final Hardening | NOT STARTED |
@@ -113,6 +120,94 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/workflows/` — four modules behind one public surface
+  (`__init__.py`): `common.py` (the exit-code vocabulary `0` / `1` / `2`, the
+  structured `WorkflowResult`, the `HumanIntervention` escalation, the one
+  exception classifier, the phase wrapper, and the finish-and-notify-once
+  helper), `sync.py` (`run_sync`, `SyncConfig`, `main`), `branding.py`
+  (`run_branding`, `BrandingConfig`, `main`).
+- **Two independently executable entry points.** `python -m
+  app.workflows.sync` and `python -m app.workflows.branding` each run once and
+  exit with the outcome's code. No scheduler, no queue, no worker, no graph
+  runtime — Step 12 owns scheduling.
+- **The workflow decides sequencing; the Agent decides content.** The branding
+  workflow branches on the `AgentResult` value (`failed`, `is_publishable`,
+  reason, draft, proposal) and never re-derives it. Generation and
+  verification run inside the Agent under Step 9's stopping rule; the workflow
+  passes the Agent's collaborators in and reads the result out.
+- **Every phase boundary identifies its phase.** `run_phase()` records each
+  transition in the new `workflow_phases` table (migration 4, with
+  `StateStore.record_phase()` / `list_phases()`), and a failure additionally
+  leaves an `operational_failures` row carrying the phase name plus the run's
+  `failed_phase`. Sync phases: `load_registry`, `synchronize`. Branding
+  phases: `context`, `decide`, `publish`.
+- **All three outcomes are recorded, never inferred.** `finish()` writes the
+  outcome to `workflow_runs` and returns it in the `WorkflowResult` with its
+  exit code: `DO_NOT_PUBLISH → 0`, `WORKFLOW_FAILED → 1`,
+  `REQUIRES_HUMAN_INTERVENTION → 2`. The two nonzero codes are distinct so a
+  scheduler can tell "it broke" from "it needs you."
+- **`DO_NOT_PUBLISH` is a success with no failure notification.** A clean
+  sync, an Agent decline (`NO_EVIDENCE`, `NO_VALUE`, `GENERATION_DECLINED`,
+  `GATE_REJECTED`, `REVISION_EXHAUSTED`), a duplicate refusal, and a
+  successful publish all terminate this way; the notifier is not even called
+  for a failure report. A published post is reported once as a *publication*
+  (`notify_publication`) — the one channel Step 7 built that the failure path
+  cannot cover.
+- **Reasoning failure is a workflow failure, not a decision.** An `AgentResult`
+  carrying an `AgentFailure` ends the run as `WORKFLOW_FAILED` on phase
+  `decide` with exactly one notification. `GenerationError` /
+  `VerificationError` / `AgentError` propagate out of the Agent by design and
+  are attributed to the phase they escaped from; a configuration failure
+  (`requires_human_intervention`) escalates to a person instead.
+- **An ambiguous publication is never retried.** An `unknown_requires_review`
+  report, an authentication-classified result, or an unresolved earlier
+  attempt (`PublishingHistory.requires_review()` non-empty — checked *before*
+  any request leaves the machine) ends the run as
+  `REQUIRES_HUMAN_INTERVENTION` with exactly one notification. The publish
+  phase is entered at most once per run, so `0 or 1` posts holds by shape,
+  backed by the Step 6 database constraint.
+- **Sync never publishes; branding never ingests.** `sync.py` has no import
+  path to publishing, agent, generation, or verification; `branding.py` has no
+  import path to sync, ingestion, or the source registry. Asserted by
+  structural scans of each module's own source, mirroring the Step 9/10
+  precedent. `app/agent/` remains free of any notify import: the Agent
+  exposes the failure, the workflow decides to notify.
+- **Persistence is additive.** Migration 4 adds only the `workflow_phases`
+  table; no Step 1 table, constraint, or existing method changed behaviour.
+
+Verified:
+- 23 focused tests (`tests/test_workflows.py`), all offline with fakes and a
+  real temporary store: sync and branding complete; failure in each of the
+  five phases names that phase; exit codes `0`/`1`/`2`; the structural
+  boundary scans; no-opportunity success with zero notifications; human
+  intervention distinct with exactly one notification (ambiguous publication,
+  unresolved earlier attempt, source needing a person); workflow failure
+  distinct with exactly one notification (failed source, reasoning failure,
+  failed publication); persisted outcomes never inferred from exit codes;
+  every phase transition recorded in order; both entry points independently
+  invocable with exit-code passthrough.
+- **Milestone:** sync then branding back-to-back on one store, run twice with
+  deterministic fakes — four runs, all `DO_NOT_PUBLISH`, with the expected
+  phase trails.
+- Full regression: 930 passed (907 before Step 11; the 23 new tests are the
+  whole difference, and nothing existing changed its result).
+
+Files: `app/workflows/{__init__,common,sync,branding}.py`,
+`app/state/{schema,models,store,__init__}.py` (migration 4 + phase recording
+only), `tests/test_workflows.py`, `docs/implementation-status.md`.
+
+Not implemented, deliberately: scheduling, locks and recovery (Step 12),
+end-to-end evaluation (Step 13), deployment (Step 14). No real source has been
+synchronized yet (Known Issue #7), no real post has been published through the
+service (Known Issue #9), and the first real branding run will still report a
+configuration failure on the known key mismatch (Known Issue #5) — correctly,
+as `REQUIRES_HUMAN_INTERVENTION`. Nothing in Steps 0–10 changed behaviour.
 
 ### Step 10 — Build the Autonomous Branding Agent
 
@@ -2089,18 +2184,17 @@ thing worth doing before Step 10 hands publishing to an autonomous Agent.
 
 ---
 
-### 10. Nothing calls the notification service yet
+### 10. ~~Nothing calls the notification service yet~~ — RESOLVED in Step 11
 
 Step 7 built the alerting path and proved it works end to end through a fake
-transport, but no workflow invokes it. Which run calls `notify_run()`, whether
-it calls `recover_run()` first, and how a phase failure inside the Agent is
-wrapped so it notifies regardless — all of that is Step 11's orchestration.
-
-Consequence today: a failing run still records its outcome and its failures,
-and still sends nothing, because nothing asks it to. This is the designed state
-at the end of Step 7 (`PLAN.md` Step 7 forbade wiring the scheduled workflows),
-and it is recorded so that "notifications exist" is not read as "a person is
-being told".
+transport, but no workflow invoked it. Step 11 wires it: both workflows call
+`notify_run()` exactly once on `WORKFLOW_FAILED` and on
+`REQUIRES_HUMAN_INTERVENTION`, and never on `DO_NOT_PUBLISH`; the branding
+workflow additionally calls `notify_publication()` exactly once for a post
+that went out (the one report the failure path cannot cover, since a publish
+terminates `DO_NOT_PUBLISH`). A phase failure inside the Agent is wrapped by
+`run_phase()` so it notifies regardless. What remains is Known Issue #11: no
+email has ever actually been sent.
 
 ---
 
@@ -2143,12 +2237,15 @@ so it is not mistaken for done.
 
 ### 13. No real model call has been made, by the generator or by the Agent
 
-**Partly resolved in Step 10.** `app/generation/` now has its first caller:
+**Partly resolved in Steps 10 and 11.** `app/generation/` now has its first caller:
 `BrandingAgent.run()` builds a `GenerationRequest` from a resolved proposal and
 calls `PostGenerator.generate()`, and on a `REVISE` verdict it re-drives it with
 Step 9's `revision_notes()` as writing constraints. `app/agent/llm.py` adds a
 second real client (`LlmContentReasoner`, the Agent's OpenRouter-backed reasoner).
 `PLAN.md` Step 10's decision path and Step 9's revision loop both exist now.
+Step 11 adds the workflow that invokes `BrandingAgent.run()`, branches on its
+`DO_NOT_PUBLISH`, and publishes at most one verified post — so the call chain
+from entry point to model is complete in structure.
 
 What remains: **nothing has still ever been generated for real, and no real
 model call of any kind has been made.** Which workflow invokes
@@ -2200,6 +2297,18 @@ and embedded in `AgentResult.to_record()` under the `"verification"` key. So
 there are now two records waiting for a writer, and they nest: the Agent's
 outcome and, inside it, Step 9's verification. **Still nothing writes either.**
 The gap above is unchanged and is now entirely Step 11's.
+
+Updated in Step 11: **partly resolved, by a deliberate narrowing.** The
+workflow persists every fact `PLAN.md` Step 11 asks for — the run outcome on
+`workflow_runs`, every phase transition in the new `workflow_phases` table,
+the structured failure with its phase, and (via the Step 6 service) the
+write-ahead intent, the publication and its evidence references. The full
+nested JSON (`AgentResult.to_record()` with the verification inside) is
+carried on the returned `WorkflowResult.detail`, not in a new column: a
+column no query reads would be dead schema, and every queryable fact the
+record contains already lives in a table. If Step 13's evaluation needs the
+claim-level record after the fact, that is the step that reads it, and the
+column belongs to that step.
 
 Recorded so that "the verifier passes" is not read as "verification has been
 persisted for a post that was published" — no post has been verified, because no
@@ -2355,89 +2464,49 @@ not a specification.
 | **The Agent's boundary is asserted in both directions** | Forbidden imports (`sqlite3`, `chroma`, `app.state`, the publishing *service*, `app.notify`, `app.retrieval`, `app.ingestion`, `app.sync`, `app.integrations`, `app.sources`) plus an explicit allow-list of every `app.*` module it may reach, plus a source scan for write verbs. Step 6, 8 and 9 each asserted one direction; asserting the allowed set too is what makes a new import a deliberate act rather than something that slips in beside a change | Step 10, `tests/test_agent_boundaries.py` |
 | **The prompt's prohibitions are imported, not restated** | The Agent's instruction sentence is generated from `PROHIBITED_CLAIMS`, imported from `app.generation.prompt`. A second hand-written copy would be free to fall out of step with the list the generator's own test checks — and the two layers would then disagree about what a post may never invent | Step 10, `app/agent/prompt.py` |
 | **The Agent stops at the value, and that is where Step 11 begins** | `AgentResult.to_record()` produces JSON-compatible values with no clock and no environment, and nothing writes them. `PLAN.md` Step 10 keeps the write above this layer — "or the system could *forget* to record" — so the run record, the publication and the verification are all persisted by the workflow, into a schema that does not have their columns yet (Known Issue #14) | Step 10, `app/agent/models.py` |
+| **Phase transitions are a table, not a log convention** | `workflow_runs` holds the outcome and the failed phase; `workflow_phases` holds every transition (migration 4, additive — no Step 1 table touched). "What did this run do?" is therefore a query (`list_phases`), and a success leaves the same trail as a failure. The alternative — inferring the trail from log lines — would have made the audit depend on log retention | Step 11, `app/state/schema.py`, `store.py`, `app/workflows/common.py` |
+| **Exit codes are 0 / 1 / 2, owned once** | `DO_NOT_PUBLISH → 0`, `WORKFLOW_FAILED → 1`, `REQUIRES_HUMAN_INTERVENTION → 2`, in one shared mapping both entry points use. The two nonzero codes are distinct so a scheduler — and Step 12 — can tell "it broke" from "it needs you" without reading the database | Step 11, `app/workflows/common.py` |
+| **A published post is reported, not celebrated by the failure path** | A publish terminates `DO_NOT_PUBLISH`, which the failure notifier waives by design — so the workflow calls `notify_publication()` exactly once for a post that went out. Without it, the one thing the user most needs to see (what went out under their name) would be the one thing nothing reports | Step 11, `app/workflows/branding.py` |
+| **The ambiguity check runs before the network, not after** | `PublishingHistory.requires_review()` is read before the publish phase is entered: an earlier attempt still awaiting review refuses the new publish and escalates, so no request can leave the machine over an unresolved outcome. Checking after the call would already have risked the duplicate | Step 11, `app/workflows/branding.py` |
 
 ---
 
 ## Next Step
 
-### Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
+### Step 12 — Add External Scheduling, Locks & Recovery
 
-The next implementation task is defined in `PLAN.md` §8, Step 11.
+The next implementation task is defined in `PLAN.md` §8, Step 12.
 
-Step 10 closed the last gap in the reasoning half of the system: something now
-decides what to write about, which evidence to write from, and whether there is
-enough value to publish at all, and it drives the revision loop under Step 9's
-bound. What does not exist is anything that *runs*: no entry point, no
-sequencing, no run record, no exit code, no phase attribution. Step 11 is that
-runner — two separate, separately executable workflows
-(`python -m app.workflows.sync`, `python -m app.workflows.branding`), each
-returning a structured run result and terminating in one of the three outcomes
-`PLAN.md` §2 defines.
+Step 11 closed the execution gap: both workflows now run once, on demand, and
+record what they did. What does not exist is anything that runs them
+unattended: no external trigger, no overlap protection, no stale-lock
+recovery, and no interrupted-run detection. Step 12 is that trigger — an
+OS-level schedule plus the `locks` mechanism Step 1 already stores, with the
+workflows remaining independently executable without it.
 
-Constraints carried in from Step 10:
+Constraints carried in from Step 11:
 
-- **The workflow decides sequencing; the Agent decides content.** `PLAN.md`
-  states the split directly, and Step 10 implements exactly that half: the Agent
-  reasons and returns an `AgentResult`; it runs no phase, records nothing and
-  sends nothing. Sequencing, error handling, state recording and notification
-  are all above it.
-- **The outcome is classified by the workflow, never by the Agent.** `PLAN.md`
-  Step 11: *"the workflow — never the Agent — classifies the outcome and decides
-  whether to notify."* Step 10 makes that possible rather than merely permitted:
-  the Agent exposes `AgentFailure` and never imports a transport, and
-  `AgentResult.failed` is kept apart from `not is_publishable` so a decision not
-  to publish is never mistaken for an incident.
-- **Every phase failure is distinguishable, and two of them are exceptions on
-  purpose.** `GenerationError` and `VerificationError` propagate out of
-  `BrandingAgent.run()` by design — Step 10 does not catch them, because a phase
-  that could not complete is not a decision. The workflow wraps each phase so
-  the failure names *which* phase failed, and `AgentError` (a violated internal
-  invariant) is the third exception to expect.
-- **The record's shape already exists; the place to write it does not.**
-  `AgentResult.to_record()` and `VerificationResult.to_record()` are
-  JSON-compatible and carry no clock, so the workflow adds the run context.
-  `PLAN.md` Step 11 also owns `workflow_runs` (run id, type, start/finish,
-  status, failed phase, structured error) — a table that does not exist yet, and
-  the schema change is this step's, not Step 10's. Known Issue #14 records the
-  same gap for the verification half.
-- **Recording the publication is this step's, and is why the Agent refuses to.**
-  `PLAN.md` Step 10 keeps the write above the Agent — *"or the system could
-  forget to record"* — and Step 6 already has the write-ahead intent, the one
-  database-enforced attempt per run, and `recover_run()`. The workflow is what
-  calls them, and `0 or 1` posts is enforced there, backed by the constraint.
-- **Sync must never publish; branding must never ingest.** The two workflows
-  have different periods, failure domains and blast radii. Step 9's and Step
-  10's package import scans are the precedent for asserting this structurally
-  rather than behaviourally: a scan that fails if `app/workflows/branding`
-  reaches `app/ingestion` or `app/sync` is a property that cannot silently
-  regress, whereas "no test observed an ingest" only proves no test looked.
-- **`REQUIRES_HUMAN_INTERVENTION` needs a distinct exit status and exactly one
-  notification.** The two conditions are already detectable from values the
-  layers below return: an ambiguous publication (`requires_review`,
-  `unresolved_intents`), an unresolved earlier attempt
-  (`HistoryDigest.unresolved_ambiguity`), an expired credential, a missing
-  source. Step 7 built the notifier and its severity vocabulary; Known Issues
-  #10 and #11 record that nothing calls it and no email has ever been sent.
-- **A no-opportunity run must exit successfully and send nothing.** This is the
-  outcome Step 10 makes most likely — `NO_EVIDENCE`, `NO_VALUE`,
-  `GENERATION_DECLINED`, `GATE_REJECTED` and `REVISION_EXHAUSTED` are all
-  ordinary — so the workflow's success path has to be the one that publishes
-  nothing, and a `DO_NOT_PUBLISH` that emails the user would be the fastest way
-  to make an unattended system annoying enough to turn off.
-- **Step 11 can be built and verified offline.** Every Step 8, 9 and 10 test
-  injects a fake, and `PLAN.md` Step 11's own test list requires only fakes and a
-  fixed fixture set. Known Issue #5 (the OpenAI-family key sent to the OpenRouter
-  endpoint) is unchanged, so the first real branding run is still ahead of the
-  project — and Step 11 must not be the step where the mismatch is worked around
-  in code.
-- **Still open, and still not this step's to close:** Known Issue #8
-  (near-duplicate detection is inert until an embedder is supplied), #9 (no real
-  publish through the service yet), #12 (a credential expiring between runs is
-  only found at publish time) and #15 (no linter is configured). Step 11 is the
-  first step that can close #10, #11, #13 and #14 — the notifier, the email, the
-  generator's first real caller and the persistence of what the gates decided —
-  but only if it actually runs and records, which is what its acceptance criteria
-  ask for.
+- **Exit codes are the scheduler's interface.** `0` is success (including a
+  run that published nothing or one post), `1` is a failed run, `2` needs a
+  person. A scheduled failure must surface non-zero outside the application.
+- **Overlap is real.** An 8-hour workflow can outlive its window; a second
+  invocation while locked is rejected and recorded, never run concurrently.
+- **Stale locks recover automatically and are logged** — never silently, and
+  never by permitting a concurrent run.
+- **An interrupted run is detectable today** (`list_unfinished_runs()` plus
+  the `workflow_phases` trail showing which phases completed), but nothing
+  looks for it yet. That detection belongs to Step 12's invocation path.
+- **Still open, and still not this step's to close:** Known Issue #5 (the key
+  mismatch — the first real branding run will report it as
+  `REQUIRES_HUMAN_INTERVENTION`), #7 (no real sync pass yet), #8
+  (near-duplicate detection still needs an embedder wired into the workflow's
+  `PublishingService`), #9 (no real publish through the service yet), #12 (a
+  credential expiring between runs is only found at publish time) and #15 (no
+  linter). Step 11 closed #10 (the notifier is now called by both workflows),
+  #13 (the generator's first real caller exists — the Agent, driven by the
+  workflow) and #14 (the run record, the publication and the verification
+  record all have writers now). No email has still ever actually been sent
+  (#11 stands).
 
 
 ---

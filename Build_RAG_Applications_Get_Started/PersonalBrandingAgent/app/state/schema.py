@@ -302,6 +302,34 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE publications ADD COLUMN embedding BLOB",
         ),
     ),
+    Migration(
+        version=4,
+        description="record workflow phase transitions for the Step 11 "
+                    "orchestration layer",
+        statements=(
+            # Step 11. Each workflow wraps every phase so a failure identifies
+            # which phase failed, and records every phase transition — not just
+            # the failing one — so "what did this run do?" is answerable by a
+            # query. One row per phase per run; the run's own failed_phase
+            # still names the failure for the notifier.
+            """
+            CREATE TABLE workflow_phases (
+                phase_id     TEXT PRIMARY KEY,
+                run_id       TEXT NOT NULL REFERENCES workflow_runs (run_id),
+                phase        TEXT NOT NULL,
+                started_at   TEXT NOT NULL,
+                finished_at  TEXT,
+                outcome      TEXT NOT NULL CHECK (outcome IN (
+                                 'ok',
+                                 'failed',
+                                 'skipped')),
+                error        TEXT
+            )
+            """,
+            "CREATE INDEX ix_workflow_phases_run "
+            "ON workflow_phases (run_id, started_at)",
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.
@@ -320,6 +348,7 @@ TABLES: tuple[str, ...] = (
     "notifications",
     "locks",
     "linkedin_credential_expiry",
+    "workflow_phases",
 )
 
 

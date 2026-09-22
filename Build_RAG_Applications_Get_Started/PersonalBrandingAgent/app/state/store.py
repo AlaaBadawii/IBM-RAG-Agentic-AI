@@ -74,6 +74,7 @@ from app.state.models import (
     PublishIntent,
     SourceLifecycleState,
     SyncCheckpoint,
+    WorkflowPhase,
     WorkflowRun,
     iso_in,
     utc_now,
@@ -315,6 +316,49 @@ class StateStore:
             "ORDER BY started_at"
         )
         return [WorkflowRun.from_row(row) for row in rows]
+
+    # -- workflow phases -----------------------------------------------------
+
+    def record_phase(self, run_id: str, phase: str, outcome: str,
+                     error: str | None = None) -> WorkflowPhase:
+        """Record one phase transition of a run.
+
+        Called by the Step 11 orchestration layer for *every* phase a run
+        enters — success or failure — so the run's trail is queryable. A
+        failing phase additionally leaves an ``OperationalFailure`` row (via
+        :meth:`record_failure`) and names itself on the run; this method
+        records only the transition itself.
+        """
+        if not phase.strip():
+            raise ValueError("phase must be non-empty")
+        if outcome not in ("ok", "failed", "skipped"):
+            raise ValueError(
+                "phase outcome must be one of: ok, failed, skipped "
+                f"(got {outcome!r})"
+            )
+        phase_id = _new_id("phase")
+        now = utc_now_iso()
+        self._write(
+            "INSERT INTO workflow_phases (phase_id, run_id, phase, started_at, "
+            "finished_at, outcome, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (phase_id, run_id, phase, now,
+             now if outcome in ("ok", "failed") else None,
+             outcome, error),
+            f"recording phase {phase} of run {run_id}",
+        )
+        rows = self._read(
+            "SELECT * FROM workflow_phases WHERE phase_id = ?", (phase_id,)
+        )
+        return WorkflowPhase.from_row(rows[0])
+
+    def list_phases(self, run_id: str) -> list[WorkflowPhase]:
+        """Every recorded phase transition of a run, in entry order."""
+        rows = self._read(
+            "SELECT * FROM workflow_phases WHERE run_id = ? "
+            "ORDER BY started_at, phase_id",
+            (run_id,),
+        )
+        return [WorkflowPhase.from_row(row) for row in rows]
 
     # -- synchronization checkpoints ---------------------------------------
 

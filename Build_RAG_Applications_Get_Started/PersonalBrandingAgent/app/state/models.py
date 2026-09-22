@@ -423,3 +423,35 @@ class LockAcquisition:
     recovered_stale: bool = False
     lock: Lock | None = None
     holder: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowPhase:
+    """One recorded phase transition of one workflow run.
+
+    Written by the Step 11 orchestration layer: every phase a run enters
+    leaves a row, whether it succeeded or failed, so "what did this run do?"
+    is answerable by a query. A failing phase additionally leaves an
+    ``OperationalFailure`` row and names itself on the run's ``failed_phase``;
+    this table is the complete trail, that row is the alert.
+    """
+
+    phase_id: str
+    run_id: str
+    phase: str
+    started_at: str
+    outcome: str
+    finished_at: str | None = None
+    error: str | None = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "WorkflowPhase":
+        return cls(
+            phase_id=row["phase_id"],
+            run_id=row["run_id"],
+            phase=row["phase"],
+            started_at=row["started_at"],
+            outcome=row["outcome"],
+            finished_at=row["finished_at"],
+            error=row["error"],
+        )
