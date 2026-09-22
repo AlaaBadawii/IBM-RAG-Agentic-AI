@@ -86,8 +86,12 @@ Agent publishes
 
 **4. Generate** (`candidate_post`)
 
-- LCEL chain: `prompt | llm | parser` produces a candidate post from the
-  structured context.
+- The prompt is assembled as separate labelled blocks — `TASK`, `EVIDENCE`,
+  `COMMUNICATION GUIDANCE`, `CONSTRAINTS` — and the model is called through the
+  repository's OpenRouter client. Step 8 implements this as a typed prompt value
+  plus an injected client rather than an LCEL chain (`prompt | llm | parser`),
+  which this line described before it was built; see the Step 8 deviations in
+  `docs/implementation-status.md`.
 
 **5. Evaluate** (`evaluation`)
 

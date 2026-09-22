@@ -27,13 +27,13 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 8 — Build Grounded Post Generation
+    Step 9 — Build Evidence Verification & Revision Gates
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–7 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–8 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
@@ -41,23 +41,28 @@ Overall Progress:
     publish leaves a durable trace — a write-ahead intent written before any
     request exists, an outcome recorded from evidence, three duplicate checks
     over stored history, and a recovery path that turns an interruption into an
-    explicit ambiguity instead of a silent retry — and a failure can now reach a
-    person: a run outcome or a recorded phase failure composes an SMTP
-    notification, sends it through a provider-agnostic transport configured
-    entirely from the environment, and records the delivery as an outcome
-    distinct from the failure it carried. Nothing generated a post yet: Step 8
-    owns that. Steps 8–14 have not been started.
+    explicit ambiguity instead of a silent retry — a failure can reach a person
+    through an SMTP notification composed from the recorded outcome, and
+    generation now turns an assembled context into a candidate post: the
+    evidence and the communication guidance are handed to the model as separate
+    labelled sections, the prohibitions on unsupported claims are part of the
+    contract, the draft comes back with the labels it used and the model and
+    prompt version that produced it, insufficient evidence produces a decline
+    instead of a fabricated post, and a failed call raises rather than degrading
+    to a weaker draft. Nothing has yet checked whether a draft is true — Step 9
+    owns that, and no draft has ever been published unattended. Steps 9–14 have
+    not been started.
 
 Last Completed Step:
-    Step 7 — Build Operational Failure Notifications via Email
+    Step 8 — Build Grounded Post Generation
 
 Next Step:
-    Step 8 — Build Grounded Post Generation
+    Step 9 — Build Evidence Verification & Revision Gates
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–7 have since been implemented, verified, and
-committed; Step 8 onwards remains untouched.
+analysis of the repository. Steps 0–8 have since been implemented, verified, and
+committed; Step 9 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -83,7 +88,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 5 | Harden the LinkedIn Integration for Autonomous Use | COMPLETED |
 | 6 | Build Persistent Publishing, Idempotency & Recovery | COMPLETED |
 | 7 | Build Operational Failure Notifications via Email | COMPLETED |
-| 8 | Build Grounded Post Generation | NOT STARTED |
+| 8 | Build Grounded Post Generation | COMPLETED |
 | 9 | Build Evidence Verification & Revision Gates | NOT STARTED |
 | 10 | Build the Autonomous Branding Agent | NOT STARTED |
 | 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | NOT STARTED |
@@ -97,6 +102,177 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 8 — Build Grounded Post Generation
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/generation/` — six modules behind one public surface
+  (`__init__.py`): `enums.py` (`GenerationOutcome`, `DeclineReason`,
+  `GenerationFailureCategory`), `errors.py` (`GenerationError`), `models.py`
+  (frozen value objects), `prompt.py` (deterministic assembly, `PROMPT_VERSION`,
+  `PROHIBITED_CLAIMS`), `generator.py` (`PostGenerator`,
+  `parse_generation_output`).
+- **`PostGenerator.generate(request) -> GenerationResult` is the whole
+  interface.** One assembled context in; a draft with its metadata, or a
+  decline, out. No store, no transport, no Agent, no second entry point — which
+  is what lets a test drive a generation without the retrieval or publishing
+  layers being alive (`PLAN.md` Step 8).
+- **The prompt's parts are fields, not one string.** `GenerationPrompt` holds
+  `task_block` · `evidence_block` · `guidance_block` · `constraints_block`
+  separately and renders them under their own headers, with the rules as the
+  *system* message and the material as the user one. `PLAN.md` Step 8 forbids one
+  thing above all — a concatenated chunk dump — and this is the shape that makes
+  the prohibition checkable: no test asserts on a prompt's wording, only on which
+  block holds what.
+- **Step 4's evidence/guidance separation is spent here.** The evidence block is
+  built from `context.evidence_items()` and the guidance block from
+  `context.guidance_items()`, with nothing crossing between them; each guidance
+  item keeps its section name and its source. Merging them would undo the
+  context layer for the one consumer where the difference decides whether a
+  manner of speaking becomes a claimed achievement.
+- **The prohibitions are constant, and generated from one list.**
+  `PROHIBITED_CLAIMS` is the single source of the enumerated rule — never invent
+  projects, achievements, technologies, metrics, dates, certificates,
+  experiences or claims the evidence does not support — so the sentence a model
+  reads and the list a test checks cannot drift apart. The instructions also
+  forbid presenting guidance as evidence, describing coursework as professional
+  experience, describing a practice project as a production system, and citing a
+  label that was not supplied.
+- **Assembly is deterministic and total.** Blocks come from ordered tuples,
+  labels are assigned by position, and nothing reads a clock, a random source,
+  the environment or the retrieval order — asserted by rebuilding the prompt
+  from the same documents in reversed order. A context with no evidence yields a
+  prompt with an empty evidence block rather than an exception, which is what
+  makes the empty case testable at all.
+- **Evidence selection is bounded by the context it came from.**
+  `request.evidence = None` means *all* of the context's evidence (not none);
+  an explicit subset is returned in the context's own order, deduplicated by
+  identity, and an item the context does not hold raises `ValueError`. Selection
+  is Step 10's job; material the assembly layer never placed is not this layer's
+  to write from, and refusing loudly is the difference between a bad choice and
+  an invention.
+- **A decline is decided before the model is called.** No evidence in the
+  assembled context → `DECLINED` / `INSUFFICIENT_EVIDENCE`, with **no request
+  made** and `latency_ms` left `None`. Asking a model to write from no evidence
+  is asking it to invent, so `PLAN.md` Step 8's "receive an insufficient-evidence
+  signal and decline rather than fabricate" is answered deterministically and
+  for free — and a plausible-looking duration on a result that never left the
+  machine would be a fabricated measurement in an audit record.
+- **A decline is a result; a failure is an exception; there is no third thing.**
+  The model may also decline (`MODEL_DECLINED`, with its reason carried
+  verbatim). An unreachable model, a missing credential or an answer that is not
+  the required shape raises `GenerationError` with a
+  `GenerationFailureCategory` — `LLM_UNAVAILABLE`, `CONFIGURATION`
+  (`requires_human_intervention` is true for that one only) or
+  `INVALID_RESPONSE`. **No degraded post exists**: no placeholder, no
+  truncation, no "best effort" text — `PLAN.md` Step 8 is explicit that
+  generation, unlike retrieval, cannot usefully fall back, and unverified text
+  about a real person reaching the publish path indistinguishable from a draft
+  is the failure this refusal prevents.
+- **A declining result lands on `DO_NOT_PUBLISH`, which is waived.** Step 7
+  sends no email for a normal outcome, so a correct "nothing worth saying"
+  produces no alert; only a genuine generation failure is `WORKFLOW_FAILED`.
+  Raising on a decline would turn the system's best behaviour into an incident.
+- **Citations are resolved, never trusted.** The model answers with the labels
+  (`E1`, `E2`) the prompt sent; `_resolve()` looks each one up in the prompt's
+  own citation list. A resolved label becomes a citation with its source path,
+  chunk id and declared evidence state; an unresolved one is reported in
+  `GeneratedPost.unresolved_labels` rather than dropped, because a model citing a
+  source it was never given is a fact Step 9 has to be able to see. "A draft
+  cites only sources present in that set" is therefore structural — there is no
+  code path from an invented label to a citation.
+- **Parsing is strict about the payload and lenient about the wrapper.** A
+  ```json fence or prose either side of the object is stripped, because that
+  would otherwise fail generations that are perfectly usable; the payload itself
+  must still be the required object, and an answer that is neither a post nor a
+  decline is `INVALID_RESPONSE` rather than a post extracted from prose.
+- **Metadata travels with the draft.** `GenerationMetadata` carries the model id,
+  the prompt version, the parameters, the evidence and guidance item counts, the
+  labels the prompt listed, and the measured latency. All of it is ordinary
+  configuration or something measured here; the credential is never read into the
+  object at all.
+- **Configuration is the repository's existing boundary and nothing new.**
+  `config.MODEL_ID`, `config.GENERATION_PARAMS`,
+  `config.OPENROUTER_BASE_URL` and `config.require_openrouter_key()`, following
+  `app/retrieval/multi_query.py`. `ChatOpenAI` is imported lazily *inside* the
+  real-client path, so importing the generation layer — which the test suite does
+  constantly — costs nothing and needs no credential.
+- **A failed call is redacted with the shared list.** The provider's error text
+  is external input and is passed through `redact()` before it is kept, the same
+  single list (`known_secrets()`) the log filter and `app/notify` use.
+- **The layer cannot reach anything it must not.** An AST scan parses every
+  module in `app/generation/` and fails on an import of `chroma`, `sqlite3`,
+  `smtplib`, `requests`, `app.state`, `app.publishing`, `app.notify`,
+  `app.retrieval` or `app.ingestion`. Generation writes no state, publishes
+  nothing, sends nothing and never queries the vector store as a property of the
+  code rather than as a rule someone has to remember.
+
+Verified:
+- `tests/test_generation_prompt.py` (34 tests) — assembly only, no model: which
+  block holds what, the per-term prohibitions, determinism under reversed input
+  order, the empty-evidence case, selection rules, and a real-corpus test that
+  reads `data/writing_style/alaa_writing_style.md`, puts it through the layer and
+  asserts its text reaches the guidance block while the constant instructions do
+  not contain it.
+- `tests/test_generation_generator.py` (39 tests) — the service contract: what
+  the model is handed, the structured result and its metadata, citation
+  resolution and invented labels, declines with and without a call, each failure
+  category, and the import scan.
+- **No test opens a socket, reads a credential or calls a model.** The model is
+  an injected object with an `invoke()` method; one test drives the whole path
+  with `OPENROUTER_API_KEY` patched to `None` to prove the suite is offline by
+  construction rather than by luck.
+- Acceptance criteria, one by one: generation consumes assembled context, not raw
+  chunks (the evidence block is built from `context.evidence_items()`, and the
+  model is asserted to receive the context's own text, source and chunk id);
+  output is structured and carries model/prompt metadata; insufficient evidence
+  produces a declining outcome with no call made, not a fabricated post; the
+  tests run fully offline with a fake LLM; style and positioning come from the
+  knowledge files through the context layer, not from hardcoded prompt text.
+- Milestone: a draft generated from a known evidence set cites only sources
+  present in that set — a label that was never sent (`E9`) resolves to nothing
+  and is reported as unresolved.
+- Full suite: **700 passed** (`627` before Step 8; the 73 new tests are the whole
+  difference, and nothing existing changed its result).
+
+Deviations:
+- **No LCEL chain, deliberately.** `PLAN.md` Step 8 says "LCEL chain, consistent
+  with the existing stack", and `docs/architecture/data-flow.md` describes
+  `prompt | llm | parser`. This is implemented instead as a typed
+  `GenerationPrompt` rendered to two plain `{"role", "content"}` messages and
+  invoked through the repository's existing injectable-client seam
+  (`llm.invoke(messages)`), with `langchain_openai.ChatOpenAI` on the real path
+  only. The reasons: the interface Step 8 needs is *typed blocks*, which is a
+  value object rather than a `Runnable` pipeline; `ChatOpenAI.invoke()` accepts
+  exactly these dicts, so the real path is the same OpenRouter client
+  `app/retrieval/multi_query.py` already uses; and a fake with one method is then
+  sufficient to test the whole contract offline. The cost is that a future step
+  wanting LangChain-level composition (streaming, callbacks, retries) will have
+  to wrap this rather than extend a chain. A one-line correction to
+  `data-flow.md` records the deviation where the claim was made.
+- **Nothing calls the generator yet.** Step 8's obligation is that a candidate
+  post is *producible* from an assembled context with its metadata; which
+  workflow calls `PostGenerator`, and what it does with a decline, is Step 10
+  (the Agent) and Step 11 (the workflows). Step 7 added an interface with no
+  caller and Step 8 adds a second, so the two meet at the same place. Recorded as
+  Known Issue #13.
+- **The real OpenRouter path has never been exercised.** Every test injects a
+  fake, so the first real call is still ahead, and it will fail immediately on
+  Known Issue #5 — an OpenAI-family key sent to the OpenRouter endpoint — as a
+  `CONFIGURATION` generation failure naming the variable to set. That is the
+  designed behaviour for an unconfigured model, and it is deliberately not
+  papered over with a fallback, a stub, or an invented credential.
+- **The prohibitions are instructions, not checks.** The prompt forbids
+  unsupported claims and the code makes an invented *citation* impossible, but
+  nothing here inspects the draft's sentences. Whether a claim is supported by
+  the evidence is Step 9's question, and a check invented here would be a second
+  verifier free to disagree with the real one. What Step 8 guarantees is narrower
+  and honest: the model was given the evidence, told what it may not claim, and
+  its own list of what it used can only name sources it was actually given.
+
+---
 
 ### Step 7 — Build Operational Failure Notifications via Email
 
@@ -1355,60 +1531,48 @@ Important notes:
 ## Current Step
 
 ```text
-Step 8 — Build Grounded Post Generation
+Step 9 — Build Evidence Verification & Revision Gates
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 8. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 9. It is not
 duplicated here.
 
-What Step 7 leaves on the table for it:
+What Step 8 leaves on the table for it:
 
-- **A failure that is now reachable has nothing to report yet.** `app/notify/`
-  composes and sends; `notify_run()` and `notify_failure()` are the two entry
-  points; and nothing calls either of them (Known Issue #10). Step 8 is the
-  first layer whose outcome is worth an email, so it is the first place the
-  interface meets a producer — and it must still not be the thing that sends.
-- **Three outcomes are already distinguishable and are the caller's input.**
-  `WorkflowOutcome`'s `DO_NOT_PUBLISH` / `WORKFLOW_FAILED` /
-  `REQUIRES_HUMAN_INTERVENTION` and `notify_failure()`'s
-  `WORKFLOW_FAILED` / `REQUIRES_HUMAN_INTERVENTION` labelling are how a run says
-  what happened. Generation has to fit that vocabulary: a declining draft is
-  `DO_NOT_PUBLISH` (waived, no email), and only a genuine generation failure is
-  `WORKFLOW_FAILED`.
-- **A run can be notified without a working store, and generation should not
-  need one.** `notify_failure()` deliberately needs no store and reports
-  `recorded is False`. Generation writes no state at all (`PLAN.md` Step 8), so
-  a generation failure is exactly the kind of thing that has to be reportable
-  while the store is the thing that is broken.
-- **The redaction list is single and shared.** `known_secrets()` and `redact()`
-  in `app/logging_config.py` are consumed by the log filter *and* by
-  `app/notify`; `SMTPConfig.secrets()` feeds the same machinery. Anything Step 8
-  logs or returns as metadata must be built the same way rather than inventing
-  its own scrubbing.
-- **Both import scans now point at Step 8's package.** An AST scan fails if
-  `app/notify/` imports `app.publishing/`, `app.retrieval/`, `app.ingestion/`,
-  `chroma` or `langchain`, and another fails if `app/publishing/` imports
-  `smtplib` or `app.notify`. A generation package sits between context assembly
-  and verification and must not shortcut either boundary — reaching retrieval
-  for evidence is Step 9's job to check, not generation's to do.
-- **`list_notifications()` gained a read filter and the schema gained nothing.**
-  Noise control reads `sent` rows through `failure_id=` instead of a new table
-  or column. Step 8 writes no state, so it should need no store method at all —
-  if it appears to, that is a signal the persistence boundary is being crossed.
-- **Known Issue #5 is a blocker for this step, not for the last one.** The
-  configured LLM key does not match the configured provider; Step 7 was immune
-  because it generates nothing, and Step 8 makes a real model call. It must be
-  corrected before Step 8 starts.
-- **Two gaps remain open and are not Step 8's to fix:** Known Issue #8
-  (near-duplicate detection is inert until Step 11 supplies an embedder) and
-  Known Issue #9 (the real publish through the service is still outstanding).
-  Step 8 must be written so that neither is silently assumed to be closed.
-- **No email has ever actually been sent (Known Issue #11).** `SMTP_*` is unset
-  in `.env`, so the transport has only ever run against the fake. Step 8 does
-  not change that, and must not be the step where a credential is invented to
-  make an end-to-end run look finished.
+- **A draft is now a value with a checkable claim on it.** `GeneratedPost`
+  carries the text plus `citations` (each with source path, chunk id and declared
+  evidence state) and `unresolved_labels` — everything a grounding check needs to
+  ask *"does this sentence follow from these chunks?"*. The labels are the
+  interface Step 9 was designed around: they either resolved against the evidence
+  that was sent or they did not.
+- **A draft that cites nothing is representable, and is Step 9's to judge.**
+  Generation reports `is_cited` and takes no view on it. Whether an uncited draft
+  is unpublishable is a gate, and gates are Step 9's.
+- **The prohibitions are stated but not enforced.** The prompt forbids
+  unsupported claims about projects, achievements, technologies, metrics, dates,
+  certificates and experiences; nothing in Step 8 reads the draft's sentences to
+  check. That check is Step 9's, and it is the reason Step 8 stops here rather
+  than growing a second opinion.
+- **`PROMPT_VERSION` and the model metadata make a revision loop traceable.**
+  A gate that rejects a draft and asks for a revision needs to know which prompt
+  produced it and whether the revision changed the prompt or only the request;
+  both are already on `GenerationMetadata`.
+- **Declines and failures are already separated, and Step 9 must not blur them.**
+  `DECLINED` is a normal outcome that lands on a waived `DO_NOT_PUBLISH`;
+  `GenerationError` is a failure that ends the run and notifies. A rejected draft
+  is a *third* thing — verified-and-refused — and reusing either of the two
+  labels for it would make "nothing to say", "the model was unreachable" and
+  "a person should look at this" indistinguishable in the record.
+- **Nothing calls the generator or the verifier yet.** Steps 10 and 11 own the
+  wiring, exactly as they do for `app/notify/` (Known Issue #10) and
+  `app/publishing/` (Known Issue #9). Step 9 should add a layer, not a runner.
+- **The real model call is still ahead of the project.** Known Issue #5 is
+  unchanged: the configured key is an OpenAI-family key sent to the OpenRouter
+  endpoint, so the first real generation will report a `CONFIGURATION` failure
+  rather than a post. Step 9 can be built and verified entirely against fake
+  models, and must not be the step where the mismatch is worked around in code.
 
 ---
 
@@ -1513,9 +1677,21 @@ falls back to the original query, and the CLI exits 0. The evaluation CLI
 records it as `fallbacks`; all 12 gold queries took the fallback path, which
 means **`multi_query` currently scores identically to plain `vector` search**.
 
-Not caused by Step 0 and not a Step 0 blocker. It must be corrected before
+Not caused by Step 0 and not a Step 0 blocker. It was recorded as a blocker for
 **Step 8** (grounded post generation), which genuinely requires an LLM. Fix is a
 configuration change — put a valid OpenRouter key in `.env` — not a code change.
+
+**Still open after Step 8, and Step 8 was built without touching it.** Generation
+uses the existing boundary exactly as it stands — `config.require_openrouter_key()`
+and `config.OPENROUTER_BASE_URL`, the same client `app/retrieval/multi_query.py`
+builds — and no credential was invented, substituted, defaulted around, or
+written into the repository. What Step 8 adds is the *reporting*: a missing key
+raises `GenerationError` with
+`GenerationFailureCategory.CONFIGURATION` and `requires_human_intervention` true,
+naming `OPENAI_API_KEY` as the variable to set, because a wrong credential is
+something a retry cannot fix and a person can. The first real generation
+therefore fails loudly and correctly instead of producing a post. See also
+Known Issue #13.
 
 ### 6. The CLIs are not importable from an unrelated CWD without `PYTHONPATH`
 
@@ -1647,6 +1823,27 @@ so it is not mistaken for done.
 
 ---
 
+### 13. Nothing calls the generator yet, and no real model call has been made
+
+`app/generation/` produces a candidate post from an assembled context, and
+nothing in the repository asks it to. Which workflow calls `PostGenerator`, what
+it does with a decline, and whether it asks for a revision are Step 10's (the
+Agent) and Step 11's (the workflows) — the same shape as the notification service
+(Known Issue #10) and the publishing service (Known Issue #9). Recorded so that
+"generation exists" is not read as "a post can be produced today".
+
+The second half is Known Issue #5 meeting a producer. Every test injects a fake
+model, so the real OpenRouter client has never been constructed against a real
+endpoint either — and the first genuine call will fail with a `CONFIGURATION`
+generation failure naming the variable to fix, because the key currently in
+`.env` belongs to the OpenAI platform rather than to OpenRouter. That outcome is
+the designed one for an unconfigured model: the failure is categorized, it says
+what a person has to do, and no draft is invented to cover it. Correcting the key
+is a configuration change in `.env` — never a code change, and never something
+this repository invents a value for.
+
+---
+
 ## Important Decisions / Deviations
 
 Established while finalizing the roadmap. Preserved here because losing them
@@ -1739,68 +1936,81 @@ not a specification.
 | **The quiet window is a read filter, not a schema change** | `list_notifications()` gained an optional `failure_id`, following Step 6's precedent of adding store read methods rather than tables. Suppression is derived from the rows that exist, so nothing has to be migrated and a `sent` row stays a pure record of what happened | Step 7, `app/state/store.py` |
 | **The layer separation is asserted in both directions, structurally** | An AST scan fails if `app/notify/` imports `chroma`, `langchain`, `app.retrieval`, `app.ingestion` or `app.publishing`, and a second scan fails if `app/publishing/` imports `smtplib` or `app.notify`. A behavioural test could only show that no test looked; this makes the notification transport structurally unreachable from the publishing layer | Step 7, `tests/test_notify_service.py` |
 | **An unsent email is not a safety hazard, so there is no write-ahead row** | Step 6 writes a `pending` intent *before* the request because an unrecorded post is a duplicate risk. An unrecorded email risks a repeated email, which the noise control already bounds — so the delivery row is written once, after the attempt, carrying its final state | Step 7, `app/notify/service.py` |
+| **The prompt's parts are fields, so they cannot be merged** | Evidence and communication guidance reach the model as separate labelled sections, with the rules as the system message and the material as the user one. A model told *"write without marketing language"* in the same block as *"I built X"* has no way to know that one is a manner of speaking and the other a fact it may claim — so the separation is a value with named fields, not a formatting choice | Step 8, `app/generation/models.py`, `prompt.py` |
+| **The prohibitions are generated from the list a test checks** | `PROHIBITED_CLAIMS` names the categories a post may never invent, and the instruction sentence is built from it. A hand-written sentence would be a second copy free to fall out of step with the test that is supposed to be enforcing it | Step 8, `app/generation/prompt.py` |
+| **An invented citation is impossible, not merely discouraged** | The model answers with the labels the prompt sent; resolution is a lookup in that list, so a label that was never supplied has no citation to become. It is reported in `unresolved_labels` rather than dropped, because a draft citing a source it was never given is a fact Step 9 has to see. "Cites only sources present in that set" is a property of the code path, not of the model's compliance | Step 8, `app/generation/generator.py` |
+| **Insufficient evidence is decided by the system, before the model is asked** | A context with no evidence cannot ground a post, and asking a model anyway is asking it to invent. The check is deterministic, makes no request, and leaves `latency_ms` `None` — a plausible duration on a call that never happened would be a fabricated measurement in an audit record | Step 8, `app/generation/generator.py` |
+| **A decline is a normal outcome; a failure is an exception; there is no third thing** | A decline is the system working — it ends the run on `DO_NOT_PUBLISH`, which Step 7 waives, so a correct "nothing worth saying" produces no alert. A failure raises `GenerationError` with a category, so it ends the run as `WORKFLOW_FAILED` and notifies. Raising on a decline would turn the best behaviour into an incident; returning a result on a failure would let a nonexistent post look like a weak one | Step 8, `app/generation/errors.py` |
+| **There is no degraded post** | Unlike retrieval — which may fall back to the original query — generation cannot usefully fall back. `PLAN.md` Step 8 says so explicitly, and the hazard is concrete: unverified text about a real person reaching the publish path indistinguishable from a draft. No placeholder, no truncation, no best-effort text | Step 8, `app/generation/generator.py` |
+| **No LCEL chain, deliberately** | The interface this step needs is typed *blocks*, which is a value object rather than a pipeline; `ChatOpenAI.invoke()` accepts plain role/content dicts, so the real path is the same OpenRouter client the repository already uses; and a fake with one method then tests the whole contract offline. The cost — no LangChain-level composition (streaming, callbacks, retries) without wrapping this — is accepted and recorded in the Step 8 deviations | Step 8, `app/generation/generator.py` |
+| **The generator cannot reach the store, the publisher, the notifier or the knowledge layers** | Asserted by parsing every module in `app/generation/`. Generation writes no state (`PLAN.md` Step 8: persistence happens at the publish step), which is what makes the failure path reachable while the store is the thing that is broken — the same reason `notify_failure()` needs no store | Step 8, `tests/test_generation_generator.py` |
 
 ---
 
 ## Next Step
 
-### Step 8 — Build Grounded Post Generation
+### Step 9 — Build Evidence Verification & Revision Gates
 
-The next implementation task is defined in `PLAN.md` §8, Step 8.
+The next implementation task is defined in `PLAN.md` §8, Step 9.
 
-Steps 0–7 built everything around generation: the evidence layer assembles named,
-ranked, provenance-preserving sections; publishing is a service an unattended
-workflow can call; and a failure can now reach a person. Nothing has ever
-produced a post. Step 8 is that bounded transformation — a candidate post and
-its metadata from assembled context — and it is deliberately not the centre of
-the system: context assembly decides what is worth saying and Step 9 decides
-whether it was said truthfully.
+Steps 0–8 built everything around the gate: the evidence layer assembles named,
+ranked, provenance-preserving sections; the source registry and the corpus
+already carry the evidence policy (seven evidence states, the hierarchy, the
+forbidden inferences) as data; generation now produces a draft that names the
+labels it used; publishing is a service, and a failure reaches a person. Nothing
+has ever checked whether a draft is true. Step 9 is that gate — `DRAFT → VERIFY →
+PASS | REVISE | REJECT` — called by both the decision path and the revision loop,
+not inserted as another stage.
 
-Constraints carried in from Step 7:
+Constraints carried in from Step 8:
 
-- **Notification is already the wrapper's job, not the generator's.** A
-  generation failure ends the run with `DO_NOT_PUBLISH` and the workflow
-  notifies through `notify_run()`. Generation must therefore report a
-  distinguishable outcome — "generation failed" vs "generated, but declined for
-  insufficient evidence" — and must not send anything itself.
-- **A declining result is a normal outcome, not a failure.** `PLAN.md` Step 8
-  requires the chain to accept an insufficient-evidence signal and decline
-  rather than fabricate. Step 7 waives `DO_NOT_PUBLISH` precisely because it is
-  a success; a decline must land there, so it belongs in the structured result
-  and not in an exception.
-- **`REQUIRES_HUMAN_INTERVENTION` remains reserved for things a person must
-  resolve.** Using it for a low-quality draft would make the one label that
-  means "stop and look" routine, and Step 7's email would stop meaning anything.
-- **The failure path must be reachable without the Agent.** Step 7's store is
-  optional so a broken store can still be reported; Step 8 should keep the same
-  shape by taking context as an explicit input, so a generation run can be
-  driven and observed without the retrieval or publishing layers being alive.
-- **Secrets stay out of generated text and its metadata.** The model id, prompt
-  version and parameters returned with the draft are audit data, and the same
-  single redaction list (`known_secrets()` / `redact()`) applies to anything a
-  failure message or log line is built from.
-- **The generation layer writes no state.** `PLAN.md` Step 8 is explicit:
-  persistence happens only at the publish step. `app/publishing/` owns the trace
-  and Step 7's `notifications` table records only deliveries — neither is
-  generation's to write.
-- **Do not reach across the layer lines.** `app/notify/`'s import scan forbids
-  reaching `app.publishing/`, `app.retrieval/` and `app.ingestion/`;
-  `app/publishing/`'s scan forbids reaching `smtplib` and `app.notify`. A
-  generation package sits between context assembly and verification and is
-  subject to the same discipline — Step 9 is the layer that must be able to
-  read what it produced.
-- **Known Issue #5 must be corrected before this step starts.** The configured
-  LLM key does not match the configured provider, and Step 7 was unaffected only
-  because it generates nothing. Step 8 makes a real model call, so the
-  mismatch is a blocker for it and not for the work committed here.
-- **Two inherited gaps stay open and are not Step 8's to close:** Known Issue #8
-  (near-duplicate detection is inert until an embedder is supplied at Step 11)
-  and Known Issue #9 (no real publish has gone through the service yet).
-  Neither blocks generation; neither may be assumed fixed.
-- **Nothing schedules or orchestrates this yet.** Step 11 owns the workflows and
-  Step 12 owns the schedule. Step 7 added an interface with no caller
-  (Known Issue #10) and has never sent a real email (Known Issue #11); Step 8
-  should add a layer, not a runner.
+- **The labels are the interface, and they already resolve or fail.** A
+  `GeneratedPost` carries `citations` (label, source path, chunk id, declared
+  evidence state) and `unresolved_labels`. The deterministic checks `PLAN.md`
+  lists — the citation exists, the source exists, the cited evidence was actually
+  available, the evidence state satisfies policy — are checks over values Step 8
+  has already resolved against the evidence that was sent. An unresolved label
+  needs no re-derivation: it is already reported as one.
+- **Generation states the prohibitions; Step 9 enforces them.** The prompt
+  forbids unsupported claims about projects, achievements, technologies, metrics,
+  dates, certificates and experiences, and forbids reading coursework as
+  professional experience or a practice project as a production system. Nothing
+  in Step 8 inspects the draft's sentences, by design: a second verifier here
+  would be free to disagree with the real one. The documented forbidden
+  inferences are Step 9's milestone fixtures.
+- **A rejected draft is a third outcome, not a relabelled one.** `DECLINED` means
+  there was nothing to say and ends the run on a waived `DO_NOT_PUBLISH`;
+  `GenerationError` means no draft exists and ends the run as `WORKFLOW_FAILED`.
+  A draft that fails verification exists, was produced, and must not be
+  published — and the record has to be able to distinguish all three.
+- **A revision loop needs an input it can re-drive.** `PLAN.md` Step 9 requires
+  the loop to be bounded and terminating. `PostGenerator.generate()` takes an
+  explicit `GenerationRequest` and holds no state between calls, and
+  `GenerationMetadata.prompt_version` records which prompt produced the draft, so
+  a revision can change the request, the prompt, or both and be traceable either
+  way. An unbounded loop is a failure mode, not a feature; `REJECT` after the
+  limit is a correct outcome.
+- **Verification infrastructure failure must fail closed.** Step 8's shape is the
+  precedent: an unreachable model raises rather than degrading, and there is no
+  valid degraded post. A verification failure must never default to `PASS` — the
+  distinction `PLAN.md` draws is that deterministic gates are authoritative while
+  LLM-assisted checks are advisory, and the degraded mode has to be *recorded*
+  rather than assumed.
+- **Verification outcomes are persisted with the publication record**, which is
+  Step 6's territory (`PLAN.md` Step 9, Data/state). Step 9 is therefore the
+  first step above the knowledge layer that *writes* — and it writes through the
+  state store, never by reaching into publishing or generation.
+- **Step 9 can be built and verified offline.** Every generation test injects a
+  fake model, and `PLAN.md` Step 9's own test list requires no network. Known
+  Issue #5 (the OpenAI-family key sent to the OpenRouter endpoint) is unchanged,
+  so the first real draft is still ahead of the project — and Step 9 must not be
+  the step where the mismatch is worked around in code.
+- **Still open, and still not this step's to close:** Known Issue #8
+  (near-duplicate detection is inert until Step 11 supplies an embedder), #9 (no
+  real publish through the service yet), #10 (nothing calls the notifier), #11
+  (no email has actually been sent), #12 (a credential expiring between runs is
+  only found at publish time) and #13 (nothing calls the generator yet). Step 9
+  adds a gate with no caller either; Steps 10 and 11 own the wiring.
 
 
 ---
