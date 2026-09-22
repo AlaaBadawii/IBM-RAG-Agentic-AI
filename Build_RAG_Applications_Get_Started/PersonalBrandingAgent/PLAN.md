@@ -2148,12 +2148,20 @@ the guise of maintenance.
 The future Personal Branding Agent should support **reactive comment
 interactions**, separate from the proactive 8-hour post workflow.
 
+Intended public identity for this capability:
+
+```text
+Agent name: Abu Prompt
+Handle: @AbuPrompt
+Arabic-style name: أبو برومبت
+```
+
 Required behavior:
 
 ```text
 New comment
    ↓
-Explicitly mentions @Agent_Name?
+Explicitly mentions @AbuPrompt?
    ├── No  → IGNORE
    └── Yes
         ↓
@@ -2175,17 +2183,21 @@ Meaningful question/request?
 Examples:
 
 ```text
-"Great post!"                       → IGNORE
-"@Agent_Name"                      → IGNORE
-"Great post @Agent_Name"           → IGNORE
-"@Agent_Name What is RAG?"         → CONSIDER_REPLY
-"@Agent_Name How did you solve X?" → CONSIDER_REPLY
+"Great post!"                     → IGNORE
+"@AbuPrompt"                      → IGNORE
+"Great post @AbuPrompt"           → IGNORE
+"@AbuPrompt What is RAG?"         → CONSIDER_REPLY
+"@AbuPrompt How did you solve X?" → CONSIDER_REPLY
 ```
 
 The core product rule is:
 
-**The Agent must not respond to every comment. An explicit `@Agent_Name`
+**The Agent must not respond to every comment. An explicit `@AbuPrompt`
 mention is the trigger for considering a response.**
+
+A response must go through the existing grounded context → generation →
+verification safety chain. This remains a future reactive workflow, separate
+from proactive post publishing.
 
 Future implementation must preserve:
 
