@@ -27,13 +27,13 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 9 — Build Evidence Verification & Revision Gates
+    Step 10 — Build the Autonomous Branding Agent
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–8 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–9 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
@@ -42,27 +42,29 @@ Overall Progress:
     request exists, an outcome recorded from evidence, three duplicate checks
     over stored history, and a recovery path that turns an interruption into an
     explicit ambiguity instead of a silent retry — a failure can reach a person
-    through an SMTP notification composed from the recorded outcome, and
-    generation now turns an assembled context into a candidate post: the
-    evidence and the communication guidance are handed to the model as separate
-    labelled sections, the prohibitions on unsupported claims are part of the
-    contract, the draft comes back with the labels it used and the model and
-    prompt version that produced it, insufficient evidence produces a decline
-    instead of a fabricated post, and a failed call raises rather than degrading
-    to a weaker draft. Nothing has yet checked whether a draft is true — Step 9
-    owns that, and no draft has ever been published unattended. Steps 9–14 have
-    not been started.
+    through an SMTP notification composed from the recorded outcome, generation
+    turns an assembled context into a candidate post with the labels it used and
+    the model and prompt version that produced it, and verification now decides
+    whether that post is true: a draft is split into numbered claims, each claim
+    is checked against the evidence the draft cited and nothing else, the exact
+    numbers and dates in it are matched as strings against that evidence, the
+    five inferences `data/audit/README.md` forbids are enforced as rules, a
+    semantic judgement is available but advisory and is consulted only after the
+    deterministic checks pass, and the result is a typed structure that cannot
+    be constructed as a pass while carrying a finding. Nothing yet drives the
+    gate, revises a draft, or publishes — Steps 10 and 11 own that. Steps 10–14
+    have not been started.
 
 Last Completed Step:
-    Step 8 — Build Grounded Post Generation
+    Step 9 — Build Evidence Verification & Revision Gates
 
 Next Step:
-    Step 9 — Build Evidence Verification & Revision Gates
+    Step 10 — Build the Autonomous Branding Agent
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–8 have since been implemented, verified, and
-committed; Step 9 onwards remains untouched.
+analysis of the repository. Steps 0–9 have since been implemented, verified, and
+committed; Step 10 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -89,7 +91,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 6 | Build Persistent Publishing, Idempotency & Recovery | COMPLETED |
 | 7 | Build Operational Failure Notifications via Email | COMPLETED |
 | 8 | Build Grounded Post Generation | COMPLETED |
-| 9 | Build Evidence Verification & Revision Gates | NOT STARTED |
+| 9 | Build Evidence Verification & Revision Gates | COMPLETED |
 | 10 | Build the Autonomous Branding Agent | NOT STARTED |
 | 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | NOT STARTED |
 | 12 | Add External Scheduling, Locks & Recovery | NOT STARTED |
@@ -102,6 +104,137 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 9 — Build Evidence Verification & Revision Gates
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/verification/` — nine modules behind one public surface
+  (`__init__.py`): `enums.py` (five `str` enums), `errors.py`
+  (`VerificationError`, `SupportJudgeUnavailable`), `models.py` (frozen value
+  objects), `claims.py` (splitting and references), `policy.py` (the
+  deterministic checks and the severity table), `support.py` (the judge
+  protocol), `judge.py` (`LlmSupportJudge`), `verifier.py`
+  (`EvidenceVerifier`, `verify`), `revision.py` (the stopping rule).
+- **`verify(post, context, *, judge=None) -> VerificationResult` is the whole
+  interface**, and it is a *function*, as `PLAN.md` Step 9 specifies ("not a
+  pipeline stage — a function called by both the decision path and the revision
+  loop"). `EvidenceVerifier` exists for a caller that wants to hold a judge
+  across calls; it holds nothing else.
+- **A draft is split into numbered claims, deterministically.** A claim is a
+  sentence — split on sentence punctuation and newlines, list markers stripped,
+  indexes assigned in order. Every non-empty sentence becomes a claim, so
+  nothing escapes the gate; classifying whether a sentence "really makes a
+  claim" would be the semantic judgement this layer is not allowed to fake.
+- **Every claim is checked on its own and carries its own verdict.** `PASS`
+  requires every claim supported; a single unsupported sentence produces
+  `REVISION_REQUIRED` naming the claim number and the reason, and
+  `ClaimVerification.supporting` records the evidence that resolved for that
+  sentence. `PLAN.md` Step 9 asks for claim-level results; a single boolean
+  cannot tell Step 10's loop what to change, and cannot tell an audit which
+  sentence was the problem.
+- **The deterministic checks are the gates, and severity is data.**
+  `VIOLATION_SEVERITY` declares, once per kind, whether a finding is about the
+  *wording* (`REVISABLE`) or about the *evidence or provenance* (`REJECT`), and
+  `severity_for()` is total over the enum with no default — a future check
+  cannot be added without someone deciding whether it gates. `REVISION_REQUIRED`
+  and `REJECTED` are then derived, not chosen at each call site.
+- **The verifier cannot invent evidence, structurally.** It holds no store
+  handle, imports no retrieval, ingestion, publishing or notify module (asserted
+  by an AST scan over every module in the package), and resolves the draft's
+  citations against the supplied context by `(source, chunk_id)`. A citation the
+  context does not hold, and a label the context never offered, are findings —
+  not lookups that might succeed. Nothing is retrieved, so there is nothing for
+  a check to reach into.
+- **The exact-reference check is string matching, and its limit is written
+  down.** Numbers, percentages, dates, versions and quantities are extracted by
+  pattern, normalised (case, spaces, commas) and matched against the cited
+  evidence's text — `40 %` matches `40%`, and a plain reference is not allowed
+  to match across a word boundary. A figure in no cited evidence at all is
+  `UNSUPPORTED_REFERENCE` (reject); a figure the supplied evidence *does* carry
+  but the draft did not cite is `UNCITED_REFERENCE` (revise) — the two need
+  different repairs and only one of them is repairable. Paraphrase is not
+  detected here, and the module says so rather than implying otherwise.
+- **`data/audit/README.md` §3 is operationalized, not paraphrased.**
+  `FORBIDDEN_INFERENCES` holds the five *weaker source → stronger claim* rules,
+  each with the audit line it came from quoted verbatim: coursework→professional
+  experience, local project→production, configuration→deployment, course
+  completion→mastery, portfolio entry→employment. Each rule fires only for a
+  claim that *is* attributed to evidence (an unattributed claim is
+  `NO_CITATION`'s business) and only when nothing behind it qualifies as strong.
+  The sixth audit line — *never invent dates, metrics, technologies,
+  responsibilities, or outcomes* — is not an inference from a source, and is
+  enforced by the reference check plus the advisory judge instead.
+- **The evidence state is checked as declared, with the corpus's own
+  vocabulary.** `EVIDENCE_STATE_TOO_WEAK` fires for evidence declaring
+  `UNVERIFIED` or `STALE` (nothing can rest on either), and for `ASPIRATIONAL`
+  or `LEARNING` **unless the claim makes the same admission** — the corpus
+  defines those states as legitimate, and "I'm learning X" supported by evidence
+  that says exactly that is not the upgrade the audit forbids. Undeclared
+  (`None`) evidence is usable and keeps its absent state.
+- **Guidance is never evidence.** Step 4 keeps positioning, vision and writing
+  style in separate fields; a claim whose vocabulary comes from guidance and
+  from nowhere else is `GUIDANCE_AS_EVIDENCE` — revisable, because the sentence
+  can be grounded or dropped, but never a pass, and never a citation.
+- **The advisory judge is advisory in the code, not just in the prose.**
+  `SupportJudge` is a structural protocol (a fake with `name`, `prompt_version`
+  and `judge()` is a judge); it is consulted only when the deterministic checks
+  found nothing *and* the claim asserts something *and* evidence resolved for
+  it; its objection is recorded as `ADVISORY_UNSUPPORTED` with `advisory=True`
+  and only ever routes to revision. It answers by **claim number**, and
+  `map_verdicts()` refuses an answer about a claim that was not asked about, or
+  two answers about one claim — a misnumbered answer is a defect
+  (`VerificationError`, `JUDGE_FAILURE`), not something to silently drop.
+- **Failing closed is separated from being unavailable.**
+  `SupportJudgeUnavailable` — no client, no credential, no answer, an answer
+  that is not the required shape — sets `degraded=True`, records it, and lets
+  the deterministic gates stand. Any *other* exception from a judge is a
+  `VerificationError`: a judge that crashed while judging may have had an
+  objection. A context that reports `SUFFICIENT` evidence while holding none is
+  also a `VerificationError` (`CONTEXT_UNUSABLE`) rather than a verdict.
+- **A passing result cannot carry a finding.** `VerificationResult.__post_init__`
+  refuses to construct `PASS` with any violation or any unsupported claim,
+  refuses `REJECTED` without an unrepairable finding, and refuses
+  `REVISION_REQUIRED` that carries one. The invariants are in the type, so a
+  caller that reads only `outcome` cannot be misled by a result that disagrees
+  with its own findings.
+- **`to_record()` produces the persistable form and nothing writes it.**
+  JSON-compatible, no clock, no environment, no secret, no evidence text: the
+  outcome, every finding, each claim with its verdict and its supporting
+  evidence by provenance, and the judge and prompt version behind the advisory
+  half. Where it is written is Step 11's (see Known Issue #14).
+- **The revision loop is not implemented; its stopping rule is.**
+  `revision_decision(result, attempts_made, *, limit=MAX_REVISION_ATTEMPTS)` is
+  total over outcomes and counts, returns `REVISE` only while the budget is
+  unspent, and `EXHAUSTED` terminally — so no caller that obeys it can loop
+  forever, and `PLAN.md`'s "REJECT after the limit is a correct outcome" is a
+  value rather than a convention. `EXHAUSTED` is reported separately from
+  `REJECT`: "this could never pass" and "we stopped trying" are different facts
+  about a run.
+
+Tests: 132 new (`tests/test_verification_rules.py`, 79;
+`tests/test_verification_verifier.py`, 53). The rules file covers claim
+splitting, reference extraction and normalisation, the severity table, each
+deterministic check, each of the five forbidden inferences (firing on a weak
+fixture *and* not firing on evidence that carries the claim), and the revision
+gate's termination. The verifier file covers the eleven properties the step was
+briefed with: a supported claim passes, an unsupported one fails, claims are
+evaluated independently, provenance survives to the record, positioning cannot
+satisfy evidence, insufficient evidence is an explicit result, a judge failure
+fails closed, revision and rejection are distinguishable, the fake judge runs
+fully offline (including the real judge with the credential removed), and
+generated text is never returned as evidence. Every test is deterministic and
+offline; no model, no network, no LinkedIn call. Full regression: 832 passed.
+
+Files: `app/verification/{__init__,claims,enums,errors,judge,models,policy,revision,support,verifier}.py`,
+`tests/test_verification_rules.py`, `tests/test_verification_verifier.py`,
+`docs/implementation-status.md`.
+
+Not implemented, deliberately: the revision loop and its attempts counter
+(Step 10), the workflow's use of the outcome (Step 10), writing the record to
+the operational store (Step 11 — see Known Issue #14), and any caller at all.
+Nothing in Steps 0–8 was modified.
 
 ### Step 8 — Build Grounded Post Generation
 
@@ -1844,6 +1977,35 @@ this repository invents a value for.
 
 ---
 
+### 14. Verification results are produced but not yet persisted
+
+`PLAN.md` Step 9 lists, under Data/state, that **outcomes are persisted with the
+publication record**. The verification layer produces exactly that record —
+`VerificationResult.to_record()` returns plain JSON-compatible values with the
+outcome, every finding, the cited evidence by provenance, the unresolved labels
+and the judge that produced the advisory half — and **nothing writes it**.
+
+Two separate gaps, both recorded rather than papered over:
+
+- **The write path does not exist.** `app/state/schema.py` has no column for a
+  verification record and no verification table, so persisting one would mean a
+  schema migration *plus* a change to `app/publishing/` — and Step 9's brief
+  puts both out of bounds ("do not modify … publishing … unless a minimal seam
+  is strictly necessary"). Adding a nullable column the only writer never
+  populates would be a seam that carries no data. The persistence belongs to
+  Step 11, which is the step that writes publication records; `to_record()` is
+  the seam it will consume, which is why the shape is defined and tested here.
+- **Nothing calls the verifier at all.** Same shape as Known Issues #9, #10, #12
+  and #13: the layer exists, is exercised by its own tests, and has no caller.
+  Wiring it into the decision path and the revision loop is Step 10 (the Agent)
+  and Step 11 (the workflows).
+
+Recorded so that "the verifier passes" is not read as "verification has been
+persisted for a post that was published" — no post has been verified, because no
+post has been generated for real (Known Issue #13).
+
+---
+
 ## Important Decisions / Deviations
 
 Established while finalizing the roadmap. Preserved here because losing them
@@ -1944,73 +2106,98 @@ not a specification.
 | **There is no degraded post** | Unlike retrieval — which may fall back to the original query — generation cannot usefully fall back. `PLAN.md` Step 8 says so explicitly, and the hazard is concrete: unverified text about a real person reaching the publish path indistinguishable from a draft. No placeholder, no truncation, no best-effort text | Step 8, `app/generation/generator.py` |
 | **No LCEL chain, deliberately** | The interface this step needs is typed *blocks*, which is a value object rather than a pipeline; `ChatOpenAI.invoke()` accepts plain role/content dicts, so the real path is the same OpenRouter client the repository already uses; and a fake with one method then tests the whole contract offline. The cost — no LangChain-level composition (streaming, callbacks, retries) without wrapping this — is accepted and recorded in the Step 8 deviations | Step 8, `app/generation/generator.py` |
 | **The generator cannot reach the store, the publisher, the notifier or the knowledge layers** | Asserted by parsing every module in `app/generation/`. Generation writes no state (`PLAN.md` Step 8: persistence happens at the publish step), which is what makes the failure path reachable while the store is the thing that is broken — the same reason `notify_failure()` needs no store | Step 8, `tests/test_generation_generator.py` |
+| **A claim is a sentence, and every sentence is a claim** | Classifying which sentences "really make a claim" is the semantic judgement this layer may not fake, and a sentence that was skipped is a sentence nothing downstream can check. Splitting is deterministic, indexes are assigned in order, and the *classification that matters* — is it supported? — is made per claim against evidence | Step 9, `app/verification/claims.py` |
+| **Severity is a declared table, not a judgement at the call site** | `PLAN.md` does not draw the line between "revise" and "reject"; the implementation draws it at *"can rewriting this draft against this same evidence make it publishable?"* — wording findings revise, evidence and provenance findings reject. Declared once per kind, total over the enum, no default, so a new check cannot be added without deciding whether it gates | Step 9, `app/verification/policy.py` |
+| **A passing result cannot carry a finding** | The invariants live in `VerificationResult.__post_init__`, so `PASS` with a violation, `REJECTED` without an unrepairable one, and `REVISION_REQUIRED` carrying one are all unconstructible. A caller that reads only `outcome` cannot be misled by a result that disagrees with its own findings, and a bug in the verifier is an exception rather than a post that publishes itself | Step 9, `app/verification/models.py` |
+| **A claim whose evidence is unused is told apart from a claim that has none** | `UNCITED_REFERENCE` (the figure is in the supplied evidence, uncited — cite it or drop it) and `UNSUPPORTED_REFERENCE` (the figure is nowhere — fabricated) need different repairs, and only one of them is repairable. A single kind would have had to pick one severity for both, which would either burn revision attempts on the unfixable or let a fabrication through as rewritable | Step 9, `app/verification/policy.py` |
+| **The forbidden inferences are quoted, not paraphrased** | Each rule in `FORBIDDEN_INFERENCES` carries the `data/audit/README.md` §3 line it came from verbatim, so the rule can be checked against the policy it operationalizes without leaving the code. The sixth line of that list — *never invent dates, metrics, technologies, responsibilities, or outcomes* — is not an inference from a source and is enforced by the reference check plus the judge | Step 9, `app/verification/policy.py` |
+| **Configuration is never evidence of a deployment, structurally** | The deployment rule can be satisfied by evidence's *text* only when its *source path* is not a configuration file. Text alone could not draw that line — a `deployment.yaml` would pass by mentioning the word — so the audit's "configuration alone" is enforced as a property of the provenance rather than of the prose | Step 9, `app/verification/policy.py` |
+| **A declared-weak evidence state is respected, and admitted by the claim** | `LEARNING` and `ASPIRATIONAL` are legitimate states in `data/evidence/README.md`, not findings: "I'm learning X" resting on evidence that says exactly that is not the upgrade the audit forbids. `UNVERIFIED` and `STALE` admit no such hedge — there is no fact underneath them to word. "Course" is deliberately *not* hedge vocabulary, because mentioning a course is a claim about what was done | Step 9, `app/verification/policy.py` |
+| **The advisory judge answers by claim number, and a wrong number fails closed** | A number either names a claim that was sent or does not; a quotation cannot be checked without trusting the quotation. An answer about a claim that was not asked about, or two answers about one claim, is a `VerificationError` rather than something silently dropped — otherwise a misnumbered objection disappears | Step 9, `app/verification/support.py` |
+| **Unavailable is not the same as failing** | `PLAN.md` allows the run to continue on the deterministic gates when LLM-assist is missing, and requires the degraded mode to be recorded. `SupportJudgeUnavailable` sets `degraded=True`; any *other* judge exception is a `VerificationError`, because a judge that crashed while judging may have had an objection. The judge implementation owns the classification, so a bug in the layer above it cannot be mistaken for an absent model | Step 9, `app/verification/errors.py`, `judge.py` |
+| **The revision bound lives with the decision, and the loop does not exist yet** | `PLAN.md` requires the revision loop to be bounded and terminating and assigns the loop itself to Step 10. `revision_decision()` is total, injectable, and returns `REVISE` only while the budget is unspent — so no caller that obeys it can loop forever, and `EXHAUSTED` is reported separately from `REJECT` because "we stopped trying" and "this could never pass" are different facts about a run | Step 9, `app/verification/revision.py` |
+| **One rule stated twice, with the copies asserted equal** | The lexical-overlap check needs *content* terms, and importing `app/retrieval`'s BM25 tokenizer would make verification depend on the retrieval stack — the boundary the package's import scan asserts. The three-line tokenizer is restated in `app/verification/claims.py`, and a test asserts the two agree, so the shared rule stays shared and the dependency does not exist | Step 9, `app/verification/claims.py`, `tests/test_verification_rules.py` |
+| **A verification is not a pipeline stage** | `verify()` is a function, as `PLAN.md` says, and the verifier holds a judge and nothing else — no store, no clock, no source path, no retrieval handle. "The verifier cannot invent evidence" is therefore a property of what it is able to do rather than a promise it keeps | Step 9, `app/verification/verifier.py` |
 
 ---
 
 ## Next Step
 
-### Step 9 — Build Evidence Verification & Revision Gates
+### Step 10 — Build the Autonomous Branding Agent
 
-The next implementation task is defined in `PLAN.md` §8, Step 9.
+The next implementation task is defined in `PLAN.md` §8, Step 10.
 
-Steps 0–8 built everything around the gate: the evidence layer assembles named,
-ranked, provenance-preserving sections; the source registry and the corpus
-already carry the evidence policy (seven evidence states, the hierarchy, the
-forbidden inferences) as data; generation now produces a draft that names the
-labels it used; publishing is a service, and a failure reaches a person. Nothing
-has ever checked whether a draft is true. Step 9 is that gate — `DRAFT → VERIFY →
-PASS | REVISE | REJECT` — called by both the decision path and the revision loop,
-not inserted as another stage.
+Step 9 closed the last gap in the deterministic half of the system: a draft can
+now be checked against the evidence it was written from, claim by claim, and the
+result is a structure rather than a boolean — an outcome (`PASS`,
+`REVISION_REQUIRED`, `REJECTED`), the findings behind it, the evidence the draft
+cited by provenance, and whether the advisory judge was consulted at all. What
+does not exist is anything that *decides*: what to write about, which evidence to
+select, whether there is enough value to publish at all, and what to do with a
+`REVISION_REQUIRED` verdict. Step 10 is that decider — one bounded Agent, sitting
+above generation and verification and below the workflows.
 
-Constraints carried in from Step 8:
+Constraints carried in from Step 9:
 
-- **The labels are the interface, and they already resolve or fail.** A
-  `GeneratedPost` carries `citations` (label, source path, chunk id, declared
-  evidence state) and `unresolved_labels`. The deterministic checks `PLAN.md`
-  lists — the citation exists, the source exists, the cited evidence was actually
-  available, the evidence state satisfies policy — are checks over values Step 8
-  has already resolved against the evidence that was sent. An unresolved label
-  needs no re-derivation: it is already reported as one.
-- **Generation states the prohibitions; Step 9 enforces them.** The prompt
-  forbids unsupported claims about projects, achievements, technologies, metrics,
-  dates, certificates and experiences, and forbids reading coursework as
-  professional experience or a practice project as a production system. Nothing
-  in Step 8 inspects the draft's sentences, by design: a second verifier here
-  would be free to disagree with the real one. The documented forbidden
-  inferences are Step 9's milestone fixtures.
-- **A rejected draft is a third outcome, not a relabelled one.** `DECLINED` means
-  there was nothing to say and ends the run on a waived `DO_NOT_PUBLISH`;
-  `GenerationError` means no draft exists and ends the run as `WORKFLOW_FAILED`.
-  A draft that fails verification exists, was produced, and must not be
-  published — and the record has to be able to distinguish all three.
-- **A revision loop needs an input it can re-drive.** `PLAN.md` Step 9 requires
-  the loop to be bounded and terminating. `PostGenerator.generate()` takes an
-  explicit `GenerationRequest` and holds no state between calls, and
-  `GenerationMetadata.prompt_version` records which prompt produced the draft, so
-  a revision can change the request, the prompt, or both and be traceable either
-  way. An unbounded loop is a failure mode, not a feature; `REJECT` after the
-  limit is a correct outcome.
-- **Verification infrastructure failure must fail closed.** Step 8's shape is the
-  precedent: an unreachable model raises rather than degrading, and there is no
-  valid degraded post. A verification failure must never default to `PASS` — the
-  distinction `PLAN.md` draws is that deterministic gates are authoritative while
-  LLM-assisted checks are advisory, and the degraded mode has to be *recorded*
-  rather than assumed.
-- **Verification outcomes are persisted with the publication record**, which is
-  Step 6's territory (`PLAN.md` Step 9, Data/state). Step 9 is therefore the
-  first step above the knowledge layer that *writes* — and it writes through the
-  state store, never by reaching into publishing or generation.
-- **Step 9 can be built and verified offline.** Every generation test injects a
-  fake model, and `PLAN.md` Step 9's own test list requires no network. Known
-  Issue #5 (the OpenAI-family key sent to the OpenRouter endpoint) is unchanged,
-  so the first real draft is still ahead of the project — and Step 9 must not be
-  the step where the mismatch is worked around in code.
+- **The Agent proposes; the workflow disposes.** `PLAN.md` states it directly,
+  and Step 9 is the shape it points at: `verify()` returns a result and the
+  Agent cannot turn one into a pass. `VerificationResult.__post_init__` already
+  makes a passing result that carries a finding unconstructible, so an Agent that
+  reports success it did not obtain fails loudly instead of silently.
+- **The revision loop already has its bound and its vocabulary.** `PLAN.md`
+  Step 10 owns the loop; `app/verification/revision.py` already owns the
+  *decision* it makes each turn — `PUBLISH` / `REVISE` / `REJECT` / `EXHAUSTED`,
+  bounded by `MAX_REVISION_ATTEMPTS`, total over every outcome and attempt count,
+  and asserted terminating by test. The loop Step 10 builds is a caller of
+  `revision_decision()`, not a second definition of when to stop. `EXHAUSTED` is
+  reported separately from `REJECT` on purpose: "we stopped trying" and "this
+  could never pass" are different facts about a run.
+- **`REVISION_REQUIRED` is not a dead end, because it says what to change.**
+  `VerificationResult.revision_notes()` returns one line per revisable finding —
+  which claim, and what about it — and `rejected_claims` / `unsupported_claims`
+  name the sentences. The loop's input is therefore the verdict it just received,
+  which is what makes re-driving `PostGenerator.generate()` a bounded operation
+  rather than a guess.
+- **`DO_NOT_PUBLISH` is a success and must stay reachable.** Step 9 added a
+  fourth way for a run to end without publishing and it must not swallow the
+  others: `PASS` is publishable, `REVISION_REQUIRED` is not, `REJECTED` is not
+  and is *not* a `DO_NOT_PUBLISH` — a draft that failed verification was
+  produced and has to be recorded as rejected. The Agent has to be able to
+  answer `DO_NOT_PUBLISH` before a draft exists, and that answer is a
+  first-class success, not a failure with a nicer name.
+- **The Agent reads history through the Step 6 read service and writes no
+  state.** `PLAN.md` is explicit: the Agent proposes, and a deterministic
+  workflow records — "or the system could *forget* to record". Nothing in
+  `app/verification/` writes either: `to_record()` produces the JSON-compatible
+  record and stops. The write is Step 11's, through the state store, via a schema
+  that does not have the column yet (Known Issue #14).
+- **One agent, no framework.** `PLAN.md` forbids multi-agent decomposition and
+  graph frameworks, and Step 9's LLM boundary is the precedent: the judge is a
+  small injectable protocol (`SupportJudge`) with a fake used in every test, the
+  deterministic checks are plain Python, and an unavailable judge degrades
+  visibly instead of being simulated. The Agent should be built the same way —
+  injectable, replayable under a fake, and unable to reach past the gates.
+- **The Agent cannot bypass the gates, the limits or the store.** Step 8's
+  import scan over `app/generation/` and Step 9's over `app/verification/` are
+  both AST-based assertions that a layer *cannot* reach the things it must not
+  touch (chroma, sqlite3, publishing, notify, retrieval). The Agent's boundary is
+  the natural next one: it may call generation, verification and the Step 6 read
+  service, and must not construct a publisher, a notifier, or a store handle of
+  its own.
+- **Step 10 can be built and verified offline.** `PLAN.md` Step 10's own tests
+  require the decision to be reproducible under a fake LLM, and every Step 8 and
+  Step 9 test injects a fake. Known Issue #5 (the OpenAI-family key sent to the
+  OpenRouter endpoint) is unchanged, so the first real model call is still ahead
+  of the project — and Step 10 must not be the step where the mismatch is worked
+  around in code.
 - **Still open, and still not this step's to close:** Known Issue #8
   (near-duplicate detection is inert until Step 11 supplies an embedder), #9 (no
   real publish through the service yet), #10 (nothing calls the notifier), #11
   (no email has actually been sent), #12 (a credential expiring between runs is
-  only found at publish time) and #13 (nothing calls the generator yet). Step 9
-  adds a gate with no caller either; Steps 10 and 11 own the wiring.
+  only found at publish time), #13 (nothing calls the generator yet) and #14
+  (verification results are produced but not persisted). Step 9 added a gate with
+  no caller; Step 10 adds the first real caller, and Step 11 owns the wiring that
+  persists what the gate decided.
 
 
 ---
