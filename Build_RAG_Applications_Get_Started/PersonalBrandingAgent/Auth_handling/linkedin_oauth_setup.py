@@ -1,15 +1,21 @@
 """
 One-time LinkedIn OAuth authorization script.
 
-Run this ONCE to get your first access token + refresh token.
-After this, your daily posting script will use the saved tokens
-and refresh them automatically without you doing this again.
+Run this ONCE to get your first access token. After this, the publishing
+service (``app/integrations/linkedin/``) uses the saved token until it
+expires, then stops and asks you to run this script again: automatic renewal
+is **not** available — the saved token has no refresh token, and LinkedIn
+issues those only when ``offline_access`` is requested and granted. Do not
+assume this script can be skipped forever. The token lasts about 60 days.
+
+Running this script replaces the saved token, so it is always safe to re-run
+when the service reports that the credential has expired or is expiring.
 
 SETUP BEFORE RUNNING:
-    Set these as environment variables (don't hardcode secrets in code):
+    Set these in the project's .env (or as environment variables):
 
-        export LINKEDIN_CLIENT_ID="783pis53u8ro4m"
-        export LINKEDIN_CLIENT_SECRET="your-client-secret-here"
+        LINKEDIN_CLIENT_ID="783pis53u8ro4m"
+        LINKEDIN_CLIENT_SECRET="your-client-secret-here"
 
     (On Windows PowerShell: $env:LINKEDIN_CLIENT_ID="...")
 
@@ -29,17 +35,27 @@ import os
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+# Paths are resolved relative to this file, never to the current working
+# directory: a token written from one directory and read from another is the
+# defect this step exists to remove. Everything that reads the token resolves
+# the same file (app/paths.py defines it canonically for the application).
+HERE = Path(__file__).resolve().parent
+load_dotenv(HERE.parent / ".env")
 
 CLIENT_ID = os.environ.get("LINKEDIN_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("LINKEDIN_CLIENT_SECRET")
 REDIRECT_URI = "http://localhost:8000/callback"
 SCOPES = "openid profile w_member_social email"
-TOKEN_FILE = "linkedin_tokens.json"
+TOKEN_FILE = Path(__file__).parent / "linkedin_tokens.json"
+
+# Every request is bounded. This script is interactive, but a socket that
+# never answers must not leave it hanging forever.
+TIMEOUT_SECONDS = 30
 
 if not CLIENT_ID or not CLIENT_SECRET:
     raise SystemExit(
@@ -113,6 +129,7 @@ def exchange_code_for_tokens(code):
             "client_secret": CLIENT_SECRET,
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=TIMEOUT_SECONDS,
     )
 
     if response.status_code != 200:
@@ -134,7 +151,9 @@ def main():
 
     print(f"\nDone. Tokens saved to {TOKEN_FILE}")
     print(f"Access token expires in {tokens.get('expires_in')} seconds (~2 months).")
-    print("\nIMPORTANT: Add linkedin_tokens.json to your .gitignore — never commit it.")
+    print("The publishing service reads this file directly and reports the "
+          "expiry before it happens; run this script again when it does.")
+    print("linkedin_tokens.json is gitignored — never commit it.")
 
 
 if __name__ == "__main__":

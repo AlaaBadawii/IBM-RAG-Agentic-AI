@@ -27,30 +27,32 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 5 — Harden the LinkedIn Integration for Autonomous Use
+    Step 6 — Build Persistent Publishing, Idempotency & Recovery
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–4 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–5 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
-    evidence about the user, synchronization is incremental, and there is now a
-    context layer that turns a retrieval result into named, ranked, provenance-
-    preserving sections — with evidence and positioning separated, coverage
-    reported, and the absence of evidence a first-class outcome. Steps 5–14
-    have not been started.
+    evidence about the user, synchronization is incremental, the context layer
+    turns a retrieval result into named, ranked, provenance-preserving sections,
+    and LinkedIn publishing is now a service an unattended workflow can call —
+    with a bounded timeout on every request, classified failures, an explicit
+    ambiguous outcome, and a credential lifecycle that warns before it fails.
+    Nothing it publishes is recorded yet: Step 6 owns that. Steps 6–14 have not
+    been started.
 
 Last Completed Step:
-    Step 4 — Build the Personal Branding Context & Evidence Layer
+    Step 5 — Harden the LinkedIn Integration for Autonomous Use
 
 Next Step:
-    Step 5 — Harden the LinkedIn Integration for Autonomous Use
+    Step 6 — Build Persistent Publishing, Idempotency & Recovery
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–3 have since been implemented, verified,
-and committed; every later step remains untouched.
+analysis of the repository. Steps 0–5 have since been implemented, verified, and
+committed; Step 6 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -73,7 +75,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 2 | Define the Personal Knowledge Source Registry & Project Lifecycle | COMPLETED |
 | 3 | Build Incremental Knowledge Synchronization | COMPLETED |
 | 4 | Build the Personal Branding Context & Evidence Layer | COMPLETED |
-| 5 | Harden the LinkedIn Integration for Autonomous Use | NOT STARTED |
+| 5 | Harden the LinkedIn Integration for Autonomous Use | COMPLETED |
 | 6 | Build Persistent Publishing, Idempotency & Recovery | NOT STARTED |
 | 7 | Build Operational Failure Notifications via Email | NOT STARTED |
 | 8 | Build Grounded Post Generation | NOT STARTED |
@@ -90,6 +92,192 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 5 — Harden the LinkedIn Integration for Autonomous Use
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/integrations/linkedin/` — six modules behind one public surface
+  (`app/integrations/linkedin/__init__.py`): `enums.py` (`LinkedInErrorCategory`,
+  `PublicationOutcome`, `CredentialStatus`), `models.py` (frozen value objects),
+  `errors.py`, `classification.py` (status/transport → category, and local
+  commentary validation), `credentials.py` (the credential lifecycle),
+  `client.py` (the HTTP boundary: `LinkedInClient`, payload, URN and post-id
+  extraction) and `publisher.py`.
+- `publish_to_linkedin(post_text, *, store=None, client=None, token_path=None,
+  now=None) -> PublicationResult` is the whole entry point. It never prints,
+  never prompts, and **raises only `StateStoreError`** — and only before any
+  request is made. Every other failure, including a total absence of
+  credentials, comes back as a classified result.
+- **The proven publish path is retained, not rewritten.** The endpoint
+  (`POST /rest/posts`), the payload, the `x-restli-id` header the post id is
+  read from, and `GET /v2/userinfo` → `urn:li:person:{sub}` are the values that
+  were already verified against the real API; `app/integrations/linkedin/`
+  wraps them. `Auth_handling/test_post.py` remains the manual verification
+  tool and was not converted into the service.
+- **Every request is bounded.** `LINKEDIN_TIMEOUT_SECONDS` (default 30.0)
+  reaches `requests` on every call, including the identity lookup and the token
+  refresh. `LinkedInClient` rejects a non-positive timeout with `ValueError` at
+  construction, so "no timeout" is unrepresentable rather than merely unused.
+- **Failures are classified, never inferred from a message.**
+  `classify_status()` maps 401 → `AUTHENTICATION`, 403 → `PERMISSION`, other
+  4xx → `VALIDATION`, 429 → `RATE_LIMIT`, ≥500 → `TRANSPORT`, everything else →
+  `UNKNOWN`; `classify_transport_error()` separates a connect-time failure
+  (nothing was sent) from a failure after the request left. `retryable` is
+  advice about the failure, not permission to retry — this layer never retries
+  anything, and the policy belongs to Step 6.
+- **The ambiguous outcome exists and is reachable.** `PLAN.md` §5.1: LinkedIn
+  can publish but cannot be read back, so local state is authoritative and an
+  attempt whose fate is unknown must be expressible rather than guessed. A 201
+  with no `x-restli-id`, and any transport failure after the request was sent,
+  return `PublicationOutcome.UNKNOWN` with `retryable=False`. A connect-time
+  failure returns `FAILED` with `retryable=True`, because nothing was sent.
+- **One persistence surface was added, and it is not about publishing.**
+  Schema migration v2 creates `linkedin_credential_expiry` — the expiry read
+  from the stored credential, the issuance time it was derived from, and which
+  evidence produced it (`id_token_iat` or `file_mtime`, CHECK-constrained). It
+  is the only write the integration makes; no publication, intent, run or
+  failure row is written by this step. It exists because the credential carries
+  a *duration* (`expires_in`), never an absolute expiry, so the expiry must be
+  derived — and a credential that dies between two runs has to be detectable by
+  the run that comes after.
+- **The credential lifecycle warns before it fails.** Status is `VALID`,
+  `EXPIRING_SOON` (inside `LINKEDIN_EXPIRY_WARNING_DAYS`, default 14), `EXPIRED`,
+  `MISSING` or `UNREADABLE`. Expiring still publishes, and the warning is
+  carried on the success result too — a warning that only appears on the run
+  that has already stopped working is not a warning. Expired, missing and
+  unreadable all fail closed with `requires_human_intervention=True` and
+  `retryable=False`, and the message names `linkedin_oauth_setup.py`: this is a
+  `REQUIRES_HUMAN_INTERVENTION` termination, not `WORKFLOW_FAILED`.
+- **An unknown expiry is reported as unknown.** The derivation is
+  `id_token.iat` where the credential carries a decodable one, otherwise the
+  file's mtime (the exchange that issues the token is what writes the file),
+  otherwise nothing — the expiry is reported absent, never inferred from
+  something else.
+- **Automatic refresh is not assumed, and is not required.** A refresh is
+  attempted only when the credential is *already expired* and carries a
+  `refresh_token` and the application credentials are configured; a valid or
+  merely expiring credential is never refreshed. A rejected or timed-out
+  refresh stays an authentication failure, is not retried, and leaves the
+  on-disk credential untouched. The real token has no `refresh_token` at all,
+  so the working path is detection → clear auth state → a person re-runs the
+  OAuth script. The refresh path is exercised only against a fake transport.
+- **The API version is configuration.** `LINKEDIN_API_VERSION` (default
+  `202607`) is validated as `YYYYMM` at import, sent as `LinkedIn-Version`, and
+  recorded on every `PublicationResult` — because a versioned API fails for
+  reasons that have nothing to do with the post.
+- **Secrets cannot reach a log or a result.** `load_dotenv` is by path, not by
+  CWD, in all three `Auth_handling/` scripts and in `app/config.py`;
+  `SecretRedactionFilter` now also reads the token file, so the token written
+  to disk *after* `.env` was last edited is redacted too; `LinkedInCredential`
+  excludes its token fields from `repr`; and result messages and response
+  bodies pass through `redact()` before they are stored.
+- **The CWD-dependence defect is fixed at the source.** `app/paths.py` now
+  defines `ENV_FILE` and `LINKEDIN_TOKEN_FILE` once, and all three
+  `Auth_handling/` scripts resolve the token file relative to their own
+  location. `linkedin_oauth_setup.py` — the script that *creates* the token and
+  the one that previously wrote it where the readers would never look — was
+  reconciled with the two that had already been corrected. See Known Issue #3.
+
+Verified:
+- Acceptance: a successful publish returns the LinkedIn post id, and the
+  request that produced it is asserted field by field (method, URL, author,
+  commentary, `LinkedIn-Version`, timeout).
+- Acceptance: missing, expired and unreadable credentials fail clearly and
+  safely — each returns a classified authentication failure with a human-
+  intervention flag, and **no request is made**.
+- Acceptance: no token appears in any log line, error, result message, `repr`,
+  or response body. Asserted with a response body that deliberately echoes the
+  token back.
+- Acceptance: the service works from any working directory. Asserted by
+  `monkeypatch.chdir()` plus the fact that the token path, the `.env` path and
+  the API version all resolve from the project root.
+- Acceptance: every error category is exercised through the real classification
+  table, from simulated LinkedIn responses and simulated transport failures —
+  no test touches the network, needs a real credential, or publishes anything.
+- The publish path cannot prompt or print, checked at source level across every
+  module in the package — an unattended workflow that blocks on `input()` is the
+  failure this step exists to remove.
+- Publishing writes nothing but the credential expiry: after a successful
+  publish, `list_publications()`, `list_publish_intents()`, `list_runs()` and
+  `list_failures()` are all empty. Step 6 owns publication records.
+- A store failure stops the publish before any request (fail-closed, `PLAN.md`
+  §11), and `StateStoreError` is never swallowed into a result.
+- The three `Auth_handling/` scripts resolve the same token file as
+  `app/paths.py` — asserted by parsing each script and comparing the assignment
+  expression, so the drift cannot silently return. Separately asserted: each
+  script passes a path to `load_dotenv`, and the token file is gitignored.
+- A live read-only smoke check of `check_credential()` against the real token
+  file confirmed the derivation end to end — `id_token.iat` `2026-08-03`,
+  `expires_in` `5183999`, expiry ≈ `2026-10-02`, reported `EXPIRING_SOON` at
+  ~11 days out. Nothing was published and no secret was printed.
+
+Tests:
+- New: `tests/test_linkedin_client.py` (33), `tests/test_linkedin_credentials.py`
+  (32), `tests/test_linkedin_publisher.py` (35) — 100 tests, all offline, using
+  a fake transport and a token file written under `tmp_path`.
+- Extended: `tests/test_logging.py` (+2 tests for token-file redaction and for a
+  missing or broken token file never breaking logging).
+- Adjusted: `tests/test_state_schema.py::test_gap_in_the_migration_ledger_is_refused`
+  used a literal `version=2` for its probe, which the new migration 2 made
+  collide. The probe is now numbered from `SCHEMA_VERSION`; the property under
+  test — that a gap in the ledger is refused — is unchanged.
+- Focused: `128 passed in 1.63s` across the three new modules plus the two
+  touched regression modules.
+- Regression: **466 passed, 1 warning in 124.32s** (baseline 364; +102 tests;
+  the warning is the pre-existing CUDA/torch driver notice).
+
+Commit:
+- `Step 5: harden LinkedIn integration for autonomous use` — the commit
+  carrying this record. The subject is used instead of a hash because the hash
+  cannot contain itself; find it with `git log --oneline --grep="^Step 5:"`.
+
+Important notes:
+- **Deviation — one new table was added, in `app/state/`.** Step 5's own scope
+  says the integration stores nothing, and Step 6 owns persistence. Both hold
+  for *publishing*: no publication, intent, run or failure is written here. But
+  the credential's expiry is a fact about the world that must outlive the
+  process that derived it, and there is nowhere else durable for it. The single
+  table `linkedin_credential_expiry` records what was read from the credential
+  and how — never what the system did. This is the one place Step 5 reaches
+  outside `app/integrations/` and `Auth_handling/`.
+- **Deviation — `Auth_handling/test_post.py` keeps its own publish flow.** It
+  could have been rewritten to call the service. It was not, because the
+  instruction for this step was to preserve the two pre-existing uncommitted
+  edits in that file and because a manual tool with a person at the keyboard is
+  what the file is for. Its docstring now says which path an unattended
+  workflow uses. What was fixed in it: the missing timeout on both requests,
+  and `load_dotenv()` by path.
+- **Deviation — refresh is attempted only when already expired.** A
+  pre-emptive refresh of a `refresh_token` login is normally safe, but this
+  refresh path has never been verified against LinkedIn (the real credential
+  has no refresh token), and trading a working credential for an unverified
+  call is the wrong direction. A valid credential is never refreshed.
+- **A refresh is not retried, and a mid-publish 401 is not refreshed.**
+  A 401 from the publish endpoint means the token was rejected; whether a
+  refresh would help is Step 6's question, and a second credential call inside
+  a publish would make the publish path harder to reason about. The result is
+  classified and returned.
+- **Known limitation — the plan's milestone item was not executed.** `PLAN.md`
+  Step 5's acceptance criterion "a real post published through the service
+  returns its LinkedIn post id" is a manual, non-interactive real publish, and
+  implementing this step was explicitly not to publish anything. The path is
+  unchanged from the one already proven by hand (`PLAN.md` §4), and the
+  automated assertion covers everything except the round trip itself. The
+  round trip still has to be confirmed by hand before Step 6 relies on it.
+- **Known limitation — the API version will expire.** `202607` is a literal
+  that LinkedIn will retire on its own schedule; it is configuration precisely
+  so that the fix is an `.env` edit rather than a code change, and it is
+  recorded per attempt so the failure can be attributed. A `404` is classified
+  `UNKNOWN`/human precisely because a retired version is one of the things it
+  can mean.
+- **`app/ingestion/`, `app/retrieval/`, `app/sources/`, `app/sync/` and
+  `app/context/` were not modified.** `app/state/` gained one migration, one
+  model, one enum and three store methods; `app/logging_config.py`,
+  `app/config.py` and `app/paths.py` gained the entries above.
+- **Nothing was published, no real credential was used, and no source was
+  synchronized** while implementing this step. Known Issue #7 remains open.
 
 ### Step 4 — Build the Personal Branding Context & Evidence Layer
 
@@ -811,31 +999,34 @@ Important notes:
 ## Current Step
 
 ```text
-Step 5 — Harden the LinkedIn Integration for Autonomous Use
+Step 6 — Build Persistent Publishing, Idempotency & Recovery
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 5. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 6. It is not
 duplicated here.
 
-What Step 4 leaves on the table for it:
+What Step 5 leaves on the table for it:
 
-- `app/context/` is complete and stands alone: `build_context()` consumes a
-  `RetrievalResult` and returns a `PersonalBrandingContext`. Nothing calls it
-  yet — Step 8 owns generation and Step 10 owns the workflow that will.
-- The insufficiency signal exists but has no consumer. `EvidenceStatus` is the
-  field Step 9's gates are meant to read; until then it is a value nobody acts
-  on, and it is worth confirming in Step 9 that "insufficient" actually stops a
-  publish rather than merely being visible.
-- Freshness reads `sync_checkpoints` and therefore reports `UNKNOWN` for every
-  registered source in the real workspace, because no source has ever been
-  synchronized (Known Issue #7). The mechanism is correct and the answer is
-  honest; the data it reads is still empty.
-- The hand-written `data/` corpus is reported as untracked with no freshness at
-  all. If a later step needs to know whether a curated document is stale, that
-  information does not exist yet — Issue #2 is still the open question behind
-  it.
+- `publish_to_linkedin()` returns a `PublicationResult` and records **nothing**
+  about the publication. Step 6 owns the write-ahead intent, the publication
+  record, the content-hash uniqueness rule and the recovery path — the tables
+  and their CHECK constraints have existed since Step 1 and are still unused.
+- `PublicationOutcome.UNKNOWN` is reachable and has to be *handled*, not merely
+  returned. When no post id came back, Step 6 must record an unresolved
+  outcome and refuse to retry it blindly. The ambiguity is expressed here; it
+  is acted on there.
+- `retryable` is an advisory field with no consumer yet. The retry policy is
+  Step 6's, and its first obligation is to respect the difference between
+  "nothing was sent" and "we do not know whether anything was sent" — retrying
+  the second can duplicate a post that already exists.
+- The credential expiry is written to operational state but read by nothing
+  across runs. Step 6 is where a run should learn from the store that the
+  credential died between runs, rather than discovering it at publish time.
+- The one real publish through the service has not been performed (see the
+  Step 5 record). It is worth doing before Step 6 builds on the assumption
+  that the wrapped path still round-trips.
 
 ---
 
@@ -892,15 +1083,19 @@ against temporary repositories — but **the real corpus is still stale**, becau
 synchronizing 29 real sources is a runtime operation, not an implementation
 step. See Issue #7. The corpus still carries the stale revisions.
 
-### 3. Uncommitted working-tree changes exist in `Auth_handling/`
+### 3. ~~Uncommitted working-tree changes exist in `Auth_handling/`~~ — RESOLVED in Step 5
 
-`Auth_handling/test_credentials.py` and `Auth_handling/test_post.py` carry
+`Auth_handling/test_credentials.py` and `Auth_handling/test_post.py` carried
 **uncommitted** edits that resolve the token file relative to `__file__`.
-`linkedin_oauth_setup.py` — the script that *creates* the token — still uses a
-CWD-relative literal path, so it writes the token where the two readers will not
+`linkedin_oauth_setup.py` — the script that *creates* the token — still used a
+CWD-relative literal path, so it wrote the token where the two readers would not
 look.
 
-Reconciled by **Step 5**.
+**Resolved** by Step 5. All three scripts now resolve the token file relative to
+their own location, `app/paths.py` defines that file once for the application,
+and an AST-based test fails if any of the three drifts again. The two
+pre-existing edits were preserved byte-for-byte and are now committed as part of
+Step 5.
 
 ### 4. Documentation referenced but not written
 
@@ -1050,46 +1245,58 @@ not a specification.
 | **Secrets live only in `.env` or the gitignored token file** | Model ids, chunk/retrieval parameters, and paths grant no external access and stay committable in `app/config.py`; `SecretRedactionFilter` scrubs secret *values* from every log line | `docs/operations/security.md` §2, §4 |
 | **Notifications use SMTP** | Provider-agnostic interface, configured for Gmail; stdlib preferred; fake transport in tests | `PLAN.md` Step 7 |
 | **Infrastructure stays minimal** | LangGraph, MCP, multi-agent, queues, Redis, PostgreSQL, microservices, Kubernetes, and distributed workers are deferred with reasons | `PLAN.md` §7 |
+| **The integration's interface is a result, never a print or a prompt** | An unattended workflow cannot read stdout and cannot answer a question. The step removes the interactive confirmation and makes the classified result the contract; a source-level test fails if `print(` or `input(` reappears anywhere in the package | Step 5, `app/integrations/linkedin/publisher.py` |
+| **An ambiguous publish is an outcome, not a failure** | LinkedIn can publish but cannot be read back, so when a 201 arrives without a post id — or the request was sent and the answer never came — the system must be able to say "a post may exist" rather than choosing between a false success and an invitation to duplicate | `PLAN.md` §5.1, Step 5, `app/integrations/linkedin/enums.py` |
+| **`retryable` is advice about the failure, not permission to retry** | Whether a retry is safe also depends on whether the previous attempt could have reached LinkedIn, which is a different field. The integration never retries anything itself; the policy is Step 6's | Step 5, `app/integrations/linkedin/classification.py` |
+| **Failures are classified from the status and the transport event, never from message text** | A message is prose that changes without notice; the status code and the exception type are the interface. A connect-time failure is provably "nothing sent" and is retryable; a failure after the request left is not | Step 5, `app/integrations/linkedin/classification.py` |
+| **The credential expiry is derived and stored with the evidence that produced it** | The credential carries a duration (`expires_in`), never an absolute date, so the expiry must be derived — and a derivation is worth exactly as much as what it came from. The row records `id_token_iat` or `file_mtime`, and an expiry that cannot be derived is reported absent rather than guessed | Step 5, `app/state/schema.py`, `app/integrations/linkedin/credentials.py` |
+| **A warning that only appears on the run that has stopped working is not a warning** | `EXPIRING_SOON` publishes normally and the warning is carried on the successful result too; the point is to reach a person while the system still works, and the only remedy is re-running the OAuth script by hand | `PLAN.md` Step 5, `app/integrations/linkedin/credentials.py` |
+| **Refresh is attempted only when the credential is already expired** | The refresh path has never been verified against LinkedIn and the real credential has no `refresh_token`, so pre-emptive refreshing would trade a working credential for an unverified call. A rejected or timed-out refresh is not retried and leaves the on-disk credential untouched | `PLAN.md` §5.2, Step 5 |
+| **The API version is configuration, not a literal in a header** | LinkedIn retires versions on a rolling cadence, so a working integration stops working with no code change on our side. It is validated as `YYYYMM` at import and recorded on every attempt, so a failure can be attributed to the version that produced it | Step 5, `app/config.py` |
+| **A request with no timeout is unrepresentable** | An unattended workflow blocked on a socket is indistinguishable from a crashed one, except that it holds the run lock (Step 12). The client refuses a non-positive timeout at construction, so "no timeout" cannot be configured | Step 5, `app/integrations/linkedin/client.py` |
+| **The credential path is defined once, and the definition is tested** | The defect this step exists to fix was a token written in one directory and looked for in another. `app/paths.py` owns the canonical path and an AST-based test fails if any `Auth_handling/` script drifts from it | Step 5, `app/paths.py`, `tests/test_linkedin_credentials.py` |
+| **Step 5 adds exactly one table, and it records a fact rather than an action** | Step 5 stores nothing about publishing — that is Step 6's authority. `linkedin_credential_expiry` exists because a credential that dies between two runs has to be detectable by the run that comes after, and there is nowhere else durable for it | Step 5, `app/state/schema.py` |
 
 ---
 
 ## Next Step
 
-### Step 5 — Harden the LinkedIn Integration for Autonomous Use
+### Step 6 — Build Persistent Publishing, Idempotency & Recovery
 
-The next implementation task is defined in `PLAN.md` §8, Step 5.
+The next implementation task is defined in `PLAN.md` §8, Step 6.
 
-Publishing is already proven against the real API; Step 5 turns an interactive
-script into a service an unattended workflow can call, and gives credentials an
-explicit lifecycle.
+Publishing works and can be called unattended; what is missing is that nothing
+about it is remembered. Step 6 makes a publish survive a crash, makes a second
+attempt at the same content impossible, and gives the ambiguous outcome
+somewhere to be recorded.
 
-Constraints carried in from Steps 0–4:
+Constraints carried in from Step 5:
 
-- **`Auth_handling/` carries uncommitted working-tree changes that belong to
-  this step.** `test_credentials.py` and `test_post.py` already resolve the
-  token file relative to `__file__`; `linkedin_oauth_setup.py` — the script that
-  *creates* the token — still uses the literal relative path, so it writes the
-  token where the two readers will never look. They were deliberately left
-  untouched through Steps 0–4 and must be reconciled here. See Known Issue #3.
-- **The `app/` integration layer is a wrapper, not a rewrite.** The OAuth flow,
-  the endpoint, the payload and the person-URN resolution are proven and are
-  retained; `app/integrations/linkedin/` wraps them behind
-  `publish_to_linkedin(post_text)`.
-- **Automatic token refresh must not be assumed.** The saved token has no
-  `refresh_token`, and `offline_access` alone is not evidence that programmatic
-  refresh works. The service must be correct without it.
-- **The integration never records success on its own authority.** Persistence —
-  the write-ahead intent, the publication record — belongs to Step 6. Step 5
-  returns a structured result and stores nothing.
-- **Retrieval and context are not consulted by this step.** Step 4 produces a
-  context object; Step 5 publishes text it is handed, and the two do not meet
-  until Step 8 generates from one the other assembled.
+- **The integration is a boundary, not a policy.** `publish_to_linkedin()`
+  takes text and returns a classified result; it does not know about runs,
+  intents, or idempotency, and Step 6 should not push that knowledge back into
+  it. The one thing it does write is the credential expiry, and that is a fact
+  it read rather than a claim it made.
+- **Ambiguity is already expressible — do not collapse it.** `UNKNOWN` with
+  `retryable=False` is the integration's answer when a post may exist.
+  Recording it as a failure and retrying would duplicate a post; `PLAN.md` §5.1
+  explains why there is no read-back to resolve it.
+- **The state store already carries the constraints.** One publish intent per
+  run, one unresolved intent per content hash, and `published` if and only if a
+  post id exists are enforced by SQLite as of Step 1. Step 6 should be using
+  them, not re-checking them in Python.
+- **A store failure must keep stopping the publish.** Step 5 already fails
+  closed before any request when the store is unusable; Step 6's write-ahead
+  intent extends that guarantee rather than replacing it.
+- **The credential lifecycle is not Step 6's.** Expiry detection, the warning,
+  and the return-to-human path are done; Step 6 consumes the recorded expiry
+  rather than re-deriving it.
 - **No credentials are to be committed, and nothing is to be published as part
-  of implementing this step.** The existing verification is a pre-existing
-  baseline, not something Step 5 needs to repeat.
-- **Known Issue #5 (the LLM key does not match the configured provider) is not a
-  Step 5 blocker** — nothing in the LinkedIn integration path uses an LLM. It
-  must be corrected before Step 8.
+  of implementing this step.** The single real publish that would confirm the
+  wrapped path is a manual, deliberate act, not an implementation step.
+- **Known Issue #5 (the LLM key does not match the configured provider) is
+  still not a blocker** — Step 6 publishes text it is handed. It must be
+  corrected before Step 8.
 
 
 ---

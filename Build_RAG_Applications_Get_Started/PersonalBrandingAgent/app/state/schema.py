@@ -26,6 +26,8 @@ A lifecycle is one of four values       ``source_lifecycle.lifecycle`` CHECK
 A delivery state is one of three values ``notifications.delivery_state`` CHECK
 A "sent" notification has a delivery    ``(delivery_state = 'sent') =
 time                                    (delivered_at IS NOT NULL)``
+A credential expiry was derived, not    ``linkedin_credential_expiry``
+asserted                                ``.derived_from`` CHECK
 One holder per lock                     ``locks.lock_name`` PRIMARY KEY
 ======================================  =====================================
 
@@ -242,6 +244,38 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        version=2,
+        description="record LinkedIn credential expiry",
+        statements=(
+            # Step 5. The stored LinkedIn credential carries a *duration*
+            # (``expires_in``), never an absolute expiry, so the expiry has to
+            # be derived from when it was issued. Deriving it on every run
+            # would work only while the token file is never touched; recording
+            # it once — together with the timestamp it was derived from — lets
+            # a run compare, notice the credential has been re-created, and
+            # re-derive instead of trusting a stale row.
+            #
+            # The row is a fact read from the credential, not a claim about
+            # something the system did, and it is the *only* thing the
+            # integration layer writes: publication records belong to Step 6,
+            # and the integration never records publishing success on its own
+            # authority.
+            """
+            CREATE TABLE linkedin_credential_expiry (
+                credential    TEXT PRIMARY KEY,
+                expires_at    TEXT NOT NULL,
+                issued_at     TEXT,
+                derived_from  TEXT NOT NULL CHECK (derived_from IN (
+                                  'id_token_iat', 'file_mtime')),
+                source_mtime  TEXT NOT NULL,
+                recorded_at   TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                CHECK (expires_at >= issued_at OR issued_at IS NULL)
+            )
+            """,
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.
@@ -259,6 +293,7 @@ TABLES: tuple[str, ...] = (
     "operational_failures",
     "notifications",
     "locks",
+    "linkedin_credential_expiry",
 )
 
 

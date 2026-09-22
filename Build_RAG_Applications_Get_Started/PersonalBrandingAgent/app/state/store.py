@@ -9,6 +9,12 @@ What belongs here
     failures, notification deliveries, and locks. In one sentence: what the
     system has done.
 
+    One row is a fact about the world rather than about the system: the
+    expiry of the stored LinkedIn credential (``linkedin_credential_expiry``,
+    Step 5). It belongs here because it must outlive the process that derived
+    it — a credential that expires between runs has to be detectable by the
+    run that comes after — and because there is nowhere else durable.
+
 What must never belong here
     Knowledge about the user. The `data/` corpus and its Chroma index are a
     different store with different authority (``PLAN.md`` §6), and the two are
@@ -48,6 +54,7 @@ from app.errors import StateConstraintError, StateStoreError
 from app.paths import STATE_DB_PATH
 from app.state.enums import (
     TERMINAL_PUBLISH_STATES,
+    CredentialDerivation,
     DeliveryState,
     LifecycleState,
     PublishState,
@@ -56,6 +63,7 @@ from app.state.enums import (
     Workflow,
 )
 from app.state.models import (
+    CredentialExpiry,
     EvidenceRef,
     Lock,
     LockAcquisition,
@@ -617,6 +625,60 @@ class StateStore:
                 )
             )
         return grouped
+
+    # -- credential expiry ---------------------------------------------------
+
+    def record_credential_expiry(self, credential: str, expires_at: str,
+                                 issued_at: str | None = None,
+                                 derived_from: CredentialDerivation | str = (
+                                     CredentialDerivation.ID_TOKEN_IAT),
+                                 source_mtime: str = "",
+                                 ) -> CredentialExpiry:
+        """Record when a stored credential expires.
+
+        Idempotent per credential: the row is replaced, because a credential
+        has exactly one expiry and keeping history here would make "when does
+        it expire" a question with several answers. The issuance time and the
+        evidence it came from are stored *with* it, so a caller can never read
+        an expiry without also being able to see how much it can be trusted
+        (``PLAN.md`` Step 5).
+
+        This is the only write the LinkedIn integration makes. It is a fact
+        read from the credential, not a claim that something was published —
+        publication records belong to Step 6.
+        """
+        if not credential.strip():
+            raise ValueError("credential must be non-empty")
+        source = _coerce_enum(derived_from, CredentialDerivation, "derived_from")
+        now = utc_now_iso()
+        self._write(
+            "INSERT INTO linkedin_credential_expiry (credential, expires_at, "
+            "issued_at, derived_from, source_mtime, recorded_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (credential) DO UPDATE SET "
+            "expires_at = excluded.expires_at, "
+            "issued_at = excluded.issued_at, "
+            "derived_from = excluded.derived_from, "
+            "source_mtime = excluded.source_mtime, "
+            "updated_at = excluded.updated_at",
+            (credential, expires_at, issued_at, source.value, source_mtime,
+             now, now),
+            f"recording the expiry of credential {credential}",
+        )
+        return self.get_credential_expiry(credential)  # type: ignore[return-value]
+
+    def get_credential_expiry(self, credential: str) -> CredentialExpiry | None:
+        rows = self._read(
+            "SELECT * FROM linkedin_credential_expiry WHERE credential = ?",
+            (credential,),
+        )
+        return CredentialExpiry.from_row(rows[0]) if rows else None
+
+    def list_credential_expiries(self) -> list[CredentialExpiry]:
+        rows = self._read(
+            "SELECT * FROM linkedin_credential_expiry ORDER BY credential"
+        )
+        return [CredentialExpiry.from_row(row) for row in rows]
 
     # -- operational failures -----------------------------------------------
 

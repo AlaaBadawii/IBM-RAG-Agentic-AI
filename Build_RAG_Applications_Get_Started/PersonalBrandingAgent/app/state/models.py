@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from app.state.enums import (
+    CredentialDerivation,
     DeliveryState,
     LifecycleState,
     PublishState,
@@ -283,6 +284,42 @@ class Notification:
             error_message=row["error_message"],
             attempted_at=row["attempted_at"],
             delivered_at=row["delivered_at"],
+        )
+
+
+@dataclass(frozen=True)
+class CredentialExpiry:
+    """When a stored credential expires, and how that was determined.
+
+    Not a credential and never a token: what is recorded is the *expiry*, the
+    issuance time it was derived from, and which evidence produced it. The
+    token itself stays on disk in the gitignored file the OAuth flow wrote —
+    operational state is not a secret store (``PLAN.md`` Step 5).
+
+    ``source_mtime`` is the modification time of the credential file the
+    values were derived from. A run that finds a different mtime knows the
+    credential was re-issued and re-derives, so a stale row can never keep a
+    dead token looking alive.
+    """
+
+    credential: str
+    expires_at: str
+    derived_from: CredentialDerivation
+    source_mtime: str
+    recorded_at: str
+    updated_at: str
+    issued_at: str | None = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "CredentialExpiry":
+        return cls(
+            credential=row["credential"],
+            expires_at=row["expires_at"],
+            derived_from=CredentialDerivation(row["derived_from"]),
+            source_mtime=row["source_mtime"],
+            recorded_at=row["recorded_at"],
+            updated_at=row["updated_at"],
+            issued_at=row["issued_at"],
         )
 
 

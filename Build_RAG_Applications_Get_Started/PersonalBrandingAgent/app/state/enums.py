@@ -93,6 +93,26 @@ class DeliveryState(str, Enum):
     FAILED = "failed"
 
 
+class CredentialDerivation(str, Enum):
+    """How a stored credential's expiry timestamp was obtained.
+
+    Stored with the expiry, because the two derivations are not equally
+    trustworthy and a later reviewer has to be able to tell them apart
+    (``PLAN.md`` Step 5: "read expiry from the stored credential; never
+    guess").
+
+    ``ID_TOKEN_IAT`` is authoritative — the issuance claim LinkedIn signed
+    inside the credential itself. ``FILE_MTIME`` is the fallback used when the
+    credential carries no decodable ``id_token``: the moment the file was
+    written is the best available evidence of when it was issued, and it is
+    evidence rather than a guess only because the file is written by the
+    exchange that issues the token.
+    """
+
+    ID_TOKEN_IAT = "id_token_iat"
+    FILE_MTIME = "file_mtime"
+
+
 class Workflow(str, Enum):
     """The two independent scheduled workflows (``PLAN.md`` Step 11).
 

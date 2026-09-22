@@ -4,14 +4,38 @@ Rule: no secret value may ever reach a log line. A logging.Filter scans
 formatted messages for known secret values (from env vars and the LinkedIn
 token file) and replaces them with [REDACTED].
 """
+import json
 import logging
 import os
 import sys
 
+from app import paths
 from app.paths import LOG_DIR
 
 REDACTED = "[REDACTED]"
 _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
+def token_file_secrets() -> list[str]:
+    """Secret values held in the LinkedIn token file, if it is readable.
+
+    The token is a secret the environment does not know about: it is written
+    to disk by the OAuth script long after ``.env`` was last edited, so a
+    filter built from environment variables alone would let it through. Read
+    defensively — a missing or unreadable token file must never break logging,
+    and it is a normal state (no credential has been created yet).
+    """
+    try:
+        with open(paths.LINKEDIN_TOKEN_FILE, encoding="utf-8") as handle:
+            tokens = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(tokens, dict):
+        return []
+    return [
+        value for key in ("access_token", "refresh_token", "id_token")
+        if isinstance(value := tokens.get(key), str) and value
+    ]
 
 
 class SecretRedactionFilter(logging.Filter):
@@ -30,7 +54,7 @@ class SecretRedactionFilter(logging.Filter):
                 os.getenv("LINKEDIN_CLIENT_ID"),
                 os.getenv("LINKEDIN_CLIENT_SECRET"),
             ) if v
-        ]
+        ] + token_file_secrets()
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()

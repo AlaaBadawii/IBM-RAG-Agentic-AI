@@ -114,8 +114,12 @@ def test_store_written_by_a_newer_version_is_refused(store, store_path):
 
 
 def test_gap_in_the_migration_ledger_is_refused(tmp_path, monkeypatch):
+    # The probe is appended after every real migration rather than numbered
+    # with a literal, so this test keeps testing "a gap is refused" as the
+    # schema grows instead of colliding with the next migration added.
+    probe_version = SCHEMA_VERSION + 1
     probe = schema_module.Migration(
-        version=2,
+        version=probe_version,
         description="probe",
         statements=("CREATE TABLE _probe (id INTEGER PRIMARY KEY)",),
     )
@@ -126,7 +130,7 @@ def test_gap_in_the_migration_ledger_is_refused(tmp_path, monkeypatch):
     conn = sqlite3.connect(str(path))
     conn.isolation_level = None
     try:
-        assert schema_module.ensure_schema(conn) == 2
+        assert schema_module.ensure_schema(conn) == probe_version
         conn.execute("DELETE FROM schema_version WHERE version = 1")
         with pytest.raises(StateStoreError, match="not contiguous"):
             schema_module.ensure_schema(conn)

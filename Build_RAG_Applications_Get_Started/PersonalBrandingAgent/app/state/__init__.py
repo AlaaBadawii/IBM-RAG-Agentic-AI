@@ -18,6 +18,7 @@ read access that would allow reconciliation (§5.1).
 """
 from app.state.enums import (
     TERMINAL_PUBLISH_STATES,
+    CredentialDerivation,
     DeliveryState,
     LifecycleState,
     PublishState,
@@ -26,6 +27,7 @@ from app.state.enums import (
     Workflow,
 )
 from app.state.models import (
+    CredentialExpiry,
     EvidenceRef,
     Lock,
     LockAcquisition,
@@ -43,6 +45,8 @@ from app.state.store import StateStore, content_hash_of
 
 __all__ = [
     "TERMINAL_PUBLISH_STATES",
+    "CredentialDerivation",
+    "CredentialExpiry",
     "DeliveryState",
     "EvidenceRef",
     "LifecycleState",

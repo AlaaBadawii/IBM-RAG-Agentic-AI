@@ -13,12 +13,18 @@ Run:
 
 import json
 import os
+from pathlib import Path
+
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+# Resolved relative to this file, never to the current working directory, so
+# the script behaves the same from anywhere.
+HERE = Path(__file__).resolve().parent
+load_dotenv(HERE.parent / ".env")
 
-TOKEN_FILE = "linkedin_tokens.json"
+
+TOKEN_FILE = Path(__file__).parent / "linkedin_tokens.json"
 REDIRECT_URI = "http://localhost:8000/callback"
 
 CLIENT_ID = os.environ.get("LINKEDIN_CLIENT_ID")

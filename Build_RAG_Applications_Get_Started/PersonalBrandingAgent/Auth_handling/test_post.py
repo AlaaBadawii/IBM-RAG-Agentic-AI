@@ -1,6 +1,12 @@
 """
 Sends a single test post to your own LinkedIn profile.
 
+This is the manual verification tool for the proven publish path. The path an
+unattended workflow uses is ``app/integrations/linkedin/publish_to_linkedin``,
+which is the same request without a person at the keyboard, with the
+credential lifecycle, timeouts and error classification this script does not
+have — see ``docs/architecture/linkedin-integration.md``.
+
 Run this after linkedin_oauth_setup.py has created linkedin_tokens.json
 in the same folder.
 
@@ -9,9 +15,18 @@ Run:
 """
 
 import json
-import requests
+from pathlib import Path
 
-TOKEN_FILE = "linkedin_tokens.json"
+import requests
+from dotenv import load_dotenv
+
+# Resolved relative to this file, never to the current working directory.
+HERE = Path(__file__).resolve().parent
+load_dotenv(HERE.parent / ".env")
+
+TOKEN_FILE = Path(__file__).parent / "linkedin_tokens.json"
+
+TIMEOUT_SECONDS = 30
 
 
 def load_access_token():
@@ -25,6 +40,7 @@ def get_person_urn(access_token):
     response = requests.get(
         "https://api.linkedin.com/v2/userinfo",
         headers={"Authorization": f"Bearer {access_token}"},
+        timeout=TIMEOUT_SECONDS,
     )
     response.raise_for_status()
     data = response.json()
@@ -54,6 +70,7 @@ def create_post(access_token, author_urn, text):
             "LinkedIn-Version": "202607",
         },
         json=payload,
+        timeout=TIMEOUT_SECONDS,
     )
 
     if response.status_code == 201:
