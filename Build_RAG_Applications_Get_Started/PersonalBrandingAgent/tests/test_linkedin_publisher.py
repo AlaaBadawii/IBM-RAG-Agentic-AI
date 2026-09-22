@@ -260,8 +260,6 @@ def test_oversized_text_is_rejected_without_a_request(tmp_path):
     (422, LinkedInErrorCategory.VALIDATION, False, False),
     (404, LinkedInErrorCategory.UNKNOWN, False, True),
     (429, LinkedInErrorCategory.RATE_LIMIT, True, False),
-    (500, LinkedInErrorCategory.TRANSPORT, True, False),
-    (503, LinkedInErrorCategory.TRANSPORT, True, False),
 ])
 def test_a_rejected_post_is_classified_and_never_claimed_as_published(
         tmp_path, status, category, retryable, human):
@@ -278,6 +276,51 @@ def test_a_rejected_post_is_classified_and_never_claimed_as_published(
     assert result.retryable is retryable
     assert result.requires_human_intervention is human
     assert result.http_status == status
+
+
+@pytest.mark.parametrize("status", [500, 503])
+def test_a_post_request_that_fails_with_5xx_is_ambiguous_not_a_failure(
+        tmp_path, status):
+    """The request reached LinkedIn, so "no post exists" cannot be claimed.
+
+    A 5xx is LinkedIn's own handling failing after it received the request.
+    Nothing here can establish that the post was not created, and reporting
+    ``FAILED`` would release the content: Step 6 protects text from being sent
+    twice only while its intent is unresolved, so a wrong ``FAILED`` is how
+    the same post goes out again on a later run.
+    """
+    transport = FakeTransport(userinfo=identity(),
+                              post=response(status, body="boom"))
+    result = publish(transport, credentialed(tmp_path))
+
+    assert result.outcome is PublicationOutcome.UNKNOWN
+    assert result.ambiguous is True
+    assert result.published is False
+    assert result.post_id is None
+    assert result.http_status == status
+    assert result.error_category is LinkedInErrorCategory.TRANSPORT
+    # The *failure* is transient, which is what `retryable` is advice about;
+    # the *outcome* is what is unknown, and Step 6 never retries either way.
+    assert result.retryable is True
+    assert result.requires_human_intervention is False
+
+
+@pytest.mark.parametrize("status", [500, 503])
+def test_a_failed_identity_lookup_stays_a_failure(tmp_path, status):
+    """No post request has been made yet, so no post can exist.
+
+    The 5xx rule is about the post request. Treating the identity lookup the
+    same way would block content that was never sent.
+    """
+    transport = FakeTransport(userinfo=response(status, body="boom"),
+                              post=published())
+    result = publish(transport, credentialed(tmp_path))
+
+    assert result.outcome is PublicationOutcome.FAILED
+    assert result.ambiguous is False
+    assert [call.method for call in transport.calls] == ["GET"], (
+        "an identity failure must not reach the post endpoint"
+    )
 
 
 def test_a_rejected_post_keeps_the_response_body_for_diagnosis(tmp_path):

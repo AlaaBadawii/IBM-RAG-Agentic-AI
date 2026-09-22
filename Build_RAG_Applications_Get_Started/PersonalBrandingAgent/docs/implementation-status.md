@@ -260,6 +260,25 @@ Deviations:
   The wrapped path is exercised end to end against fakes only. The single real
   publish through the service remains a deliberate manual act (see the Step 5
   record and Issue #9).
+- **Deviation, added after the step was reviewed — a 5xx from the post endpoint
+  is `UNKNOWN`, not `FAILED`.** Step 6 was implemented against the Step 5 result
+  as it then stood, where every received response that was not a publication
+  came back `FAILED`. A review of the boundary found that is wrong for the one
+  request that can create a post: a 5xx means LinkedIn received the request and
+  its own handling failed, so whether a post exists cannot be established from
+  here, and there is no read-back to ask (§5.1). Recorded as `FAILED`, such an
+  attempt drops out of `ux_publish_intents_unresolved_content`, a later run
+  stops finding it by content hash, and the same words go out twice — the
+  duplicate this step exists to prevent. `publisher._http_failure` now takes a
+  required `outcome` and the post call site passes `UNKNOWN` for `status >= 500`
+  while the identity call site keeps passing `FAILED` (no post request has been
+  made at that point, whatever the status). The 5xx *classification* is
+  unchanged — still `TRANSPORT` and still `retryable`, which is advice about the
+  failure rather than a statement about the post — and `retryable` never
+  mattered here because nothing in Step 6 retries. The state machine, the
+  duplicate checks, and the schema are untouched; `PublicationOutcome`,
+  `PublishState.UNKNOWN_REQUIRES_REVIEW` and recovery's two directions already
+  expressed this case, and only the boundary was failing to use them.
 
 ---
 

@@ -42,13 +42,15 @@ def linkedin_result(outcome: PublicationOutcome, *, post_id: str | None = None,
                     message: str = "reported by the fake transport",
                     category: LinkedInErrorCategory | None = None,
                     retryable: bool = False,
-                    requires_human: bool = False) -> PublicationResult:
+                    requires_human: bool = False,
+                    http_status: int | None = None) -> PublicationResult:
     """A ``PublicationResult`` as the Step 5 integration would return it."""
     return PublicationResult(
         outcome=outcome,
         message=message,
         api_version="202601",
         attempted_at=to_iso(utc_now()),
+        http_status=http_status,
         post_id=post_id,
         error_category=category,
         retryable=retryable,
@@ -334,6 +336,56 @@ def test_an_ambiguous_outcome_is_never_retried_by_a_later_run(store):
     assert report.refused
     assert not retry.called, "an unresolved attempt was retried"
     assert "unresolved" in report.message
+
+
+def test_a_post_5xx_keeps_the_content_blocked_without_retrying_it(store):
+    """The Step 5 5xx outcome, seen from Step 6's side of the boundary.
+
+    A 5xx from the post endpoint reaches the service as ``UNKNOWN``, and the
+    only safe record of it is the ambiguity: LinkedIn received the request and
+    its own handling failed, so a post may exist and there is no read-back to
+    ask (``PLAN.md`` §5.1). Recorded as ``FAILED`` instead, the intent would
+    drop out of the unresolved-content index, ``find_intent_by_content_hash``
+    would stop finding it, and the next run would send the same words again —
+    the duplicate this state machine exists to prevent.
+    """
+    first = _run(store)
+    answer = linkedin_result(
+        PublicationOutcome.UNKNOWN,
+        message=("LinkedIn failed while creating the post (HTTP 503); whether "
+                 "a post exists is unknown and has to be confirmed by a person"),
+        category=LinkedInErrorCategory.TRANSPORT,
+        retryable=True,
+        http_status=503,
+    )
+    transport = FakeTransport(answer)
+    report = _service(store, transport).publish(PublishRequest(content=TEXT),
+                                                first.run_id)
+
+    assert report.decision is PublishDecision.UNKNOWN_REQUIRES_REVIEW
+    assert report.requires_review
+    assert len(transport.calls) == 1, "an ambiguous post was sent again"
+    stored = store.get_publication_for_intent(report.intent_id)
+    assert stored.outcome is PublishState.UNKNOWN_REQUIRES_REVIEW
+    assert stored.linkedin_post_id is None
+
+    # The words stay spoken for: a later run is refused before any request is
+    # built, exactly as for any other unresolved intent.
+    second = _run(store)
+    retry = FakeTransport(_published(store))
+    again = _service(store, retry).publish(PublishRequest(content=TEXT),
+                                           second.run_id)
+
+    assert again.refused
+    assert not retry.called, "a 5xx that may have created a post was retried"
+    assert "unresolved" in again.message
+
+    # And nothing quietly resolves it: the ambiguity was recorded, not left
+    # mid-flight, so a recovery pass over the run has nothing to decide.
+    recovery = _service(store, retry).recover_run(first.run_id)
+    assert recovery.recovered == 0
+    assert not recovery.blocked
+    assert not retry.called
 
 
 def test_a_definitely_failed_attempt_does_not_burn_the_content(store):

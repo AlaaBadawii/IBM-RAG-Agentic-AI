@@ -179,6 +179,9 @@ def publish_to_linkedin(post_text: str, *,
             message=(f"LinkedIn refused to identify the credential owner "
                      f"(HTTP {urn_response.status_code}); the credential may "
                      f"lack the openid/profile scope"),
+            # No post request has been made, so no post can exist — whatever
+            # the status was, including a 5xx.
+            outcome=PublicationOutcome.FAILED,
         )
 
     try:
@@ -240,12 +243,28 @@ def publish_to_linkedin(post_text: str, *,
             response_body=body,
         )
 
+    # A 5xx from the post endpoint is not a rejection: the request reached
+    # LinkedIn and its own handling failed, so whether a post was created
+    # cannot be established from here — and there is no read-back to ask
+    # (§5.1). It is therefore the same ambiguity as a transport failure after
+    # the request was sent, and is recorded the same way. Reporting it as a
+    # failure would be a claim this layer cannot support, and Step 6 releases
+    # a failed attempt's content for a later run to send again.
+    ambiguous = post_response.status_code >= 500
     return _http_failure(
         post_response, api_version=api_version, attempted_at=attempted_at,
         credential=credential, credential_status=report.status,
         expiry_warning=warning,
-        message=(f"LinkedIn rejected the post with HTTP "
-                 f"{post_response.status_code}"),
+        message=(
+            f"LinkedIn failed while creating the post (HTTP "
+            f"{post_response.status_code}); whether a post exists is unknown "
+            f"and has to be confirmed by a person"
+            if ambiguous
+            else f"LinkedIn rejected the post with HTTP "
+                 f"{post_response.status_code}"
+        ),
+        outcome=(PublicationOutcome.UNKNOWN if ambiguous
+                 else PublicationOutcome.FAILED),
     )
 
 
@@ -277,9 +296,20 @@ def _send(call: Callable[[str], Any], access_token: str, *,
 
 def _http_failure(response: Any, *, api_version: str, attempted_at: str,
                   credential, credential_status: CredentialStatus,
-                  expiry_warning: str | None, message: str
+                  expiry_warning: str | None, message: str,
+                  outcome: PublicationOutcome
                   ) -> PublicationResult:
-    """Classify a response that was received and is not a publication."""
+    """Classify a response that was received and is not a publication.
+
+    ``outcome`` is required rather than defaulted: the two requests this
+    function serves know different things, and only the caller knows which one
+    it made. A response to the identity lookup cannot have created a post, so
+    its failure is definitive. A response to the *post* request may have: a 5xx
+    says the request was received and LinkedIn's own handling failed, which
+    cannot be told apart from a post that was created and then lost. A default
+    here is what silently made that case ``FAILED``, and ``FAILED`` releases
+    the content for a second send by a later run (``PLAN.md`` §5.1).
+    """
     status = response.status_code
     classification = classify_status(status)
     if classification.requires_human_intervention:
@@ -292,7 +322,7 @@ def _http_failure(response: Any, *, api_version: str, attempted_at: str,
         message=message, credential=credential,
         credential_status=credential_status, expiry_warning=expiry_warning,
         http_status=status, classification=classification,
-        outcome=PublicationOutcome.FAILED,
+        outcome=outcome,
         response_body=_response_body(response, credential.secrets()),
     )
 
