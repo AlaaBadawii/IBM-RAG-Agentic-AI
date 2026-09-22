@@ -29,6 +29,7 @@ from app.workflows.common import (
     Escalation,
     WorkflowResult,
     finish,
+    record_phase_failure,
     run_phase,
     start,
 )
@@ -130,6 +131,8 @@ def run_sync(config: SyncConfig | None = None) -> WorkflowResult:
             f"{names or 'a source reported a condition the system cannot resolve'}"
         )
         logger.warning("Sync run %s requires human intervention: %s", run.run_id, error)
+        record_phase_failure(store, run, "synchronize", error,
+                             "synchronize_needs_review", human=True)
         return finish(
             store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
             failed_phase="synchronize", error=error,
@@ -140,6 +143,8 @@ def run_sync(config: SyncConfig | None = None) -> WorkflowResult:
         names = ", ".join(r.source_name for r in failed)
         error = f"synchronization failed for {len(failed)} source(s): {names}"
         logger.warning("Sync run %s failed: %s", run.run_id, error)
+        record_phase_failure(store, run, "synchronize", error,
+                             "synchronize_failed", human=False)
         return finish(
             store, run, RunOutcome.WORKFLOW_FAILED,
             failed_phase="synchronize", error=error,

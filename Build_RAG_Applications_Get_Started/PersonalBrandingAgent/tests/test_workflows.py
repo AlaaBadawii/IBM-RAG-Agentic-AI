@@ -273,6 +273,27 @@ def stored_outcome(tmp_path, run_id):
     return run, phases, failures
 
 
+def stored_trail(tmp_path, run_id):
+    """Every persisted phase transition as ``(phase, outcome)`` pairs."""
+    with StateStore(tmp_path / "state.db") as store:
+        return [(p.phase, p.outcome) for p in store.list_phases(run_id)]
+
+
+def assert_trail_matches_outcome(tmp_path, result):
+    """The trail agrees with the terminal outcome: the failed phase's latest
+    row is ``failed``; every other row is ``ok``; exactly one run-linked
+    failure exists naming that phase."""
+    trail = stored_trail(tmp_path, result.run_id)
+    run, _, failures = stored_outcome(tmp_path, result.run_id)
+    assert run.outcome is result.outcome
+    assert run.failed_phase == result.failed_phase
+    assert trail[-1] == (result.failed_phase, "failed")
+    assert all(outcome == "ok" for _, outcome in trail[:-1])
+    assert len(failures) == 1
+    assert failures[0].phase == result.failed_phase
+    return trail
+
+
 # ------------------------------------------------------------- sync happy ---
 
 def test_sync_completes_with_fakes(tmp_path):
@@ -382,8 +403,101 @@ def test_sync_failed_source_is_a_workflow_failure(tmp_path):
     run, phases, failures = stored_outcome(tmp_path, result.run_id)
     assert run.outcome is RunOutcome.WORKFLOW_FAILED
     assert run.failed_phase == "synchronize"
-    assert phases == ["load_registry", "synchronize"]
+    assert phases == ["load_registry", "synchronize", "synchronize"]
     assert any(f.phase == "synchronize" for f in failures)
+
+
+def test_sync_failed_synchronize_is_persisted_as_failed(tmp_path):
+    cfg, holder = sync_config(
+        tmp_path, sync_result=FakeSyncResult(failed_names=("quizey",))
+    )
+    result = run_sync(cfg)
+
+    assert result.outcome is RunOutcome.WORKFLOW_FAILED
+    trail = assert_trail_matches_outcome(tmp_path, result)
+    assert trail == [
+        ("load_registry", "ok"),
+        ("synchronize", "ok"),
+        ("synchronize", "failed"),
+    ]
+    assert holder["notifier"].run_calls == [result.run_id]
+
+
+def test_sync_review_signal_persists_synchronize_as_failed(tmp_path):
+    cfg, holder = sync_config(
+        tmp_path, sync_result=FakeSyncResult(human_names=("ibm-monorepo",))
+    )
+    result = run_sync(cfg)
+
+    assert result.outcome is RunOutcome.REQUIRES_HUMAN_INTERVENTION
+    assert result.exit_code == EXIT_REQUIRES_HUMAN_INTERVENTION
+    trail = assert_trail_matches_outcome(tmp_path, result)
+    assert trail[-1] == ("synchronize", "failed")
+    _, _, failures = stored_outcome(tmp_path, result.run_id)
+    assert failures[0].requires_human_intervention
+    assert holder["notifier"].run_calls == [result.run_id]
+
+
+def test_reasoning_failure_persists_decide_as_failed(tmp_path):
+    cfg, holder, _ = branding_config(tmp_path, agent_result=failed_result())
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.WORKFLOW_FAILED
+    trail = assert_trail_matches_outcome(tmp_path, result)
+    assert trail == [
+        ("context", "ok"),
+        ("decide", "ok"),
+        ("decide", "failed"),
+    ]
+    assert holder["notifier"].run_calls == [result.run_id]
+
+
+def test_unresolved_guard_persists_publish_as_failed(tmp_path):
+    cfg, holder, _ = branding_config(
+        tmp_path,
+        agent_result=PublishableStub(),
+        pending_review=(object(),),
+    )
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.REQUIRES_HUMAN_INTERVENTION
+    assert result.failed_phase == "publish"
+    # The guard blocks before the publish phase is entered, so its failed
+    # row is the phase's first — and only — trail entry.
+    trail = assert_trail_matches_outcome(tmp_path, result)
+    assert trail == [
+        ("context", "ok"),
+        ("decide", "ok"),
+        ("publish", "failed"),
+    ]
+    assert holder["notifier"].run_calls == [result.run_id]
+
+
+@pytest.mark.parametrize("decision,human", [
+    (PublishDecision.UNKNOWN_REQUIRES_REVIEW, True),
+    (PublishDecision.FAILED, False),
+])
+def test_publish_report_outcome_persists_publish_as_failed(
+        tmp_path, decision, human):
+    cfg, holder, _ = branding_config(
+        tmp_path,
+        agent_result=PublishableStub(),
+        publish_report=FakePublishReport(
+            decision=decision,
+            post_id=None,
+            message="publication did not resolve cleanly",
+        ),
+    )
+    result = run_branding(cfg)
+
+    expected = (RunOutcome.REQUIRES_HUMAN_INTERVENTION if human
+                else RunOutcome.WORKFLOW_FAILED)
+    assert result.outcome is expected
+    trail = assert_trail_matches_outcome(tmp_path, result)
+    assert trail[-1] == ("publish", "failed")
+    _, _, failures = stored_outcome(tmp_path, result.run_id)
+    assert failures[0].requires_human_intervention is human
+    assert holder["notifier"].run_calls == [result.run_id]
 
 
 # ------------------------------------------------- human intervention paths ---

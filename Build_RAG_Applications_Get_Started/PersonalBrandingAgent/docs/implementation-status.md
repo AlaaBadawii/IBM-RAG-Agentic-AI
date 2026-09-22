@@ -147,6 +147,14 @@ Implemented:
   leaves an `operational_failures` row carrying the phase name plus the run's
   `failed_phase`. Sync phases: `load_registry`, `synchronize`. Branding
   phases: `context`, `decide`, `publish`.
+- **Correction (review follow-up): logical failures persist their phase as
+  failed.** Branches where a returned value — not an exception — means failure
+  (failed sources, review signals, reasoning failures, the unresolved-ambiguity
+  guard, ambiguous/failed publish reports) now call the shared
+  `record_phase_failure()` before `finish()`, so the phase's terminal trail row
+  is `failed` and agrees with the run outcome. Previously the trail held only
+  the `ok` row `run_phase()` had written on normal return. Outcomes, exit
+  codes, `failed_phase` values, and notify-exactly-once behavior are unchanged.
 - **All three outcomes are recorded, never inferred.** `finish()` writes the
   outcome to `workflow_runs` and returns it in the `WorkflowResult` with its
   exit code: `DO_NOT_PUBLISH → 0`, `WORKFLOW_FAILED → 1`,

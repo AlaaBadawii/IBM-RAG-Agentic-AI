@@ -57,6 +57,7 @@ __all__ = [
     "HumanIntervention",
     "WorkflowResult",
     "finish",
+    "record_phase_failure",
     "requires_human",
     "run_phase",
 ]
@@ -159,6 +160,37 @@ def _category_of(exc: Exception, phase: str) -> str:
     return f"{phase}_failed"
 
 
+def record_phase_failure(store: StateStore, run: WorkflowRun, phase: str,
+                         error: str, error_category: str, *,
+                         human: bool) -> None:
+    """Persist a phase that logically failed without raising.
+
+    The counterpart of :func:`run_phase`'s exception path for branches where a
+    returned value — not an exception — means failure (a failed source set, a
+    reasoning failure, an ambiguous publication). It records the phase as
+    ``failed`` and writes the structured failure row carrying the phase name,
+    so the trail agrees with the terminal outcome :func:`finish` then records.
+    `finish()` sees the existing failure row and does not write a second one,
+    and the notification policy is unchanged.
+    """
+    store.record_phase(run.run_id, phase, "failed", error=error)
+    try:
+        store.record_failure(
+            phase=phase,
+            error_category=error_category,
+            message=error,
+            retryable=not human,
+            requires_human_intervention=human,
+            run_id=run.run_id,
+            workflow=run.workflow,
+        )
+    except StateStoreError as store_exc:
+        logger.error(
+            "Could not record the %s failure for run %s: %s",
+            phase, run.run_id, store_exc,
+        )
+
+
 def run_phase(store: StateStore, run: WorkflowRun, phase: str,
               fn: Callable[[], T]) -> T:
     """Run one phase, recording the transition and attributing any failure.
@@ -176,28 +208,14 @@ def run_phase(store: StateStore, run: WorkflowRun, phase: str,
     except Exception as exc:
         human = requires_human(exc)
         message = str(exc) or f"{phase} failed with {type(exc).__name__}"
-        store.record_phase(run.run_id, phase, "failed", error=message)
-        try:
-            store.record_failure(
-                phase=phase,
-                error_category=_category_of(exc, phase),
-                message=message,
-                retryable=not human,
-                requires_human_intervention=human,
-                run_id=run.run_id,
-                workflow=run.workflow,
-            )
-        except StateStoreError as store_exc:
-            logger.error(
-                "Could not record the %s failure for run %s: %s",
-                phase, run.run_id, store_exc,
-            )
+        category = _category_of(exc, phase)
+        record_phase_failure(store, run, phase, message, category, human=human)
         raise Escalation(
             outcome=(RunOutcome.REQUIRES_HUMAN_INTERVENTION if human
                      else RunOutcome.WORKFLOW_FAILED),
             phase=phase,
             error=message,
-            error_category=_category_of(exc, phase),
+            error_category=category,
         ) from exc
     store.record_phase(run.run_id, phase, "ok")
     return value

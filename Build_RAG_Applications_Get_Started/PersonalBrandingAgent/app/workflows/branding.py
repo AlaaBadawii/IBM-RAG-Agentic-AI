@@ -47,6 +47,7 @@ from app.workflows.common import (
     Escalation,
     WorkflowResult,
     finish,
+    record_phase_failure,
     run_phase,
     start,
 )
@@ -183,6 +184,8 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
             f"{failure.detail}"
         )
         logger.warning("Branding run %s: %s", run.run_id, error)
+        record_phase_failure(store, run, "decide", error, "reasoning_failed",
+                             human=False)
         return finish(
             store, run, RunOutcome.WORKFLOW_FAILED,
             failed_phase="decide", error=error,
@@ -217,6 +220,8 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
             f"({len(pending)} unresolved); refusing to publish over an ambiguity"
         )
         logger.warning("Branding run %s: %s", run.run_id, error)
+        record_phase_failure(store, run, "publish", error,
+                             "unresolved_ambiguity", human=True)
         return finish(
             store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
             failed_phase="publish", error=error,
@@ -242,6 +247,8 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
             f"{report.message} (decision={report.decision.value})"
         )
         logger.warning("Branding run %s: %s", run.run_id, error)
+        record_phase_failure(store, run, "publish", error,
+                             "publication_needs_review", human=True)
         return finish(
             store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
             failed_phase="publish", error=error,
@@ -271,6 +278,8 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
         )
     error = f"publication failed: {report.message}"
     logger.warning("Branding run %s: %s", run.run_id, error)
+    record_phase_failure(store, run, "publish", error, "publication_failed",
+                         human=False)
     return finish(
         store, run, RunOutcome.WORKFLOW_FAILED,
         failed_phase="publish", error=error,
