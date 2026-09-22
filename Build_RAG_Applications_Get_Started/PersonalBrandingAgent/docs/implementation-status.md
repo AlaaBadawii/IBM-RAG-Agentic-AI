@@ -27,23 +27,25 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 4 — Build the Personal Branding Context & Evidence Layer
+    Step 5 — Harden the LinkedIn Integration for Autonomous Use
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–3 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–4 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
-    evidence about the user, and synchronization is now incremental — a
-    24-hour run does work proportional to what changed rather than to the size
-    of 29 sources. Steps 4–14 have not been started.
+    evidence about the user, synchronization is incremental, and there is now a
+    context layer that turns a retrieval result into named, ranked, provenance-
+    preserving sections — with evidence and positioning separated, coverage
+    reported, and the absence of evidence a first-class outcome. Steps 5–14
+    have not been started.
 
 Last Completed Step:
-    Step 3 — Build Incremental Knowledge Synchronization
+    Step 4 — Build the Personal Branding Context & Evidence Layer
 
 Next Step:
-    Step 4 — Build the Personal Branding Context & Evidence Layer
+    Step 5 — Harden the LinkedIn Integration for Autonomous Use
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
@@ -70,7 +72,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 1 | Introduce Persistent Operational State (SQLite) | COMPLETED |
 | 2 | Define the Personal Knowledge Source Registry & Project Lifecycle | COMPLETED |
 | 3 | Build Incremental Knowledge Synchronization | COMPLETED |
-| 4 | Build the Personal Branding Context & Evidence Layer | NOT STARTED |
+| 4 | Build the Personal Branding Context & Evidence Layer | COMPLETED |
 | 5 | Harden the LinkedIn Integration for Autonomous Use | NOT STARTED |
 | 6 | Build Persistent Publishing, Idempotency & Recovery | NOT STARTED |
 | 7 | Build Operational Failure Notifications via Email | NOT STARTED |
@@ -88,6 +90,181 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 4 — Build the Personal Branding Context & Evidence Layer
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/context/` — four modules behind one narrow public surface
+  (`app/context/__init__.py`): `enums.py` (`EvidenceStatus`, `FreshnessState`),
+  `taxonomy.py` (which section an item belongs to, and how sections and states
+  rank), `models.py` (frozen result dataclasses), `builder.py` (the single entry
+  point), and `__init__.py`.
+- `build_context(result: RetrievalResult, store: StateStore | None = None) ->
+  PersonalBrandingContext` is the whole API. It performs no retrieval of its
+  own, and `retrieve_knowledge` is still the only thing that queries Chroma.
+- **Sections are the corpus's own categories**, plus one for the `@source/…`
+  population and one catch-all — not a new taxonomy invented here. Nine evidence
+  sections (`repository_evidence`, `evidence`, `completed_projects`,
+  `in_progress_projects`, `certificates`, `in_progress_courses`,
+  `stories_lessons`, `audit`, `unclassified`) and three guidance sections
+  (`vision_goals`, `public_positioning`, `writing_style`).
+- **Provenance is structural, not conventional.** `ContextItem` is built by
+  `from_document()` and carries `source`, `chunk_id` and `evidence_state`; there
+  is no constructor path that produces an item without them. Retrieval `rank`
+  and `score` are carried too, as provenance.
+- **Ordering is deterministic and derived from the corpus.** Items in a section
+  sort by `(evidence state, source, chunk id)`. Retrieval `rank`/`score` are
+  deliberately **not** ordering keys — ordering by them would make a context a
+  function of the strategy that produced it.
+- **Evidence and guidance are separate fields**, joined only by the convenience
+  accessors `evidence_items()` and `guidance_items()`. Positioning, voice and
+  vision are not ranked as weak evidence; they are removed from the evidence
+  field entirely.
+- **Coverage is reported, including emptiness.** `SectionCoverage` (item count,
+  evidence states present, unclassified count, `is_empty`) per section, plus a
+  context-level `ContextCoverage` over both populations.
+- **Insufficiency is a first-class outcome.** `EvidenceStatus.INSUFFICIENT` is
+  set when no evidence section holds an item; guidance alone does not resolve
+  it. It is a distinguishable field on the result, not an empty list a caller
+  might read as success.
+- **Freshness reads `sync_checkpoints` — the Option B decision.** One
+  `SourceState` per population: the hand-written `data/` corpus is reported
+  `tracked=False, UNKNOWN` with a note explaining that synchronization tracks
+  registered sources only; a source with no checkpoint is `UNKNOWN`, a
+  succeeded one is `SYNCHRONIZED`, and one whose latest attempt failed is
+  `FAILED` while still exposing its last successful `last_synced_at` and
+  `last_revision`.
+- Added `source_name_from_key()` to `app/sync/namespace.py` — the one seam
+  Step 4 required elsewhere (see *Important notes*).
+
+Verified:
+- Acceptance: all six criteria pass (checklist below).
+- **The taxonomy cannot drift from the corpus.** Tests read the real `data/`
+  directory tree and compare it against `EVIDENCE_SECTIONS`, and read
+  `app/ingestion/metadata.py`'s `EVIDENCE_STATES` to assert every declared state
+  is ranked. Adding a `data/` category or an evidence state without ranking it
+  fails the suite rather than silently landing in `unclassified`.
+- **Two corpus populations are separated by the namespace, not by heuristics.**
+  A document under `@source/<name>/…` is filed as repository evidence by virtue
+  of the namespace alone; the test asserts it could not be filed anywhere else.
+- **Input order does not affect placement.** A test re-ranks the same documents
+  and asserts identical section assignment and ordering — the property that
+  makes the output deterministic rather than merely stable in practice.
+- **Duplicates collapse by `chunk_id`**, so overlapping retrieval strategies
+  (hybrid, reranked) cannot inflate a section's coverage.
+- **The two failure semantics are proven, not asserted.** No documents yields an
+  explicit INSUFFICIENT context; a failing collection behind the real
+  `RetrievalEngine` propagates its exception instead of being converted into an
+  evidence-free context, and a failing state store propagates too rather than
+  degrading to "unknown freshness".
+- **No timestamp is invented.** A test asserts the freshness result carries only
+  values that came from a checkpoint row — no clock read, no file mtime, no
+  inference from retrieval frequency.
+- Milestone (`PLAN.md` §8, Step 4): a context object for a known topic contains
+  the expected evidence with correct provenance, asserted against a real
+  ingestion of `data/` into a temporary Chroma collection.
+
+Tests:
+- `tests/test_context.py` (25) and `tests/test_sync_namespace.py` (6) — **31 new
+  tests**. Every Chroma collection, state store and corpus copy in them is
+  created under `tmp_path`; none reads or writes the user's `chroma_db/` or
+  `state_db/`.
+- Regression: `.venv/bin/python -m pytest tests/ -q` → **364 passed**
+  (333 baseline + 31 new), zero collection errors, zero failures. No existing
+  test was modified, weakened, or skipped — `app/ingestion/`, `app/retrieval/`,
+  `app/sources/` and `app/state/` were not touched at all, and their test
+  modules are unchanged.
+- `PYTHONNOUSERSITE=1` was used throughout.
+
+Commit:
+- `Step 4: build personal branding context and evidence layer` — the commit
+  carrying this record. The subject is used instead of a hash because the hash
+  cannot contain itself; find it with `git log --oneline --grep="^Step 4:"`.
+
+Acceptance criteria:
+- [x] Context is assembled into named sections, not one concatenated blob.
+- [x] Every item retains source, chunk id, and evidence state.
+- [x] Ordering is deterministic and follows the documented evidence hierarchy.
+- [x] Coverage is reported per section, including empty ones.
+- [x] Insufficient evidence is a distinguishable, first-class outcome.
+- [x] Evidence and positioning/style remain separate fields.
+- [x] Focused Step 4 tests pass (31).
+- [x] The retrieval regression passes, and retrieval results are unchanged.
+- [x] The full suite passes (364).
+- [x] This document is updated truthfully, including the deviations below.
+- [x] Step 4 is one coherent commit.
+- [x] Steps 5–14 have not been started.
+
+Important notes:
+- **Freshness is derived from `sync_checkpoints`, not written during ingestion.**
+  `PLAN.md` §8 offers both and requires the choice to be recorded. The
+  derivation wins because `docs/implementation-status.md` already said so in
+  Step 3's hand-off — *"a context layer that needs to know how fresh a source's
+  evidence is should read it rather than re-derive it"* — and because a new
+  metadata field would have meant re-ingesting the entire corpus to populate it,
+  which is a runtime data operation rather than a step. Consequence: freshness
+  is a property of a **source**, not of a document, so the hand-written `data/`
+  corpus has no freshness at all. It is reported as untracked rather than
+  guessed at, because synchronization owns registered sources and no checkpoint
+  describes it or ever will.
+- **The three documented evidence hierarchies disagree, and the disagreement is
+  resolved in the open rather than silently.** `data/evidence/README.md`,
+  `data/audit/README.md` §2, and `docs/architecture/rag-architecture.md` give
+  three different orderings. `app/context/taxonomy.py` follows the two corpus
+  documents and records every rank's basis in the code; the three decisions —
+  audit conclusions rank **last** (not fourth), completed outranks in-progress,
+  and positioning is **removed from the ranking rather than ranked fifth** — are
+  argued in `docs/architecture/rag-architecture.md` §The hierarchy as
+  implemented (Step 4). That section is the record of the deviation; this entry
+  is the pointer to it.
+- **`repository_evidence` is a section Step 4 added, not one the corpus
+  defines.** The corpus is hand-written Markdown; the `@source/<name>/…`
+  population is 29 repositories. They are not the same kind of evidence — the
+  first is a curated claim about the user, the second is the user's actual work
+  — and the corpus has no category for the second because the corpus predates
+  it. Ranking it first follows `data/evidence/README.md`'s own first principle
+  (primary evidence over description).
+- **Two state ranks are additions the corpus does not state.** A document with
+  no declared `evidence_state` sorts after every declared state but **before**
+  `STALE` (unknown is weaker than a positive claim, but stronger than a
+  known-invalid one), and `STALE` sorts last. "Is it declared?" and "does it
+  rank above unclassified?" are deliberately different questions: `is_declared_state()`
+  is membership of the vocabulary, and `STALE` is declared while ranking last.
+- **Ordering ignores retrieval rank and score on purpose.** Both are carried on
+  every item, but using them as sort keys would make the assembled context a
+  function of which strategy ran — the same corpus would produce a different
+  context under `vector` than under `reranked`, and Step 9's verification would
+  be checking against an artifact of retrieval rather than of the evidence.
+- **An item belongs to exactly one section, and guidance is matched twice.**
+  Classification checks `category` first and falls back to `document_type`, so a
+  positioning document filed under an unexpected category is still recognised as
+  guidance. A test pins both paths.
+- **`build_context` catches nothing.** A retrieval failure is not converted into
+  an insufficient-evidence context; the two are different facts and only one of
+  them means "the user has nothing to say about this". Silently degrading would
+  turn an infrastructure outage into a reason not to publish.
+- **One seam outside `app/context/` was required: `source_name_from_key()`.**
+  The context layer has to know which registered source a `@source/…` key
+  belongs to, and the only other way to get it was to re-spell the namespace
+  prefix and separator inside `app/context/` — a second copy of a correctness
+  device, free to drift from the original. The function was added to
+  `app/sync/namespace.py` beside the `is_source_key`/`source_key` pair it
+  inverts, it is total (returns `None` rather than raising, because it runs over
+  metadata that came from a retrieval result), and it changes no existing
+  behaviour. `tests/test_sync_namespace.py` pins both the new accessor and the
+  published guarantees Step 2 and Step 3 already relied on. Nothing else in
+  `app/sync/`, `app/ingestion/`, `app/retrieval/`, `app/sources/` or
+  `app/state/` was modified.
+- **No new persistence, and no schema change.** `data/` is not restructured, no
+  `PersonalProfile` abstraction replaces it, and no metadata field was added to
+  ingestion. Step 4 reads existing rows and returns a value object.
+- **Nothing was published, no LinkedIn code was touched, and synchronization
+  was not run.** Known Issue #7 remains open: no real source has a checkpoint
+  row, so in the real workspace every registered source currently reports
+  `UNKNOWN` freshness — which is the honest answer, and the reason the
+  untracked/unknown distinction was built rather than assumed away.
 
 ### Step 3 — Build Incremental Knowledge Synchronization
 
@@ -634,31 +811,31 @@ Important notes:
 ## Current Step
 
 ```text
-Step 4 — Build the Personal Branding Context & Evidence Layer
+Step 5 — Harden the LinkedIn Integration for Autonomous Use
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 4. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 5. It is not
 duplicated here.
 
-What Step 3 leaves on the table for it:
+What Step 4 leaves on the table for it:
 
-- `sync_all(registry, context)` performs one full pass over the registered
-  sources and returns a `SyncRunResult` that distinguishes synced / unchanged /
-  failed and carries per-source review signals. Nothing calls it on a schedule
-  yet.
-- `app/sync/__init__.py` re-exports the whole public surface; the ingestion
-  pipeline is reached only through `SyncContext.ingest`, so a caller can point a
-  pass at different embeddings or a different collection without patching
-  anything.
-- The corpus now has two populations in one collection — hand-written
-  `data/` documents and `@source/…` keys — with the namespace keeping them
-  apart. The Context layer is the first consumer that has to treat them as
-  different kinds of evidence.
-- `sync_checkpoints` holds a revision per source after a successful pass, and
-  `operational_failures` holds structured sync failures. Both are readable, and
-  nothing reads them yet.
+- `app/context/` is complete and stands alone: `build_context()` consumes a
+  `RetrievalResult` and returns a `PersonalBrandingContext`. Nothing calls it
+  yet — Step 8 owns generation and Step 10 owns the workflow that will.
+- The insufficiency signal exists but has no consumer. `EvidenceStatus` is the
+  field Step 9's gates are meant to read; until then it is a value nobody acts
+  on, and it is worth confirming in Step 9 that "insufficient" actually stops a
+  publish rather than merely being visible.
+- Freshness reads `sync_checkpoints` and therefore reports `UNKNOWN` for every
+  registered source in the real workspace, because no source has ever been
+  synchronized (Known Issue #7). The mechanism is correct and the answer is
+  honest; the data it reads is still empty.
+- The hand-written `data/` corpus is reported as untracked with no freshness at
+  all. If a later step needs to know whether a curated document is stale, that
+  information does not exist yet — Issue #2 is still the open question behind
+  it.
 
 ---
 
@@ -840,6 +1017,17 @@ not a specification.
 | **The completed-project flag is reported, not persisted** | `sync_checkpoints.last_outcome` is CHECK-constrained to `SUCCEEDED`/`FAILED`; a third state needs a Step 1 migration, which is outside Step 3's boundary. The flag lives in the result, and in `operational_failures` for failures. Synchronization never writes `source_lifecycle` | Step 3, `app/sync/synchronizer.py` |
 | **The scoped sweep runs only for a full resync** | A sweep's keep-set is a source's whole inventory, so passing it for a diff would delete every file the revision did not touch. Consequence: narrowing a source's includes does not retract indexed content until the next full resync | Step 3, `app/sync/synchronizer.py` |
 | **The failure path is raise-proof** | A failure path that can itself raise turns one broken source into an aborted run over 28. An unrecognised exception becomes `UNEXPECTED`, and an uninterpretable lifecycle declaration is reported as requiring review rather than propagating | Step 3, `app/sync/synchronizer.py` |
+| **Freshness is read from `sync_checkpoints`, never re-derived** | `PLAN.md` offered a new ingestion metadata field or derivation from the checkpoint. Derivation wins: no re-ingestion of the corpus is required to populate it, and freshness is already recorded by the layer that owns it. Consequence: freshness is a property of a **source**, so the hand-written `data/` corpus has none and is reported untracked rather than guessed at | ADR-006, Step 4, `app/context/builder.py` |
+| **The evidence hierarchy follows the corpus documents, and the disagreement between them is recorded** | `data/evidence/README.md`, `data/audit/README.md` §2 and `rag-architecture.md` give three orderings that do not agree. The implementation follows the two corpus documents and carries each rank's basis in code; the resolutions are argued in `rag-architecture.md` rather than left implicit | ADR-007, Step 4, `app/context/taxonomy.py` |
+| **Audit conclusions rank last, not fourth** | Ranking a summary above the material it summarises would let the audit outrank its own evidence, and `data/audit/README.md` §2 states the audit *"must never become the source of truth for personal facts"*. This is the one place the corpus's own hierarchy documents contradict each other | Step 4, `app/context/taxonomy.py` |
+| **Positioning, voice and vision are removed from the evidence field, not ranked as weak evidence** | `data/audit/README.md` §13 assigns them the communication rules, and `data/vision_goals/my_vision.md` instructs the Agent to use it for positioning decisions. They are not weak support for a claim — they are not support — so a separate field is what makes it impossible to read *"preferred writing style"* as *"evidence that I built X"* | ADR-007, Step 4, `app/context/models.py` |
+| **Sections are the corpus's own categories, not a taxonomy invented for the context layer** | The corpus is hand-written and its directory hierarchy is already semantic; re-deriving categories would create a second vocabulary free to drift from the first. The one added section, `repository_evidence`, exists because the `@source/…` population is 29 real repositories with no corpus category to hold them. A test reads `data/` and fails if the two drift | Step 4, `app/context/taxonomy.py`, `tests/test_context.py` |
+| **Ordering ignores retrieval rank and score** | Ordering by them would make the assembled context a function of which strategy ran — the same corpus would produce a different context under `vector` than under `reranked`, and Step 9's verification would then be checking an artifact of retrieval rather than of the evidence. Both are still carried, as provenance | Step 4, `app/context/models.py` |
+| **Insufficiency is a field, not an empty list** | An empty result list is the only "nothing found" indication retrieval offers, and downstream code can read it as success. `EvidenceStatus.INSUFFICIENT` is the single most important output for Step 9's gates, so it is explicit and distinguishable — and guidance alone does not resolve it | Step 4, `app/context/models.py` |
+| **`build_context` catches nothing, and performs no retrieval** | Retrieval failure and "no evidence exists" are different facts, and only one of them means the user has nothing to say. Converting an outage into an insufficient context would turn infrastructure failure into a reason not to publish; the exception propagates and fails the run | Step 4, `app/context/builder.py` |
+| **A retrieval-result input is a value, not a query** | `build_context` takes a `RetrievalResult`, so retrieval stays the only thing that queries Chroma and the context layer cannot quietly become a second retrieval path | Step 4, `app/context/builder.py` |
+| **The one seam outside `app/context/` is an accessor, not a copy of the namespace** | The context layer needs to know which source a `@source/…` key belongs to. Re-spelling the prefix and separator here would create a second copy of a correctness device, free to drift. `source_name_from_key()` sits beside the functions it inverts, is total, and changes no existing behaviour | Step 4, `app/sync/namespace.py` |
+| **No new persistence and no schema change** | The layer reads existing rows and returns a value object. `data/` is not restructured, no `PersonalProfile` abstraction replaces it, and no ingestion metadata field was added | Step 4, `app/context/` |
 | **An explicit source registry is required** | Workspace roots contain ~28 repos, 17 virtualenvs (~17 GB), and this application itself; roots are places to inspect, not sources to ingest. **Implemented** as `sources.yaml`: 29 sources, 9 roots, 10 `not_registered`, 3 include profiles | `PLAN.md` Step 2, `docs/architecture/source-registry.md` |
 | **The application must not ingest itself** | `~/LLMs/IBM` contains this project, so its own source, runtime state, `data/` corpus and token file are not professional evidence. Guarded twice — structurally by `is_protected()`, and at load time against concrete probe paths | Step 2, `app/sources/guard.py` |
 | **Exclusion wins over inclusion** | Deny-wins rather than last-rule-wins, so the outcome depends on which rules exist rather than on the order they were written in. An exclusion without a stated reason is refused at load time — an unexplained rule cannot be reviewed, so it never gets removed | Step 2, `app/sources/patterns.py` |
@@ -867,32 +1055,42 @@ not a specification.
 
 ## Next Step
 
-### Step 4 — Build the Personal Branding Context & Evidence Layer
+### Step 5 — Harden the LinkedIn Integration for Autonomous Use
 
-The next implementation task is defined in `PLAN.md` §8, Step 4.
+The next implementation task is defined in `PLAN.md` §8, Step 5.
 
-Step 3 made the knowledge base current; Step 4 gives the system a durable
-picture of *who the user is professionally* — a context layer over the evidence
-rather than a restatement of it.
+Publishing is already proven against the real API; Step 5 turns an interactive
+script into a service an unattended workflow can call, and gives credentials an
+explicit lifecycle.
 
-Constraints carried in from Steps 0–3:
+Constraints carried in from Steps 0–4:
 
-- **The context layer is a consumer of the index, not a second index.** The
-  collection now holds two populations — hand-written `data/` documents and
-  `@source/<name>/…` keys from 29 registered sources — and the namespace is the
-  only thing that distinguishes them. A context layer that ignores it would
-  treat authored code and curated self-description as the same kind of
-  evidence.
-- **Nothing is inferred from inactivity, and lifecycle is a declaration.**
-  `source_lifecycle` remains empty; synchronization never writes it. A
-  `COMPLETED` project's new commits arrive flagged, not silently absorbed.
-- **Synchronization state belongs in the Step 1 store.** `sync_checkpoints`
-  holds a revision per source; a context layer that needs to know how fresh a
-  source's evidence is should read it rather than re-derive it.
-- **`data/` is not restructured** by Step 4, and ingestion/retrieval remain
-  untouched.
-- Synchronization is not yet scheduled and has not been run for real
-  (Known Issue #7). Step 4 should not assume a populated source index.
+- **`Auth_handling/` carries uncommitted working-tree changes that belong to
+  this step.** `test_credentials.py` and `test_post.py` already resolve the
+  token file relative to `__file__`; `linkedin_oauth_setup.py` — the script that
+  *creates* the token — still uses the literal relative path, so it writes the
+  token where the two readers will never look. They were deliberately left
+  untouched through Steps 0–4 and must be reconciled here. See Known Issue #3.
+- **The `app/` integration layer is a wrapper, not a rewrite.** The OAuth flow,
+  the endpoint, the payload and the person-URN resolution are proven and are
+  retained; `app/integrations/linkedin/` wraps them behind
+  `publish_to_linkedin(post_text)`.
+- **Automatic token refresh must not be assumed.** The saved token has no
+  `refresh_token`, and `offline_access` alone is not evidence that programmatic
+  refresh works. The service must be correct without it.
+- **The integration never records success on its own authority.** Persistence —
+  the write-ahead intent, the publication record — belongs to Step 6. Step 5
+  returns a structured result and stores nothing.
+- **Retrieval and context are not consulted by this step.** Step 4 produces a
+  context object; Step 5 publishes text it is handed, and the two do not meet
+  until Step 8 generates from one the other assembled.
+- **No credentials are to be committed, and nothing is to be published as part
+  of implementing this step.** The existing verification is a pre-existing
+  baseline, not something Step 5 needs to repeat.
+- **Known Issue #5 (the LLM key does not match the configured provider) is not a
+  Step 5 blocker** — nothing in the LinkedIn integration path uses an LLM. It
+  must be corrected before Step 8.
+
 
 ---
 

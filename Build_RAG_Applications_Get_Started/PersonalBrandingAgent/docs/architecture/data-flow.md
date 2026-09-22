@@ -61,9 +61,28 @@ Agent publishes
 
 **3. Build context** (`structured_context`)
 
-- The context builder (`app/context/builder.py`) assembles distinct sections:
-  identity / stable facts, evidence, positioning, voice/style, content rules,
-  current state. It does **not** concatenate raw documents into one blob.
+- The context builder (`app/context/builder.py`) consumes the retrieval result
+  and assembles *named* sections. It does **not** concatenate raw documents
+  into one blob, and it performs no retrieval of its own.
+- The sections are the corpus's own categories, ordered by the evidence
+  hierarchy (`../architecture/rag-architecture.md`): `repository_evidence`
+  (the `@source/…` population), `evidence`, `completed_projects`,
+  `in_progress_projects`, `certificates`, `in_progress_courses`,
+  `stories_lessons`, `audit`, `unclassified` — plus the guidance sections
+  `vision_goals`, `public_positioning`, `writing_style`.
+- **Evidence and guidance are separate fields.** Positioning, voice and vision
+  say how a supported fact is communicated; they are not support for a claim,
+  and a separate field is what makes that impossible to misread downstream.
+- Every item keeps its `source`, `chunk_id` and `evidence_state`; within a
+  section, items are ordered by `(evidence state, source, chunk id)` — never by
+  retrieval rank or score, which are carried as provenance only.
+- Coverage is reported per section (count, evidence states present, emptiness).
+  **No relevant evidence is a first-class outcome**, not an empty list: the
+  result carries `INSUFFICIENT` rather than looking like a context that simply
+  had nothing to say. A retrieval or state-store failure propagates — it is
+  never degraded into "no evidence".
+- Freshness comes from `sync_checkpoints` in the operational store, one entry
+  per population. The layer reads it; it never re-derives it.
 
 **4. Generate** (`candidate_post`)
 

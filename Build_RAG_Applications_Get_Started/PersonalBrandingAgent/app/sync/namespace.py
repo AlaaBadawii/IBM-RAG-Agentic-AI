@@ -32,6 +32,7 @@ __all__ = [
     "assert_namespace_safe",
     "is_source_key",
     "source_key",
+    "source_name_from_key",
     "source_namespace",
 ]
 
@@ -100,3 +101,25 @@ def source_key(source_name: str, relative_path: str) -> str:
 def is_source_key(key: str) -> bool:
     """True when a stored key came from a registered source."""
     return isinstance(key, str) and key.startswith(NAMESPACE_PREFIX)
+
+
+def source_name_from_key(key: str) -> str | None:
+    """The registered source a stored key belongs to, or ``None``.
+
+    The inverse of :func:`source_key` for the part that names the source. Needed
+    by anything holding a *stored key* that must act per source — the context
+    layer (Step 4) reads a source's synchronization checkpoint to report how
+    fresh its evidence is, and would otherwise have to re-spell the namespace
+    prefix in another module and get it subtly wrong.
+
+    ``None`` for a corpus path: ``evidence/backend/fastapi.md`` is not a
+    registered source, has no checkpoint and never will, and returning a
+    plausible-looking string here would let it masquerade as one.
+
+    Total and never raising. It is called on metadata that arrived from a
+    retrieval result, and one document with an odd key must not be able to fail
+    a whole context assembly.
+    """
+    if not is_source_key(key):
+        return None
+    return key[len(NAMESPACE_PREFIX):].partition("/")[0] or None

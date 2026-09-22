@@ -28,6 +28,7 @@ from app.sync.namespace import (
     NAMESPACE_PREFIX,
     is_source_key,
     source_key,
+    source_name_from_key,
     source_namespace,
 )
 from app.sync.relevance import (
@@ -77,6 +78,7 @@ __all__ = [
     "read_admitted_paths",
     "read_revision",
     "source_key",
+    "source_name_from_key",
     "source_namespace",
     "sync_all",
     "sync_source",

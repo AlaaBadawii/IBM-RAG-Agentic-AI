@@ -87,13 +87,31 @@ is **auditable**.
 
 ### 4. Branding context layer
 
-- Builds the LLM prompt from *distinct* parts so the model cannot confuse them:
-  - **Identity / stable facts** — who the user is
-  - **Evidence** — what the user did, built, learned
-  - **Positioning** — how the user wants to be perceived
-  - **Voice / style** — how posts should sound
-  - **Content rules** — what may and may not appear
-  - **Current state** — what is being learned/built now
+- Assembles the LLM prompt from *distinct* parts so the model cannot confuse
+  them. Implemented in `app/context/` (Step 4); `build_context()` consumes a
+  `RetrievalResult` and returns a `PersonalBrandingContext`.
+- **Evidence** — what the user did, built, learned. Held in named sections that
+  are the corpus's own categories (`repository_evidence` for `@source/…`,
+  then `evidence`, `completed_projects`, `in_progress_projects`,
+  `certificates`, `in_progress_courses`, `stories_lessons`, `audit`), ordered
+  by the evidence hierarchy in `rag-architecture.md`.
+- **Positioning / voice** — how the user wants to be perceived, how posts
+  should sound, and what may not appear (`public_positioning`,
+  `writing_style`, `vision_goals`; §13 of `data/audit/README.md` assigns
+  communication rules to these). A **separate field**, so guidance cannot be
+  counted as support.
+- **Current state / freshness** — how current the evidence behind the context
+  is. Read from `sync_checkpoints` in the operational store: one entry per
+  population, each either `SYNCHRONIZED`, `FAILED`, or `UNKNOWN`, with no
+  timestamp this layer invented. The hand-written `data/` corpus is reported
+  as *untracked* — synchronization owns registered sources, so no checkpoint
+  describes it and none ever will.
+- Coverage is reported per section (item count, evidence states present,
+  emptiness), and the absence of evidence is a first-class outcome
+  (`INSUFFICIENT`) rather than an empty list. A retrieval failure propagates;
+  it is never converted into an evidence-free context.
+- Identity / stable facts remains a prompt-level concern built from the
+  positioned sections above, not a separate store.
 
 ### 5. Generation layer
 

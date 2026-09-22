@@ -130,6 +130,67 @@ law):
 
 This default can be refined if the actual data suggests otherwise.
 
+### The hierarchy as implemented (Step 4)
+
+`app/context/taxonomy.py` is the implementation, and it is transcribed from
+`data/evidence/README.md` §Evidence hierarchy and `data/audit/README.md` §2 —
+the corpus's own documents, not from the list above. The three sources do not
+agree, so each rank carries the line it came from and the resolution is
+recorded here. Ranks are dense from 1; a section's rank *is* its position.
+
+```text
+1  repository_evidence    @source/<name>/…        — the user's actual repositories
+2  evidence               data/evidence/
+3  completed_projects
+4  in_progress_projects
+5  certificates
+6  in_progress_courses
+7  stories_lessons
+8  audit
+9  unclassified           a category the corpus does not define
+```
+
+Three decisions had to be made, and they are the reason this section exists:
+
+**Audit conclusions rank last, not fourth.** `data/evidence/README.md` lists
+them fourth, above portfolio and course material. `data/audit/README.md` §2
+lists them last and states that the audit *"must never become the source of
+truth for personal facts"*; §13 repeats the boundary, assigning communication
+to writing style and public positioning rather than to the audit. The two
+documents contradict each other, so the ranking follows the argument rather
+than the precedence: ranking a summary above the material it summarises would
+let the audit outrank its own evidence. This is the only place the corpus's
+hierarchy documents disagree on an ordering.
+
+**Completed outranks in-progress, at both the project and the course level.**
+`data/evidence/README.md` exists to *"distinguish demonstrated ability /
+documented experience / completed work from in-progress work"*, and defines
+`IN_PROGRESS` as *"work exists but is not complete"*.
+`data/audit/README.md` §2.3 lumps both into one level and orders nothing
+between them, so this refines it rather than contradicting it.
+
+**Positioning is not ranked — it is removed.** The list above places "general
+positioning / portfolio" fifth. Step 4 found the corpus stating something
+stronger: `data/audit/README.md` §13 — *"Writing style and public positioning
+determine how supported facts are communicated"* — and
+`data/vision_goals/my_vision.md`, which instructs the Agent to use it *"for
+positioning decisions"*. Positioning is therefore not the weakest evidence; it
+is not evidence. It is assembled into a separate field so that no generator can
+read *"preferred writing style"* as *"evidence that I built X"*.
+
+Evidence **states** keep the table order in `data/evidence/README.md`
+(strongest first), with two additions the corpus does not state: a document
+with no declared state sorts after every declared one but before `STALE`
+(unknown is weaker than a positive claim, stronger than a known-invalid one),
+and `STALE` sorts last. `tests/test_context.py` fails if a state is added to
+`app/ingestion/metadata.py` without being ranked.
+
+Determinism: sections are ordered by the table above, items within a section by
+`(evidence state, source, chunk id)`. Retrieval `rank` and `score` are carried
+on every item as provenance but are deliberately **not** ordering keys — they
+describe the retrieval run, so ordering by them would make a context a function
+of the strategy that produced it.
+
 ## Embeddings
 
 - Model: `sentence-transformers/all-MiniLM-L6-v2` (local, free, no API cost).
