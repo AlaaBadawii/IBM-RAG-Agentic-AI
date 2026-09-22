@@ -200,8 +200,32 @@ git check-ignore -v .env    # must print a matching rule
    `chroma_db/`, or `logs/` to make something commit — that is a signal the thing
    being committed is in the wrong place.
 
-Steps 7 and 12 introduce SMTP credentials and scheduling, at which point the
-secret register above grows. Those values follow rule 1.
+| `SMTP_PASSWORD` | Gmail app password for failure notifications | `.env` |
+| `SMTP_USERNAME` | Gmail address used as the SMTP login | `.env` |
+
+`SMTP_HOST/PORT/SENDER/RECIPIENT/TLS/TIMEOUT` are ordinary configuration
+(committable defaults in `app/config.py`; addresses go in `.env` because
+they are the user's, not because they are secret). Only the password grants
+access, so only it is in the redaction list — recorded notification rows
+carry `host:port tls=mode`, never credentials or message bodies.
+
+### What must never appear in logs, tests, or documentation
+
+Real credential values of any kind: API keys, app passwords, OAuth client
+secrets, access/refresh/id tokens, or full token-file contents. Tests use
+obviously-fake values (`fake-access-token-value`); documentation names
+variables and key *families* (`sk-or-v1-…` vs `sk-proj-…`) but never values.
+A `tests/test_operations_docs.py` check fails the suite if real key material
+patterns appear under `docs/`.
+
+### Boundaries this document does not cover alone
+
+- **PID-based lock ownership** (`docs/operations/scheduling.md` §3): lock
+  owners embed `hostname:pid:token`. A pid is process-table data, not a
+  secret — but treat rejection rows as operational detail, not public text.
+- **Manual intervention** (`docs/operations/recovery.md`, `PLAN.md` §11):
+  ambiguity resolution, re-authorization, and lock clearing are human acts
+  with named procedures. Automation must never perform them silently.
 
 ---
 

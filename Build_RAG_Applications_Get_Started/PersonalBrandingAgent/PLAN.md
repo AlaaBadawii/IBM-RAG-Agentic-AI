@@ -2133,3 +2133,69 @@ At each step:
 
 A step is complete only when its acceptance criteria pass. Do not weaken a test
 to complete a step.
+
+---
+
+# 15. Future Roadmap (Explicitly Not in Scope)
+
+Documented in Step 14 as a planning placeholder. Nothing below is designed,
+scheduled, or implemented — no comment APIs, comment polling, webhooks,
+reply workflows, or social-comment code exists, and none may be added under
+the guise of maintenance.
+
+## Future capability: mention-triggered comment responses
+
+The future Personal Branding Agent should support **reactive comment
+interactions**, separate from the proactive 8-hour post workflow.
+
+Required behavior:
+
+```text
+New comment
+   ↓
+Explicitly mentions @Agent_Name?
+   ├── No  → IGNORE
+   └── Yes
+        ↓
+Meaningful question/request?
+        ├── No  → IGNORE
+        └── Yes
+             ↓
+        bounded Agent reasoning
+             ↓
+        grounded personal context
+             ↓
+        generation
+             ↓
+        deterministic verification
+             ↓
+        reply
+```
+
+Examples:
+
+```text
+"Great post!"                       → IGNORE
+"@Agent_Name"                      → IGNORE
+"Great post @Agent_Name"           → IGNORE
+"@Agent_Name What is RAG?"         → CONSIDER_REPLY
+"@Agent_Name How did you solve X?" → CONSIDER_REPLY
+```
+
+The core product rule is:
+
+**The Agent must not respond to every comment. An explicit `@Agent_Name`
+mention is the trigger for considering a response.**
+
+Future implementation must preserve:
+
+* explicit mention trigger
+* bounded reasoning
+* grounded evidence
+* deterministic verification
+* no invented personal claims
+* idempotency / duplicate protection
+* one reply per triggering event
+* ambiguous external reply outcome fails closed
+* separate reactive comment workflow rather than mixing it into proactive
+  publishing

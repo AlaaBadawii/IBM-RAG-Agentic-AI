@@ -27,13 +27,13 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 14 — Operational Documentation, Deployment & Final Hardening
+    COMPLETE — all Steps 0–14 implemented, verified, and committed
 
 Status:
-    NOT STARTED
+    DONE
 
 Overall Progress:
-    Steps 0–13 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–14 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
@@ -81,18 +81,24 @@ Overall Progress:
     boundaries, asserting recorded outcomes and persistent state — including
     the ambiguous-publication case, which proves a second post can never go
     out. The manual real-LinkedIn path remains explicit and documented.
-    Nothing in this step runs long-lived: Step 14 has not been started.
+    And finally the system is operable from documentation alone: the schema
+    is specified table by table, every promised operations/evaluation/phases
+    document exists, ten ADRs record the real decisions, recovery procedures
+    match the state machine and were exercised against isolated state, and a
+    clean checkout reproduces a working scheduled system from the docs.
 
 Last Completed Step:
-    Step 13 — End-to-End Autonomous Evaluation
+    Step 14 — Operational Documentation, Deployment & Final Hardening
 
 Next Step:
-    Step 14 — Operational Documentation, Deployment & Final Hardening
+    None — roadmap complete. The documented future capability
+    (mention-triggered comment responses, PLAN.md §15) is explicitly not
+    designed, scheduled, or implemented.
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–13 have since been implemented, verified,
-and committed; Step 14 onwards remains untouched.
+analysis of the repository. Steps 0–14 have since been implemented, verified,
+and committed; no implementation steps remain.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -125,7 +131,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | COMPLETED |
 | 12 | Add External Scheduling, Locks & Recovery | COMPLETED |
 | 13 | End-to-End Autonomous Evaluation | COMPLETED |
-| 14 | Operational Documentation, Deployment & Final Hardening | NOT STARTED |
+| 14 | Operational Documentation, Deployment & Final Hardening | COMPLETED |
 
 > Step names above are taken verbatim from `PLAN.md` §8. If a step is renamed
 > there, rename it here too.
@@ -133,6 +139,72 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 14 — Operational Documentation, Deployment & Final Hardening
+
+Status: COMPLETED
+
+Implemented (documentation first, code only where the docs required it):
+- `docs/operations/state-model.md` — the schema as specified: 11 tables plus
+  ledger, every column that matters, every CHECK/UNIQUE guarantee, state
+  transitions, and which component owns each state. Written against the
+  actual `schema.py` v4, nothing invented.
+- `docs/operations/recovery.md` — procedures for interrupted workflows,
+  stale locks, ambiguous publications, failed notifications, expired
+  credentials, failed scheduled runs, and partial sync failures, each with
+  detect/decide/act/verify against the real state machine, plus the
+  `PLAN.md` §11 manual-intervention boundaries restated per procedure.
+- `docs/operations/deployment.md` — clean-checkout reproduction (venv, deps,
+  `.env` names without values, DB init/migrations, config, tests, scheduler
+  install, verification and daily-use commands).
+- `docs/operations/publishing.md` — operator view of the publishing,
+  credential, and notification lifecycles, including the error-classification
+  table and what each category does next.
+- `docs/operations/security.md` — extended with the SMTP secret register,
+  the no-real-secrets rule (enforced by test), and PID/manual-intervention
+  boundaries.
+- `docs/evaluation/quality-gates.md` — evidence policy and gate contract
+  (the document ADR-004 always referenced).
+- `docs/phases/phase-10-observability-memory.md` + `docs/phases/README.md`
+  (the document ADR-005 always referenced, plus why no other phase files
+  exist).
+- Ten real ADR files (`adr-001`–`adr-010`: the seven indexed decisions plus
+  cron-vs-systemd, liveness-gated recovery, and fakes-over-real-boundaries
+  evaluation), index updated, and nine stale `../` references in the old
+  index corrected to resolve.
+- `PLAN.md` §15 — the mention-triggered comment-response capability recorded
+  as document-only future work (explicit mention trigger, bounded reasoning,
+  grounded evidence, verification, fail-closed ambiguity, separate reactive
+  workflow). No comment APIs, polling, webhooks, or reply code added.
+- `tests/test_operations_docs.py` (8 tests): promised documents exist, ADR
+  index matches files, ADR link targets resolve, cron entries parse and map
+  to importable entry points unmasked, no real secret material under
+  `docs/`, secret/runtime paths untracked.
+- `docs/README.md` structure section rewritten to the actual tree.
+
+Verified:
+- Exercised on isolated state (no prod DB, no network, no mail, no
+  LinkedIn): fresh-store init (schema v4, all tables), simulated SIGKILL
+  aftermath (unfinished run + phase + stale dead-pid lock), documented
+  inspection queries, and the real guarded recovery path — reclaim recorded,
+  interruption reported, fresh run `DO_NOT_PUBLISH` exit 0, old run still
+  `NULL`, lock released.
+- Full regression: 979 passed (971 before Step 14; the 8 new tests are the
+  whole difference, and nothing existing changed its result).
+
+Earlier-step defects / hardening changes: none to application code. One
+genuine operability gap surfaced while documenting recovery and is recorded
+as a Known Issue rather than redesigned: an `unknown_requires_review`
+publication has no operator resolution API, so the pre-publish guard halts
+publishing permanently after the first ambiguity until such a path is built
+(manual confirmation procedure documented; hand-editing the row forbidden).
+
+Files: `docs/operations/{state-model,recovery,deployment,publishing}.md`,
+`docs/operations/security.md` (extended), `docs/evaluation/quality-gates.md`,
+`docs/phases/{phase-10-observability-memory.md,README.md}`,
+`docs/decisions/ADRs/adr-00{1..10}.md` + index, `docs/README.md`, `PLAN.md`
+(§15 future work only), `tests/test_operations_docs.py`,
+`docs/implementation-status.md`.
 
 ### Step 13 — End-to-End Autonomous Evaluation
 
@@ -2482,6 +2554,24 @@ all, and if so which one and at what step. It is not assigned to Step 11.
 
 ---
 
+### 17. An ambiguous publication has no operator resolution path
+
+Discovered in Step 14 while documenting recovery against the actual state
+machine. Once an `unknown_requires_review` publication row exists,
+`PublishingHistory.requires_review()` is permanently non-empty, and the
+Step 11 pre-publish guard refuses every later publish — so publishing halts
+(fail-closed) after the first ambiguity, with no API to record a human's
+confirmation either way.
+
+This is the designed direction (a second post must never go out on a guess),
+but it is operationally terminal: the documented procedure is confirm-on-
+LinkedIn by hand, and hand-editing the row to unblock publishing is
+forbidden (it would destroy the record the guard protects). Resolving it
+properly needs a confirmation-attesting operation with its own audit design
+— future work, not a silent retry and not a Step 14 redesign.
+
+---
+
 ### 16. A recycled pid can make a stale lock look live
 
 Step 12 reclaims an expired lock only after its owner pid is shown to be
@@ -2633,39 +2723,28 @@ not a specification.
 | **A timeout never grants a lock to a second live process** | Step 1 reclaims on expiry alone, which would silently twin an overrunning run. Owners are therefore `hostname:pid:token` and an expired-but-live owner is refused, not reclaimed; only a demonstrably dead owner is taken, through the atomic transaction, so two simultaneous recoveries cannot both win. The failure direction on doubt (unparseable owner, pid reuse) is always refusal — a missed run, never an overlap | Step 12, `app/workflows/scheduled.py` |
 | **Recovery reports; it never resolves** | Unfinished runs are occurrence-counted and left `NULL` — finishing one here would invent an outcome nobody observed — and publish state is never touched, so recovery cannot retry an ambiguity. An unfinished run seen while locked is the live holder's own, so it is not reported at all | Step 12, `app/workflows/scheduled.py` |
 | **Evaluation asserts recorded state, and cannot reach the network** | Scenarios drive the real workflow boundaries with fakes only at the external edges; a socket-blocking fixture fails any test that dials out, and the milestone asserts the full outcome vector twice from clean state. Reproducibility is constructed, not hoped for | Step 13, `tests/test_autonomous_evaluation.py` |
+| **Documentation describes the built system, and is tested for drift** | `tests/test_operations_docs.py` fails on missing promised documents, ADR index/file mismatches, broken ADR links, unparseable or masked cron entries, and real secret material under `docs/`. The secret/runtime commit boundary is asserted the same way | Step 14, `tests/test_operations_docs.py` |
+| **Mention-triggered replies are future work, explicitly not built** | Reactive comment responses are recorded in `PLAN.md` §15 with their product rule (explicit mention triggers consideration) and invariants — and with an explicit ban on adding comment APIs, polling, webhooks, or reply code under maintenance | Step 14, `PLAN.md` §15 |
 
 ---
 
 ## Next Step
 
-### Step 14 — Operational Documentation, Deployment & Final Hardening
+### Roadmap complete — no further implementation steps
 
-The next implementation task is defined in `PLAN.md` §8, Step 14.
+`PLAN.md` Steps 0–14 are implemented, verified, and committed. What remains
+is operation, not construction:
 
-Step 13 proved the failure catalogue end to end: eighteen deterministic
-scenarios over isolated state assert recorded outcomes, not completion —
-including ambiguity handling, interrupted-run recovery, lock contention,
-self-ingestion refusal, and the notification-delivery-failure path. What does
-not exist is the operator-facing whole: the architecture, state model,
-registry, lifecycles, credential handling, notification behavior, scheduler
-setup, recovery procedures, and security posture written down outside the
-code; real ADR files for the accepted decisions; and a documented
-reproduction of a working scheduled system from a clean checkout.
-
-Constraints carried in from Step 13:
-
-- **Documentation describes what the code does.** The evaluated contracts —
-  three recorded outcomes, phase trails, lock/recovery rows, the duplicate
-  and ambiguity safeguards, the manual-only real-LinkedIn path — are the
-  source material, not aspirations.
-- **The evaluated suite is the regression gate.** Step 14's hardening must
-  keep all 971 tests green; any documentation-driven code change is minimal
-  and re-verified.
-- **Still open:** Known Issues #5 (key mismatch), #7 (no real sync pass),
-  #8 (near-duplicate embedder), #9 (no real publish), #11 (no real email),
-  #12 (expiry pre-check), #15 (linter), #16 (pid-reuse false-live). Step 14
-  is documentation and hardening — it closes #4's remainder and the ADR gap,
-  not the runtime firsts, which stay deliberate manual acts.
+- **First real acts (all deliberate, all manual):** valid OpenRouter key
+  (#5), first real sync pass (#7), first real publish (#9), first real email
+  (#11). Each is designed to succeed or to fail loudly with a named remedy.
+- **Deferred by design:** near-duplicate embedder wiring (#8), credential
+  expiry pre-check (#12), linter adoption (#15).
+- **Accepted residuals:** pid-reuse false-live refusals (#16); no operator
+  resolution path for `unknown_requires_review` yet (#17) — publishing
+  halts (fail-closed) after the first ambiguity until one is built.
+- **Future capability (document-only):** mention-triggered comment responses
+  (`PLAN.md` §15) — not designed, not scheduled, not implemented.
 
 
 ---

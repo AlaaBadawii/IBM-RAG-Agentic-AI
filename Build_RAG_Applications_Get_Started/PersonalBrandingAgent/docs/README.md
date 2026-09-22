@@ -8,7 +8,8 @@ mixed together:
 - **Retrieval** — the retrieval milestone: concepts and measured results.
 - **Evaluation** — how we measure retrieval, content, and quality gates.
 - **Decisions** — architecture decision records (ADRs).
-- **Operations** — local development, environment, and security.
+- **Operations** — local development, environment, security, scheduling,
+  state model, recovery, deployment, publishing.
 - **Phases** — foundational phase documents (historical).
 
 ## Documentation roles
@@ -60,23 +61,31 @@ docs/
 │   └── evaluation.md              # Hit@K / MRR and what the numbers showed
 ├── phases/                        # Foundational phase documents (historical)
 │   ├── phase-01-foundation.md
-│   └── phase-02-ingestion.md
-├── evaluation/                    # (empty — not yet written)
-│   ├── retrieval-evaluation.md
-│   ├── content-evaluation.md
-│   └── quality-gates.md
+│   ├── phase-02-ingestion.md
+│   ├── phase-10-observability-memory.md   # exists: referenced by ADR-005
+│   └── README.md                          # why no other phase files exist
+├── evaluation/
+│   ├── autonomous-evaluation.md           # 18 workflow scenarios + milestone (Step 13)
+│   ├── manual-linkedin.md                 # explicit real-LinkedIn path (never automated)
+│   └── quality-gates.md                   # evidence policy + verification gates
 ├── decisions/
 │   └── ADRs/
-│       └── README.md              # Template + index (ADR files not yet written)
-└── operations/                    # Written in Step 0
+│       ├── README.md                      # Template + index
+│       └── adr-001.md … adr-010.md        # Accepted decisions
+└── operations/
     ├── local-development.md       # Configuration authority, CLIs, tests
     ├── environment.md             # Python version, reproduction, resolved versions
-    └── security.md                # Secret vs non-secret split
+    ├── security.md                # Secret vs non-secret split
+    ├── scheduling.md              # Cron trigger, locks, exit codes (Step 12)
+    ├── state-model.md             # Operational schema (Step 14)
+    ├── recovery.md                # Recovery procedures + manual intervention (Step 14)
+    ├── deployment.md              # Clean-environment reproduction (Step 14)
+    └── publishing.md              # Publishing/auth lifecycles, notifications (Step 14)
 ```
 
-> Items marked *not yet written* are planned locations, not existing documents.
-> Do not link to them as if they exist. `operations/` was written in Step 0 and
-> its three documents exist; `evaluation/` remains planned.
+> All locations above exist. `evaluation/` was written across Steps 9
+> (gates), 13 (scenarios, manual path), and 14 (quality-gates catalogue);
+> `operations/` grew from three documents (Step 0) to eight (Steps 12, 14).
 
 ## Roadmap and phase documents
 
