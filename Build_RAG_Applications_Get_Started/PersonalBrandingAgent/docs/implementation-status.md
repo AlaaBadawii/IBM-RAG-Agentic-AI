@@ -222,6 +222,43 @@ Deviations:
   records transient failures it handles will accumulate rows that only a
   deliberate `notify_failure` call would report.
 
+Follow-up, added after the step was reviewed — **one mailbox, two kinds of
+message**:
+
+- **Every notification now carries the same subject, `"Branding Agent"`**, and
+  what a message is *about* moved onto the message itself as a
+  `NotificationKind` (`ISSUE` / `PUBLICATION`) rather than being encoded in the
+  subject line. The user wanted one mailbox to receive both the system's
+  problems and the posts it publishes, and one predictable subject is what makes
+  that routable. The cost is accepted deliberately: the subject no longer says
+  which kind a message is, so the body has to be opened to find out.
+- **The body now leads with the thing itself.** An issue email quotes the
+  recorded failure message first and verbatim — the same text that used to sit
+  at the bottom under `Explanation:` — before any of its metadata; a run email
+  with several failures attributes each description to its phase. A published
+  post's body *is* the post content, with the post id and link underneath.
+- **`notify_publication(post)` is the third entry point**, and the one the
+  failure path structurally cannot cover: a successful publish terminates
+  `DO_NOT_PUBLISH`, which is waived as a normal outcome, so nothing else would
+  ever tell the user what went out under their name. The post arrives as a
+  `PublishedPost` value rather than being looked up, because `app/notify/` may
+  not import `app/publishing/` — the import scan still passes.
+- **A publication has no noise control, deliberately.** The repeat window exists
+  to stop a recurring *condition* from flooding the mailbox; a post is an event
+  with a beginning and an end. `_deliver(..., key=None)` skips the suppression
+  check, so two posts published in a row are two things to read.
+- **A post is reported, not learned from.** The content goes into an email and
+  the delivery into the `notifications` table (`failure_id` NULL, `run_id`
+  optional); it is never indexed, never written into the knowledge base, and
+  never becomes context for the next post. Asserted by a test that walks every
+  field of the delivery row and fails if the post text appears in any of them.
+- **`SMTPConfig` test hermeticity was fixed in the same commit.** The Step 7
+  configuration tests asserted the *code's* defaults while reading the
+  developer's local `.env`, so they began failing the moment real SMTP settings
+  were added — a defect in the tests, not in the code, and one that would have
+  failed on the Step 7 commit too. They now clear the `SMTP_*` variables before
+  reloading, so the claim is about the code.
+
 ---
 
 ### Step 6 — Build Persistent Publishing, Idempotency & Recovery
@@ -1580,11 +1617,16 @@ client classes, and every other test uses a capturing fake. No message has left
 this machine, and the real path — a Gmail app password, STARTTLS on 587, a
 sender that matches the account — has never run.
 
-Two things also remain the user's to produce: the four required settings
-(`PLAN.md` §12.2 open item C) are not set in the local `.env`, and the app
-password has to be created in the Google account. Until then a failure is
-recorded as a delivery failure with the `configuration` category — loud in the
-state store, and the correct behaviour for an unconfigured notifier.
+The configuration half is now in place: the required settings (`PLAN.md` §12.2
+open item C) are present in the local `.env`, so the notifier is no longer
+recorded as an `configuration` delivery failure by default. What remains is the
+first real delivery, which is a deliberate manual act — the same shape as the
+first real publish (Known Issue #9). Until it is taken, "notifications work"
+rests on fakes in both directions.
+
+*(This entry read "`SMTP_*` is unset in `.env`" until the settings were added;
+the status document is corrected rather than left asserting a condition that is
+no longer true.)*
 
 ---
 

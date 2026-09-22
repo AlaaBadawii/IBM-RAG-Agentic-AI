@@ -4,23 +4,27 @@
 
     workflow phase fails → persist failure → notification service → email → user
 
-So the decision lives here, in deterministic code, and it takes exactly two
-inputs the layers below already produce — a run's recorded outcome, and a
-recorded failure. Nothing has to be re-derived, and no phase has to remember
-to notify: a phase records a structured failure, and the wrapper asks this
-service to report the run.
+So the decision lives here, in deterministic code, and it takes exactly three
+inputs the layers below already produce — a run's recorded outcome, a recorded
+failure, and a post that was published. Nothing has to be re-derived, and no
+phase has to remember to notify: a phase records a structured failure, and the
+wrapper asks this service to report the run.
 
     from app.notify import NotificationService
 
     service = NotificationService(store)
     service.notify_run(run.run_id)          # the workflow wrapper
     service.notify_failure(failure)         # a phase, with no store needed
+    service.notify_publication(post)        # a post that went out
 
-Three rules the design rests on:
+Four rules the design rests on:
 
 1. **A success is not a failure.** ``DO_NOT_PUBLISH`` — and a run that has not
    finished — is waived, not emailed. An alerting path that cries wolf on a
    normal no-op is one a person will filter into a folder and stop reading.
+   A publication is the exception that proves the rule: it is a success, and it
+   is still reported, because "what went out under my name" is the one thing a
+   successful run owes the user and the only channel that can carry it.
 2. **A delivery failure is its own outcome.** It is recorded as a
    ``notifications`` row with ``delivery_state='failed'`` and a categorized
    reason, and returned as a report. It never raises past the caller, never
@@ -29,7 +33,12 @@ Three rules the design rests on:
 3. **The first occurrence is never suppressed.** Noise control suppresses the
    *repetitions* of a failure already reported inside the quiet window; the
    first time a failure is seen, there is nothing to compare against and it
-   goes out.
+   goes out. A publication is not subject to it at all — see
+   :meth:`NotificationService.notify_publication`.
+4. **Every notification has the same subject.** One mailbox receives both the
+   problems and the posts, so what a message is about is a field on the
+   message (:class:`~app.notify.enums.NotificationKind`), never something a
+   reader has to infer from the subject line.
 
 The store is optional, and only for one reason: the state store is itself a
 phase that must be able to report a failure (``PLAN.md`` Step 7, reachability
@@ -49,8 +58,16 @@ from app.notify.enums import (
     WaiverReason,
 )
 from app.notify.errors import NotificationDeliveryError
-from app.notify.messages import build_failure_message, build_run_message
-from app.notify.models import NotificationMessage, NotificationReport
+from app.notify.messages import (
+    build_failure_message,
+    build_post_message,
+    build_run_message,
+)
+from app.notify.models import (
+    NotificationMessage,
+    NotificationReport,
+    PublishedPost,
+)
 from app.notify.transport import EmailTransport, SMTPTransport
 from app.state.enums import DeliveryState, RunOutcome
 from app.state.models import (
@@ -132,23 +149,45 @@ class NotificationService:
                              failure_id=failure.failure_id,
                              subject_of=failure)
 
+    def notify_publication(self, post: PublishedPost, *,
+                           run_id: str | None = None) -> NotificationReport:
+        """Report a post that was published.
+
+        The other thing the mailbox is for, and the one the failure path can
+        never cover: a successful publish terminates ``DO_NOT_PUBLISH`` and is
+        waived, so if this does not say what went out, nothing does.
+
+        The post is supplied as a value rather than looked up, because the
+        notification layer may not import the publishing layer — and because a
+        caller that has just published already holds it.
+
+        Unlike a failure, a publication has **no noise control**: a post is one
+        event with a beginning and an end, not a condition that recurs, so a
+        repeat window has nothing to compare it against and nothing to
+        suppress. Two posts published in a row are two things to read.
+        """
+        message = build_post_message(post, secrets=self._secrets)
+        return self._deliver(message, key=None, run_id=run_id, failure_id=None,
+                             subject_of=post)
+
     # -- the delivery itself ------------------------------------------------
 
     def _deliver(self, message: NotificationMessage, *,
-                 key: tuple[str, str],
+                 key: tuple[str, str] | None,
                  run_id: str | None,
                  failure_id: str | None,
                  subject_of: Any) -> NotificationReport:
-        prior = self._recently_sent(key)
-        if prior is not None:
-            reason = (
-                f"already reported at {prior.created_at} "
-                f"({prior.subject}); repeats inside "
-                f"{self._repeat_after_hours:g}h are suppressed so a recurring "
-                f"failure cannot flood the mailbox"
-            )
-            logger.info("Notification suppressed: %s", reason)
-            return self._waive(WaiverReason.REPEAT_SUPPRESSED, reason)
+        if key is not None:
+            prior = self._recently_sent(key)
+            if prior is not None:
+                reason = (
+                    f"already reported at {prior.created_at} "
+                    f"({prior.subject}); repeats inside "
+                    f"{self._repeat_after_hours:g}h are suppressed so a "
+                    f"recurring failure cannot flood the mailbox"
+                )
+                logger.info("Notification suppressed: %s", reason)
+                return self._waive(WaiverReason.REPEAT_SUPPRESSED, reason)
 
         category, error = self._attempt(message)
         if category is not None:
@@ -281,6 +320,9 @@ class NotificationService:
             return f"run {subject_of.run_id}"
         if isinstance(subject_of, OperationalFailure):
             return f"the failure in phase {subject_of.phase}"
+        if isinstance(subject_of, PublishedPost):
+            return (f"the published post {subject_of.post_id}"
+                    if subject_of.post_id else "the published post")
         return "the failure"
 
     @staticmethod

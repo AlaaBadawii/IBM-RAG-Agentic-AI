@@ -6,13 +6,31 @@ import pytest
 import app.config as config
 from app.errors import ConfigError
 
+#: The settings Step 7 added. Named here so the reload helper can clear them:
+#: what these tests assert are the *code's* defaults, and a real `.env` in the
+#: working tree must not be able to change what that means.
+SMTP_ENV_VARS = (
+    "SMTP_HOST", "SMTP_PORT", "SMTP_SENDER", "SMTP_RECIPIENT",
+    "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_TLS",
+    "SMTP_TIMEOUT_SECONDS", "SMTP_REPEAT_AFTER_HOURS",
+)
+
 
 def _reload_with(monkeypatch, **env):
     # Patch inside the dotenv package: app.config re-executes
     # "from dotenv import load_dotenv" during importlib.reload, so patching
     # the app.config attribute would be overwritten. Patch the source module.
     monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
-    for key in list(env.keys()) + ["OPENAI_API_KEY", "OPENROUTER_API_KEY"]:
+    # Every variable these tests assert a *default* for has to be cleared
+    # first, including the ones .env supplies: a default is a property of the
+    # code, and a test that read the developer's local .env would start
+    # asserting the developer's mailbox instead. app.config calls
+    # load_dotenv(ENV_FILE) at import, which has already put .env into
+    # os.environ by the time any test runs, so patching load_dotenv to a no-op
+    # is not enough on its own.
+    for key in (list(env.keys())
+                + ["OPENAI_API_KEY", "OPENROUTER_API_KEY"]
+                + list(SMTP_ENV_VARS)):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -77,20 +95,23 @@ def test_generation_params_use_openai_compatible_names():
 
 # --- Step 7: notification configuration --------------------------------------
 
-def test_smtp_has_no_default_addresses():
+def test_smtp_has_no_default_addresses(monkeypatch):
     """The mechanism is decided; the addresses are the user's (PLAN.md §12.2 C).
 
     A hardcoded sender or recipient would be a value this repository chose for
     somebody else's mailbox, so the required settings start empty and the
-    application runs without them.
+    application runs without them. Asserted with the environment cleared, so
+    the claim is about the code and not about whoever is running the tests.
     """
+    _reload_with(monkeypatch)
     assert config.SMTP_HOST == ""
     assert config.SMTP_SENDER == ""
     assert config.SMTP_RECIPIENT == ""
     assert config.SMTP_PASSWORD == ""
 
 
-def test_smtp_defaults_are_bounded_and_encrypted():
+def test_smtp_defaults_are_bounded_and_encrypted(monkeypatch):
+    _reload_with(monkeypatch)
     assert config.SMTP_PORT == 587
     assert config.SMTP_TLS == "starttls"
     assert config.SMTP_TIMEOUT_SECONDS == 30.0

@@ -18,16 +18,27 @@ Two rules:
    transport's own configuration carries. The body is composed *from* a stored
    failure message, and a message is a string some earlier layer wrote — so it
    is treated as untrusted with respect to secrets.
+
+Layout: every notification carries the same subject (:data:`SUBJECT`) and a
+body that leads with the thing itself — the issue, or the published post — and
+only then its metadata. The mailbox is where the user finds out what happened,
+so the first line of the body has to answer "what?" rather than describe the
+shape of the message that answers it. Which of the two a message is, is on the
+message as a :class:`~app.notify.enums.NotificationKind`, not in the subject.
 """
 from typing import Iterable, Sequence
 
 from app.logging_config import redact
-from app.notify.models import NotificationMessage
+from app.notify.enums import NotificationKind
+from app.notify.models import NotificationMessage, PublishedPost
 from app.state.enums import RunOutcome
 from app.state.models import OperationalFailure, WorkflowRun, utc_now_iso
 
-#: Prefixes every subject, so a mailbox rule can find these without guessing.
-SUBJECT_PREFIX = "[PersonalBrandingAgent]"
+#: The subject of *every* notification, whatever it is about. One mailbox
+#: receives both the problems and the posts, so one predictable subject is what
+#: lets a single mail rule collect them (``PLAN.md`` Step 7's notification
+#: layer, extended so a successful publish is reportable too).
+SUBJECT = "Branding Agent"
 
 #: Width of the label column in a body. Chosen to fit the longest label
 #: (``Requires human intervention``) with its colon and a visible gap, so
@@ -70,8 +81,32 @@ def _action(requires_human_intervention: bool) -> str:
             "next scheduled run will pick the work up again.")
 
 
+def _issue_lines(recorded: Sequence[OperationalFailure], *,
+                 secrets: Sequence[str]) -> list[str]:
+    """The issue itself, before any of its metadata.
+
+    A phase writes a human-readable message when it records a failure, and that
+    message is the description of the problem — so it is rendered first and
+    verbatim (redacted, never summarised or paraphrased). One failure is quoted
+    on its own; several are attributed to their phase, because a run that
+    failed in two places has two descriptions and dropping either would hide
+    half the problem. A run with no recorded failure still has an outcome worth
+    reporting, so it says that rather than rendering an empty issue.
+    """
+    if not recorded:
+        return [_NO_FAILURE_RECORD]
+    if len(recorded) == 1:
+        return [redact(recorded[0].message, *secrets)]
+    return [
+        f"[{index}/{len(recorded)}] {failure.phase}: "
+        f"{redact(failure.message, *secrets)}"
+        for index, failure in enumerate(recorded, start=1)
+    ]
+
+
 def _failure_block(failure: OperationalFailure, *, heading: str | None,
                    secrets: Sequence[str]) -> list[str]:
+    """A failure's structured fields. The description is quoted separately."""
     lines: list[str] = []
     if heading:
         lines += [heading, ""]
@@ -84,9 +119,6 @@ def _failure_block(failure: OperationalFailure, *, heading: str | None,
         _line("Retryable", _yes_no(failure.retryable)),
         _line("Requires human intervention",
               _yes_no(failure.requires_human_intervention)),
-        "",
-        "Explanation:",
-        redact(failure.message, *secrets),
     ]
     return lines
 
@@ -100,10 +132,10 @@ def build_failure_message(failure: OperationalFailure, *,
     anything about email, configuration or the store's notification table.
     """
     outcome = outcome_label(failure.requires_human_intervention)
-    subject = (f"{SUBJECT_PREFIX} {outcome} — {failure.phase}"
-               + (f" ({failure.workflow})" if failure.workflow else ""))
     body = "\n".join([
         "PersonalBrandingAgent — operational failure",
+        "",
+        *_issue_lines([failure], secrets=secrets),
         "",
         _line("Outcome", outcome),
         _line("Workflow", failure.workflow or "(not recorded)"),
@@ -114,7 +146,8 @@ def build_failure_message(failure: OperationalFailure, *,
         "",
         _action(failure.requires_human_intervention),
     ])
-    return NotificationMessage(subject=redact(subject, *secrets),
+    return NotificationMessage(kind=NotificationKind.ISSUE,
+                               subject=redact(SUBJECT, *secrets),
                                body=redact(body, *secrets))
 
 
@@ -130,10 +163,11 @@ def build_run_message(run: WorkflowRun, failures: Iterable[OperationalFailure],
     outcome = (run.outcome.value if run.outcome is not None
                else "(unfinished)")
     requires_human = run.outcome is RunOutcome.REQUIRES_HUMAN_INTERVENTION
-    subject = (f"{SUBJECT_PREFIX} {outcome} — {run.workflow} run {run.run_id}")
 
     lines = [
         "PersonalBrandingAgent — unattended run notification",
+        "",
+        *_issue_lines(recorded, secrets=secrets),
         "",
         _line("Outcome", outcome),
         _line("Workflow", run.workflow),
@@ -151,8 +185,6 @@ def build_run_message(run: WorkflowRun, failures: Iterable[OperationalFailure],
             "is retried automatically.",
             "",
         ]
-    if not recorded:
-        lines += [_NO_FAILURE_RECORD, ""]
     for index, failure in enumerate(recorded, start=1):
         lines += _failure_block(
             failure,
@@ -161,5 +193,33 @@ def build_run_message(run: WorkflowRun, failures: Iterable[OperationalFailure],
         )
         lines.append("")
     lines.append(_action(requires_human))
-    return NotificationMessage(subject=redact(subject, *secrets),
+    return NotificationMessage(kind=NotificationKind.ISSUE,
+                               subject=redact(SUBJECT, *secrets),
                                body=redact("\n".join(lines), *secrets))
+
+
+def build_post_message(post: PublishedPost, *,
+                       secrets: Sequence[str] = ()) -> NotificationMessage:
+    """A post that was published, as an email.
+
+    The other half of what the mailbox is for, and the half the failure path
+    can never cover: publishing succeeds, the run terminates ``DO_NOT_PUBLISH``
+    and is waived as a normal outcome, so nothing else would ever tell the user
+    what went out under their name.
+
+    The body *is* the post — the supplied content, first and unaltered — with
+    the identifiers that let a person find it underneath.
+    """
+    body = "\n".join([
+        "PersonalBrandingAgent — published post",
+        "",
+        redact(post.content, *secrets),
+        "",
+        _line("Post", post.post_id or "(not recorded)"),
+        _line("Link", post.url or "(not recorded)"),
+        _line("Published", post.published_at or "(not recorded)"),
+        _line("Notified", utc_now_iso()),
+    ])
+    return NotificationMessage(kind=NotificationKind.PUBLICATION,
+                               subject=redact(SUBJECT, *secrets),
+                               body=redact(body, *secrets))

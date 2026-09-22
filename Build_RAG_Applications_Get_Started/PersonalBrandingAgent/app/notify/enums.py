@@ -14,6 +14,23 @@ distinction an unattended system cannot afford to lose.
 from enum import Enum
 
 
+class NotificationKind(str, Enum):
+    """What a notification is *about*.
+
+    The mailbox carries exactly two things and nothing else: a problem the
+    system could not resolve on its own, and a post it published on the user's
+    behalf. The kind is carried on the message rather than encoded in the
+    subject, because the subject is deliberately the same for both — one
+    mailbox rule has to be able to find all of them — so without this field the
+    two would only be distinguishable by reading the body.
+    """
+
+    #: Something went wrong and a person has to hear about it.
+    ISSUE = "issue"
+    #: Something was published and a person should see what it was.
+    PUBLICATION = "publication"
+
+
 class NotificationDecision(str, Enum):
     """What happened to one notification request.
 

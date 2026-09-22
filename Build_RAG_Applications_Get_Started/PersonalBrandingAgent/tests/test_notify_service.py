@@ -12,10 +12,14 @@ import pytest
 from app import paths
 from app.errors import StateStoreError
 from app.notify import (
+    SMTPConfig,
+    SUBJECT,
     NotificationDecision,
     NotificationDeliveryError,
     NotificationFailureCategory,
+    NotificationKind,
     NotificationService,
+    PublishedPost,
     WaiverReason,
 )
 from app.notify.errors import NotificationConfigurationError
@@ -128,8 +132,10 @@ def test_a_failed_run_produces_exactly_one_notification(store):
     assert len(transport.messages) == 1
 
     message = transport.messages[0]
-    assert "WORKFLOW_FAILED" in message.subject
-    assert run.run_id in message.subject
+    assert message.kind is NotificationKind.ISSUE
+    assert message.subject == SUBJECT
+    # The outcome is still carried — in the body, where the metadata lives.
+    assert "Outcome:" in message.body and "WORKFLOW_FAILED" in message.body
     # Every field PLAN.md Step 7 requires the content to carry.
     body = message.body
     assert "Workflow:" in body and "branding" in body
@@ -156,7 +162,7 @@ def test_the_delivery_is_recorded_against_the_run(store):
     assert stored.run_id == run.run_id
     assert stored.transport == "fake"
     assert stored.error_message is None
-    assert "WORKFLOW_FAILED" in stored.subject
+    assert stored.subject == SUBJECT
     assert store.list_notifications(run_id=run.run_id) == [stored]
 
 
@@ -199,8 +205,8 @@ def test_human_intervention_notifies_with_its_own_outcome(store):
     _service(store, transport).notify_run(run.run_id)
 
     message = transport.messages[0]
-    assert "REQUIRES_HUMAN_INTERVENTION" in message.subject
-    assert "WORKFLOW_FAILED" not in message.subject
+    assert "REQUIRES_HUMAN_INTERVENTION" in message.body
+    assert "WORKFLOW_FAILED" not in message.body
     assert "Action required" in message.body
     assert "cannot be resolved automatically" in message.body
 
@@ -224,7 +230,8 @@ def test_a_failure_that_needs_a_person_is_labelled_as_such(store):
 
     assert report.sent
     message = transport.messages[0]
-    assert "REQUIRES_HUMAN_INTERVENTION" in message.subject
+    assert message.subject == SUBJECT
+    assert "REQUIRES_HUMAN_INTERVENTION" in message.body
     assert "Requires human intervention:    yes" in message.body
 
 
@@ -298,7 +305,8 @@ def test_every_phase_in_the_reachability_table_can_report(store, phase):
     report = _service(store, transport).notify_failure(failure)
 
     assert report.sent
-    assert phase in transport.messages[0].subject
+    assert transport.messages[0].subject == SUBJECT
+    assert phase in transport.messages[0].body
     assert f"{phase} broke" in transport.messages[0].body
 
 
@@ -475,8 +483,6 @@ def test_a_repeat_is_suppressed_per_failure_not_globally(store):
 
 def test_no_secret_appears_in_a_notification_or_its_delivery_record(store):
     """Acceptance: no secret value can appear in a notification."""
-    from app.notify import SMTPConfig
-
     config = SMTPConfig(host="smtp.example.com", port=587,
                         sender="owner@example.com",
                         recipient="owner@example.com",
@@ -509,8 +515,6 @@ def test_no_secret_appears_in_a_notification_or_its_delivery_record(store):
 
 def test_a_delivery_error_is_scrubbed_before_it_is_recorded(store):
     """The text a mail server returns is external input, not a trusted string."""
-    from app.notify import SMTPConfig
-
     config = SMTPConfig(host="h", port=587, sender="a@b.c", recipient="d@e.f",
                         username="a@b.c", password="app-password-xyz")
     run, _ = _finished(store, RunOutcome.WORKFLOW_FAILED)
@@ -522,8 +526,6 @@ def test_a_delivery_error_is_scrubbed_before_it_is_recorded(store):
 
 
 def test_the_configuration_used_is_recorded_without_its_credentials(store):
-    from app.notify import SMTPConfig
-
     config = SMTPConfig(host="smtp.example.com", port=587, sender="a@example.com",
                         recipient="owner@example.com", username="a@example.com",
                         password="app-password-xyz")
@@ -535,6 +537,226 @@ def test_the_configuration_used_is_recorded_without_its_credentials(store):
     assert recorded.recipient == "owner@example.com"
     assert recorded.transport == "fake"
     assert "app-password-xyz" not in (recorded.smtp_config or "")
+
+
+# --- one mailbox, two kinds of message ----------------------------------------
+#
+# Follow-up to Step 7. The mailbox receives both the problems the system could
+# not resolve and the posts it published, so every notification carries the
+# same subject and the body leads with the thing itself. These are the focused
+# tests for that: one subject, two kinds, and the supplied content present in
+# the body of each.
+
+ISSUE_TEXT = "the retrieval index is missing its embedding column"
+POST_TEXT = ("Today I learned that a retrieval pipeline is mostly a story about "
+             "what you throw away. Here is how I decide what stays.")
+
+
+def _post(**overrides) -> PublishedPost:
+    values = dict(content=POST_TEXT, post_id="urn:li:share:7001",
+                  url="https://www.linkedin.com/feed/update/urn:li:share:7001",
+                  published_at="2026-09-22T09:00:00+00:00")
+    values.update(overrides)
+    return PublishedPost(**values)
+
+
+def test_an_issue_notification_uses_the_branding_agent_subject(store):
+    """Acceptance: the failure email's subject is exactly ``Branding Agent``."""
+    run = _run(store)
+    failure = _failure(store, run.run_id, message=ISSUE_TEXT,
+                       category="RETRIEVAL")
+    transport = CapturingTransport()
+    report = _service(store, transport).notify_failure(failure)
+
+    assert report.sent
+    message = transport.messages[0]
+    assert message.subject == "Branding Agent"
+    assert message.subject == SUBJECT
+    assert message.kind is NotificationKind.ISSUE
+    assert store.get_notification(report.notification.notification_id).subject \
+        == "Branding Agent"
+
+
+def test_a_run_notification_uses_the_same_subject_as_a_phase_notification(store):
+    """A mailbox rule that finds one has to find the other."""
+    failed, _ = _finished(store, RunOutcome.WORKFLOW_FAILED)
+    human, _ = _finished(store, RunOutcome.REQUIRES_HUMAN_INTERVENTION)
+
+    transport = CapturingTransport()
+    service = _service(store, transport)
+    service.notify_run(failed.run_id)
+    service.notify_run(human.run_id)
+
+    subjects = [message.subject for message in transport.messages]
+    assert subjects == ["Branding Agent", "Branding Agent"]
+
+
+def test_the_issue_email_body_contains_the_supplied_description(store):
+    """Acceptance: the body carries the issue description, not just metadata.
+
+    It leads with it: the description a phase recorded is the answer to "what
+    is wrong", and it is quoted first and unaltered.
+    """
+    run = _run(store)
+    failure = _failure(store, run.run_id, message=ISSUE_TEXT,
+                       category="RETRIEVAL")
+    transport = CapturingTransport()
+    _service(store, transport).notify_failure(failure)
+
+    body = transport.messages[0].body
+    assert ISSUE_TEXT in body
+    # First content line, before any of the structured fields.
+    assert body.splitlines()[2] == ISSUE_TEXT
+    assert body.index(ISSUE_TEXT) < body.index("Phase:")
+
+
+def test_a_run_email_leads_with_every_recorded_description(store):
+    run = _run(store)
+    _failure(store, run.run_id, phase="retrieval", message=ISSUE_TEXT,
+             category="RETRIEVAL")
+    _failure(store, run.run_id, message=TEXT)
+    store.finish_run(run.run_id, RunOutcome.WORKFLOW_FAILED,
+                     failed_phase="linkedin_publish")
+
+    transport = CapturingTransport()
+    _service(store, transport).notify_run(run.run_id)
+
+    body = transport.messages[0].body
+    assert ISSUE_TEXT in body and TEXT in body
+    assert body.index(ISSUE_TEXT) < body.index("Outcome:")
+    assert body.index(TEXT) < body.index("Outcome:")
+
+
+# --- the other thing the mailbox carries --------------------------------------
+
+def test_a_publication_notification_uses_the_branding_agent_subject(store):
+    """Acceptance: the publication email's subject is ``Branding Agent`` too."""
+    transport = CapturingTransport()
+    report = _service(store, transport).notify_publication(_post())
+
+    assert report.sent
+    message = transport.messages[0]
+    assert message.subject == "Branding Agent"
+    assert message.kind is NotificationKind.PUBLICATION
+
+
+def test_the_publication_email_body_contains_the_published_post(store):
+    """Acceptance: the body carries the post content as supplied."""
+    transport = CapturingTransport()
+    _service(store, transport).notify_publication(_post())
+
+    body = transport.messages[0].body
+    assert POST_TEXT in body
+    assert body.splitlines()[2] == POST_TEXT, "the post is not led with"
+    assert "urn:li:share:7001" in body
+
+
+def test_a_publication_is_reported_even_though_the_run_did_not_fail(store):
+    """The half the failure path cannot reach.
+
+    A successful publish terminates ``DO_NOT_PUBLISH`` and is waived, so if a
+    publication did not notify on its own, nothing would ever tell the user
+    what went out under their name.
+    """
+    run = _run(store)
+    store.finish_run(run.run_id, RunOutcome.DO_NOT_PUBLISH)
+    transport = CapturingTransport()
+    service = _service(store, transport)
+
+    assert service.notify_run(run.run_id).waived, "a success is waived"
+    report = service.notify_publication(_post(), run_id=run.run_id)
+
+    assert report.sent
+    assert transport.called
+    recorded = store.get_notification(report.notification.notification_id)
+    assert recorded.delivery_state is DeliveryState.SENT
+    assert recorded.run_id == run.run_id
+    assert recorded.failure_id is None, "a post is not a failure"
+
+
+def test_a_publication_is_not_suppressed_by_the_repeat_window(store):
+    """A post is an event, not a condition: two posts are two things to read."""
+    transport = CapturingTransport()
+    service = _service(store, transport, repeat_after_hours=24)
+
+    first = service.notify_publication(_post(post_id="urn:li:share:1"))
+    second = service.notify_publication(_post(post_id="urn:li:share:2"))
+
+    assert first.sent and second.sent, "the second post was suppressed"
+    assert len(transport.messages) == 2
+
+
+def test_a_publication_with_no_identifiers_still_composes(store):
+    """Nothing about a publish is guaranteed to be recorded but the content."""
+    transport = CapturingTransport()
+    report = _service(store, transport).notify_publication(
+        PublishedPost(content=POST_TEXT))
+
+    assert report.sent
+    body = transport.messages[0].body
+    assert POST_TEXT in body
+    assert "(not recorded)" in body
+
+
+def test_a_publication_needs_no_store(store):
+    """Same contract as a failure: composing never requires the store."""
+    transport = CapturingTransport()
+    report = NotificationService(transport=transport).notify_publication(_post())
+
+    assert report.sent
+    assert report.recorded is False
+
+
+def test_a_failed_publication_notification_is_recorded_without_a_failure(store):
+    """A delivery failure is reported as such and invents no failure row."""
+    transport = CapturingTransport(
+        fail_with=NotificationDeliveryError(
+            NotificationFailureCategory.TRANSPORT, "the mail server refused")
+    )
+    report = _service(store, transport).notify_publication(_post())
+
+    assert report.failed
+    recorded = store.get_notification(report.notification.notification_id)
+    assert recorded.delivery_state is DeliveryState.FAILED
+    assert recorded.failure_id is None
+    assert store.list_failures() == [], "a notification failure wrote a failure"
+
+
+def test_no_secret_reaches_a_publication_email(store):
+    """Acceptance: the SMTP password is never included, in either kind."""
+    config = SMTPConfig(host="smtp.example.com", port=587,
+                        sender="owner@example.com",
+                        recipient="owner@example.com",
+                        username="owner@example.com",
+                        password="app-password-xyz")
+    transport = CapturingTransport(config=config)
+    report = _service(store, transport).notify_publication(
+        _post(content=f"{POST_TEXT} (sent with app-password-xyz)"))
+
+    rendered = transport.messages[0].render()
+    assert "app-password-xyz" not in rendered
+    assert "[REDACTED]" in rendered
+    assert "app-password-xyz" not in report.message
+    recorded = store.get_notification(report.notification.notification_id)
+    assert "app-password-xyz" not in recorded.subject
+    assert "app-password-xyz" not in (recorded.smtp_config or "")
+    assert "app-password-xyz" not in (recorded.error_message or "")
+
+
+def test_the_reported_post_is_never_indexed_anywhere(store):
+    """The post is reported, not learned from: no store row carries its text.
+
+    ``PLAN.md`` §6 keeps publication history out of Chroma, and Step 6 does not
+    write post content into the state store either. Notifying about a post must
+    not become the loophole: the delivery row records that a message was sent
+    and to whom, never what it said.
+    """
+    transport = CapturingTransport()
+    report = _service(store, transport).notify_publication(_post())
+
+    recorded = store.get_notification(report.notification.notification_id)
+    for value in vars(recorded).values():
+        assert POST_TEXT not in str(value)
 
 
 # --- the layers stay apart ---------------------------------------------------

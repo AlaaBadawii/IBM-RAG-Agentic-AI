@@ -17,7 +17,9 @@ import pytest
 from app import config as app_config
 from app.errors import ConfigError
 from app.notify import (
+    SUBJECT,
     NotificationFailureCategory,
+    NotificationKind,
     NotificationMessage,
     NotificationService,
     SMTPConfig,
@@ -46,7 +48,7 @@ def a_config(**overrides) -> SMTPConfig:
 
 
 def a_message() -> NotificationMessage:
-    return NotificationMessage(subject="[PersonalBrandingAgent] test",
+    return NotificationMessage(kind=NotificationKind.ISSUE, subject=SUBJECT,
                                body=SUMMARY)
 
 
@@ -122,7 +124,7 @@ def test_a_notification_is_sent_to_the_configured_addresses(smtp):
     payload = client.payload
     assert payload["From"] == "owner@example.com"
     assert payload["To"] == "owner@example.com"
-    assert payload["Subject"] == "[PersonalBrandingAgent] test"
+    assert payload["Subject"] == "Branding Agent"
     assert SUMMARY in payload.get_content()
     assert "send_message" in [op[0] for op in client.operations]
 
