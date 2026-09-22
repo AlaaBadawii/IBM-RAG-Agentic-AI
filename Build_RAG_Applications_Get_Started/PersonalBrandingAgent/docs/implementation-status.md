@@ -27,13 +27,13 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 10 — Build the Autonomous Branding Agent
+    Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–9 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–10 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
@@ -51,20 +51,29 @@ Overall Progress:
     five inferences `data/audit/README.md` forbids are enforced as rules, a
     semantic judgement is available but advisory and is consulted only after the
     deterministic checks pass, and the result is a typed structure that cannot
-    be constructed as a pass while carrying a finding. Nothing yet drives the
-    gate, revises a draft, or publishes — Steps 10 and 11 own that. Steps 10–14
-    have not been started.
+    be constructed as a pass while carrying a finding. Above that gate now sits
+    the one bounded Agent: it chooses a topic from the context's own non-empty
+    evidence sections, names the evidence by label from the list it was shown
+    and from nothing else, proposes an angle, a project and — for a fresh pass —
+    a retrieval strategy, drives Step 9's revision loop under Step 9's own
+    stopping rule, and returns a decision. `PUBLISH` is unconstructible without
+    a passing verification behind it; `DO_NOT_PUBLISH` carries a reason and is a
+    success. Reasoning failure is a `DO_NOT_PUBLISH` carrying the failure for
+    the workflow to notify, never a weaker post. The Agent writes nothing,
+    publishes nothing, notifies no one, and has no import path to a store, a
+    publisher, a transport or the corpus. Nothing yet runs any of this on a
+    schedule — Steps 11–14 have not been started.
 
 Last Completed Step:
-    Step 9 — Build Evidence Verification & Revision Gates
+    Step 10 — Build the Autonomous Branding Agent
 
 Next Step:
-    Step 10 — Build the Autonomous Branding Agent
+    Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–9 have since been implemented, verified, and
-committed; Step 10 onwards remains untouched.
+analysis of the repository. Steps 0–10 have since been implemented, verified,
+and committed; Step 11 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -92,7 +101,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 7 | Build Operational Failure Notifications via Email | COMPLETED |
 | 8 | Build Grounded Post Generation | COMPLETED |
 | 9 | Build Evidence Verification & Revision Gates | COMPLETED |
-| 10 | Build the Autonomous Branding Agent | NOT STARTED |
+| 10 | Build the Autonomous Branding Agent | COMPLETED |
 | 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | NOT STARTED |
 | 12 | Add External Scheduling, Locks & Recovery | NOT STARTED |
 | 13 | End-to-End Autonomous Evaluation | NOT STARTED |
@@ -104,6 +113,172 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 10 — Build the Autonomous Branding Agent
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/agent/` — nine modules behind one public surface (`__init__.py`):
+  `enums.py` (the decision, its reasons, the failure categories, and the
+  `FAILURE_REASONS` set), `errors.py` (`AgentError` and its three subclasses),
+  `models.py` (frozen value objects), `prompt.py` (deterministic prompt assembly
+  and the answer parser), `reasoning.py` (the reasoning protocol), `llm.py`
+  (`LlmContentReasoner`), `history.py` (the read-only history boundary),
+  `agent.py` (`BrandingAgent`, the one entry point).
+- **Exactly one agent, and no framework.** `BrandingAgent` is the only agent in
+  the package; there is no planner/critic pair, no sub-agent, no graph
+  framework, no MCP, and no second turn anywhere. `ContentReasoner.reason()` is
+  asked **once per run** and there is no mechanism by which it could be asked
+  twice — the bounded part of a run is the revision loop *below* the decision,
+  over drafts. A test computes the set of agent classes in the package and
+  asserts it has exactly one member.
+- **`DO_NOT_PUBLISH` is a first-class success and is reachable from every
+  branch.** It is `AgentDecision.DO_NOT_PUBLISH`, it always carries a
+  `NoPublishReason`, and the reasons that are *failures* are a separate,
+  explicitly enumerated set (`FAILURE_REASONS` = `{REASONING_FAILED,
+  INVALID_PROPOSAL}`) — so "we decided not to" and "reasoning broke" can never
+  be confused for one another. Six non-failure routes reach it: `NO_EVIDENCE`
+  (decided before the model is asked), `NO_VALUE` (the reasoner declined),
+  `GENERATION_DECLINED` (the writer declined), `GATE_REJECTED` (Step 9 refused
+  the draft) and `REVISION_EXHAUSTED` (the budget ran out). An
+  `AgentResult.__post_init__` invariant makes a `DO_NOT_PUBLISH` with no reason
+  unconstructible — an outcome with no reason is indistinguishable from a bug.
+- **Evidence selection is confined to what retrieval returned, structurally.**
+  `evidence_options(context)` numbers the context's *own* `evidence_items()` as
+  `E1…En`, and `_proposal_from()` resolves the reasoner's labels against exactly
+  that list. A label that does not resolve is `EvidenceSelectionError` —
+  **refused, never dropped** — and the answer is built from the context's own
+  items in the **context's** order (the same rule
+  `app.generation.prompt.selected_evidence` applies), so a repeated label is one
+  item and the prompt's labels do not depend on the order the model listed them
+  in. There is nowhere for an invented source, chunk id, or label to be stored:
+  `ReasoningAnswer` holds labels and nothing resolved, and a test asserts its
+  exact field set. The reasoner is offered no corpus handle, and the import scan
+  proves it has no path to one.
+- **The Agent cannot write state, and publishing history is read through the
+  Step 6 read service.** There is no store handle, session, publisher, notifier,
+  transport or clock anywhere in the package, and no import path to any of them
+  — asserted by parsing every module in `app/agent/` and failing on `sqlite3`,
+  `chroma`, `app.state`, `app.publishing.service`,
+  `app.publishing.duplicates`, `app.notify`, `app.sync`, `app.retrieval`,
+  `app.ingestion`, `app.integrations` or `app.sources`. The positive half is
+  asserted too: every `app.*` import in the package is on an explicit allow-list,
+  so a new one is a deliberate act. A second test greps the source for write
+  verbs (`create_publish_intent`, `record_publication`, `start_run`, `insert`,
+  `execute(`, `commit(`) so a write added later fails a test rather than needing
+  one to notice.
+- **The history boundary is a narrow read protocol, satisfied by the real
+  service.** `PublicationHistoryReader` declares five read methods
+  (`recent_publications`, `requires_review`, `recent_topics`,
+  `recent_projects`, `recent_evidence`) and `PublishingHistory` satisfies it
+  structurally, with no import of `app.publishing`'s service module. The digest
+  is read **once per run** (`run()` reads it, then passes it down) so the
+  history a proposal was reasoned from and the history its writing constraints
+  came from are the same value by construction rather than by two queries that
+  happened to agree. `history=None` yields `HistoryDigest.empty()` — a first
+  run, never an error, and never a reason to refuse the first post.
+- **`PUBLISH` is unconstructible without a passing verification.**
+  `AgentResult.__post_init__` refuses a `PUBLISH` with no `verification`, with a
+  verification that is not publishable, with no proposal, or carrying a
+  no-publish reason or a failure. Not "should not" — cannot. So the one lie an
+  agent could tell, reporting a publication the gate never granted, is a
+  `ValueError` at construction rather than a post.
+- **The gates stay authoritative and are not duplicated.** Step 8's
+  `PostGenerator.generate()` and Step 9's `EvidenceVerifier.verify()` are called
+  **as-is**; not one of their checks is restated, relaxed or reimplemented. The
+  loop's bound is `revision_decision(result, attempts_made,
+  limit=self._revision_limit)` — Step 9's function, which the Agent calls rather
+  than redefines — so `REVISE` is returned only while the budget is unspent and
+  the loop runs at most `revision_limit + 1` times whatever the model does. A
+  `REVISE` re-drives the generator with Step 9's own `revision_notes()` as
+  writing constraints, which is what makes the second attempt a bounded
+  operation rather than a guess. An explicit guard raises `AgentError` if the
+  loop outran its bound, because a stopping rule that stopped being one is not a
+  decision.
+- **Bounded reasoning terminates with a structured result.** Every path through
+  `run()` returns exactly one `AgentResult` — no unbounded retry, no open-ended
+  autonomy, no path that loops without a spent budget. `GenerationError` and
+  `VerificationError` are deliberately **not** caught: a phase that failed is
+  the workflow's to record and Step 7's to notify, and collapsing it into
+  `DO_NOT_PUBLISH` would report a broken run as a decision.
+- **Reasoning failure is a `DO_NOT_PUBLISH`, never a weaker post.**
+  `PLAN.md` Step 10's Failure/recovery is implemented literally: every reasoning
+  failure — an unreachable model, an answer that is not the required shape, an
+  evidence identifier that does not resolve — becomes a `DO_NOT_PUBLISH`
+  carrying an `AgentFailure(category, detail)`, and the Agent sends nothing
+  itself. `AgentResult.failed` is kept distinct from `not is_publishable` on
+  purpose, so the workflow knows a decision not to publish is a success the user
+  must not be emailed about.
+- **The answer is parsed strictly, and the failure is classified rather than
+  inferred from prose.** `parse_reasoning_answer()` extracts one JSON object
+  (forgiving about code fences, strict about shape) and raises
+  `ReasoningUnavailable` for a non-object, a missing boolean `publish`, or a
+  non-list `evidence`. `reasoning.py` declares `ContentReasoner` as a
+  `runtime_checkable` protocol — a fake with `name`, `prompt_version` and
+  `reason()` is a reasoner, which is why every test runs offline.
+  `LlmContentReasoner` builds the `ChatOpenAI` client lazily, so importing the
+  package needs no credential, and collapses every client-build, invoke and
+  parse failure into `ReasoningUnavailable`.
+- **Retrieval strategy selection is supported only to the extent Step 10 asks
+  for it, and no retrieval was redesigned.** `PLAN.md` notes that
+  `RetrievalEngine` accepts a strategy but nothing chooses one. The Agent does
+  not retrieve and cannot — `app.retrieval` is on the forbidden list. What it
+  produces is a **recommendation**: the strategy for a fresh pass at the topic
+  it chose, drawn from the vocabulary the caller allowed (`strategies=`). Empty
+  vocabulary means *no choice to make*, and the proposal keeps the strategy the
+  context was assembled with — a real strategy that demonstrably found this
+  evidence, not a default invented here. A strategy outside the allowed set is
+  refused like any other unresolvable name.
+- **The prompt's parts are fields, and the prohibitions are generated from the
+  list a test checks.** `ReasoningPrompt` carries named blocks
+  (`opportunities_block`, `evidence_block`, `history_block`,
+  `strategies_block`) with the rules as the system message, and the instruction
+  sentence is built from `PROHIBITED_CLAIMS` — imported from
+  `app.generation.prompt` rather than restated, so the two layers cannot drift
+  into disagreeing about what a post may never invent.
+- **`to_record()` produces the recordable form and nothing writes it.**
+  JSON-compatible, no clock, no environment, no secret and no evidence text: the
+  decision and its reason, the proposal's topic/angle/project/strategy and its
+  evidence by provenance, the failure when there is one, and Step 9's own record
+  once a draft got that far. Where it is written stays Step 11's.
+
+Verified:
+- 12 focused guarantees, each asserted against the public surface rather than
+  against internals: `DO_NOT_PUBLISH` is reachable; `DO_NOT_PUBLISH` is
+  respected (the caller's publish path is never entered); exactly one agent
+  exists; the Agent cannot publish directly; the Agent cannot write state;
+  publishing history is reached only through its read service; evidence
+  selection is limited to retrieved/context evidence; unsupported evidence
+  identifiers are rejected; the deterministic gates remain authoritative;
+  reasoning failure yields `DO_NOT_PUBLISH`; a fake LLM produces reproducible
+  decisions; and the bounded revision loop terminates.
+- **Milestone:** one full simulated run with fakes — context → Agent decision →
+  generation proposal → verification → final proposal/outcome — executed
+  **twice**, asserting the two results are equal. The real workflow is not
+  invoked.
+
+Tests: 75 new (`tests/test_agent.py`, 52; `tests/test_agent_boundaries.py`, 23).
+The first covers each of the twelve guarantees plus the milestone, driven by
+`FakeReasoner`, `FakeHistory`, `FakeJudge`, `FakeLLM` and `FakeGenerator` over
+contexts built from literal chunks; the second asserts what the package is
+structurally unable to do (the forbidden-import scan, the positive allow-list,
+the write-verb scan, the public surface, the read-only history surface, the
+protocol's narrowness, and that the Agent holds no state between runs). No
+network, no real LLM, no LinkedIn, no real publishing. Full regression: 907
+passed.
+
+Files: `app/agent/{__init__,agent,enums,errors,history,llm,models,prompt,reasoning}.py`,
+`tests/test_agent.py`, `tests/test_agent_boundaries.py`,
+`docs/implementation-status.md`.
+
+Not implemented, deliberately: the workflows and their run records (Step 11),
+scheduling, locks and recovery (Step 12), end-to-end evaluation (Step 13),
+deployment (Step 14), persisting an `AgentResult` (Step 11 — see Known Issue
+#14), and any notification on a reasoning failure (the Agent exposes
+`AgentFailure`; Step 7's notifier is called by the workflow). No module in
+`app/ingestion/`, `app/retrieval/`, `app/sync/`, `app/notify/` or
+`app/integrations/` was modified, and nothing in Steps 0–9 was changed.
 
 ### Step 9 — Build Evidence Verification & Revision Gates
 
@@ -1664,48 +1839,58 @@ Important notes:
 ## Current Step
 
 ```text
-Step 9 — Build Evidence Verification & Revision Gates
+Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 9. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 11. It is not
 duplicated here.
 
-What Step 8 leaves on the table for it:
+What Step 10 leaves on the table for it:
 
-- **A draft is now a value with a checkable claim on it.** `GeneratedPost`
-  carries the text plus `citations` (each with source path, chunk id and declared
-  evidence state) and `unresolved_labels` — everything a grounding check needs to
-  ask *"does this sentence follow from these chunks?"*. The labels are the
-  interface Step 9 was designed around: they either resolved against the evidence
-  that was sent or they did not.
-- **A draft that cites nothing is representable, and is Step 9's to judge.**
-  Generation reports `is_cited` and takes no view on it. Whether an uncited draft
-  is unpublishable is a gate, and gates are Step 9's.
-- **The prohibitions are stated but not enforced.** The prompt forbids
-  unsupported claims about projects, achievements, technologies, metrics, dates,
-  certificates and experiences; nothing in Step 8 reads the draft's sentences to
-  check. That check is Step 9's, and it is the reason Step 8 stops here rather
-  than growing a second opinion.
-- **`PROMPT_VERSION` and the model metadata make a revision loop traceable.**
-  A gate that rejects a draft and asks for a revision needs to know which prompt
-  produced it and whether the revision changed the prompt or only the request;
-  both are already on `GenerationMetadata`.
-- **Declines and failures are already separated, and Step 9 must not blur them.**
-  `DECLINED` is a normal outcome that lands on a waived `DO_NOT_PUBLISH`;
-  `GenerationError` is a failure that ends the run and notifies. A rejected draft
-  is a *third* thing — verified-and-refused — and reusing either of the two
-  labels for it would make "nothing to say", "the model was unreachable" and
-  "a person should look at this" indistinguishable in the record.
-- **Nothing calls the generator or the verifier yet.** Steps 10 and 11 own the
-  wiring, exactly as they do for `app/notify/` (Known Issue #10) and
-  `app/publishing/` (Known Issue #9). Step 9 should add a layer, not a runner.
-- **The real model call is still ahead of the project.** Known Issue #5 is
-  unchanged: the configured key is an OpenAI-family key sent to the OpenRouter
-  endpoint, so the first real generation will report a `CONFIGURATION` failure
-  rather than a post. Step 9 can be built and verified entirely against fake
-  models, and must not be the step where the mismatch is worked around in code.
+- **There is now a caller, and it returns a value rather than acting.**
+  `BrandingAgent.run(context)` returns exactly one `AgentResult` on every path:
+  `is_publishable`, or `DO_NOT_PUBLISH` with a `NoPublishReason`, or
+  `DO_NOT_PUBLISH` with an `AgentFailure`. The workflow's job is to branch on
+  that value, not to re-derive it.
+- **The three workflow outcomes already have their discriminators.**
+  `AgentResult.failed` is true only when the *reasoning* failed, and is
+  deliberately distinct from `not is_publishable` — so `DO_NOT_PUBLISH` (a
+  success, exit 0, no notification), `WORKFLOW_FAILED` (a reasoning failure, or
+  a `GenerationError`/`VerificationError` that this layer does not catch and
+  does not swallow) and `REQUIRES_HUMAN_INTERVENTION` (`HistoryDigest.
+  unresolved_ambiguity`, `RecoveryReport.blocked`) are all already answerable
+  from the objects the layers below return.
+- **Recording is deliberately not done, and `to_record()` is the seam.**
+  `AgentResult.to_record()` is JSON-compatible, carries no clock and no
+  environment, and embeds Step 9's own verification record. `PLAN.md` Step 10
+  keeps the write above this layer — *"or the system could forget to record"* —
+  so the workflow writes it, through the store, into a schema that does not have
+  the column yet (Known Issue #14).
+- **Notification is exposed, not sent.** A reasoning failure arrives as an
+  `AgentFailure(category, detail)` and nothing in `app/agent/` imports
+  `app.notify` or `smtplib`. `PLAN.md` Step 11 owns the classification of the
+  outcome and the decision to notify, and Step 7's `NotificationService` is
+  already built and uncalled (Known Issues #10 and #11).
+- **One publication per run is a property, not a check the workflow has to
+  remember.** `AgentResult` carries a single optional `proposal` and a single
+  optional `draft`, the loop returns at the first passing verification, and the
+  Agent holds no publisher at all — so `MAX_PUBLISHES_PER_RUN` is backed by the
+  shape of the result *and* by the database's `ux_publish_intents_run` (Step 6).
+  `PLAN.md` Step 11 still asks the workflow to enforce `0 or 1`, which is the
+  third layer of the same guarantee rather than a duplicate of it.
+- **The retrieval strategy is a recommendation the workflow has to act on.**
+  `AgentProposal.strategy` names the strategy for a *fresh* pass at the chosen
+  topic, drawn from the vocabulary the caller passed as `strategies=`. The Agent
+  cannot retrieve, so nothing has yet made a second pass at the topic — that is
+  the workflow's call, and passing `strategies=STRATEGIES` is what makes the
+  choice meaningful.
+- **Nothing here is wired, and nothing is scheduled.** Step 10 delivered a
+  library: no CLI, no entry point, no run record, no lock. The real model call
+  is still ahead of the project (Known Issue #5), so the first real branding run
+  will report a configuration failure rather than a post, and Step 11 must not
+  be the step where that mismatch is worked around in code.
 
 ---
 
@@ -1956,22 +2141,29 @@ so it is not mistaken for done.
 
 ---
 
-### 13. Nothing calls the generator yet, and no real model call has been made
+### 13. No real model call has been made, by the generator or by the Agent
 
-`app/generation/` produces a candidate post from an assembled context, and
-nothing in the repository asks it to. Which workflow calls `PostGenerator`, what
-it does with a decline, and whether it asks for a revision are Step 10's (the
-Agent) and Step 11's (the workflows) — the same shape as the notification service
-(Known Issue #10) and the publishing service (Known Issue #9). Recorded so that
-"generation exists" is not read as "a post can be produced today".
+**Partly resolved in Step 10.** `app/generation/` now has its first caller:
+`BrandingAgent.run()` builds a `GenerationRequest` from a resolved proposal and
+calls `PostGenerator.generate()`, and on a `REVISE` verdict it re-drives it with
+Step 9's `revision_notes()` as writing constraints. `app/agent/llm.py` adds a
+second real client (`LlmContentReasoner`, the Agent's OpenRouter-backed reasoner).
+`PLAN.md` Step 10's decision path and Step 9's revision loop both exist now.
 
-The second half is Known Issue #5 meeting a producer. Every test injects a fake
-model, so the real OpenRouter client has never been constructed against a real
-endpoint either — and the first genuine call will fail with a `CONFIGURATION`
-generation failure naming the variable to fix, because the key currently in
+What remains: **nothing has still ever been generated for real, and no real
+model call of any kind has been made.** Which workflow invokes
+`BrandingAgent.run()`, what it does with a `DO_NOT_PUBLISH`, and when it runs at
+all are Step 11's — the same shape as the notification service (Known Issue #10)
+and the publishing service (Known Issue #9). Recorded so that "generation
+exists" is not read as "a post can be produced today".
+
+The second half is Known Issue #5 meeting two producers. Every Step 8, 9 and 10
+test injects a fake model, so neither real OpenRouter client has ever been
+constructed against a real endpoint — and the first genuine call will fail with a
+`CONFIGURATION` failure naming the variable to fix, because the key currently in
 `.env` belongs to the OpenAI platform rather than to OpenRouter. That outcome is
 the designed one for an unconfigured model: the failure is categorized, it says
-what a person has to do, and no draft is invented to cover it. Correcting the key
+what a person has to do, and nothing is invented to cover it. Correcting the key
 is a configuration change in `.env` — never a code change, and never something
 this repository invents a value for.
 
@@ -2000,9 +2192,40 @@ Two separate gaps, both recorded rather than papered over:
   Wiring it into the decision path and the revision loop is Step 10 (the Agent)
   and Step 11 (the workflows).
 
+Updated in Step 10: **the verifier now has its first caller.**
+`BrandingAgent.run()` calls `EvidenceVerifier.verify()` on every draft it
+produces, and the resulting `VerificationResult` — the one that granted a
+`PUBLISH`, or the one that refused it — is carried on `AgentResult.verification`
+and embedded in `AgentResult.to_record()` under the `"verification"` key. So
+there are now two records waiting for a writer, and they nest: the Agent's
+outcome and, inside it, Step 9's verification. **Still nothing writes either.**
+The gap above is unchanged and is now entirely Step 11's.
+
 Recorded so that "the verifier passes" is not read as "verification has been
 persisted for a post that was published" — no post has been verified, because no
 post has been generated for real (Known Issue #13).
+
+---
+
+### 15. No linter is configured, so the new packages were not lint-checked
+
+Discovered in Step 10 while looking for one. There is no `ruff`, `flake8`,
+`pyflakes` or `pylint` in the project-local `.venv`, no `[tool.ruff]` or
+`[flake8]` section in `pyproject.toml` (there is no `pyproject.toml`),
+`setup.cfg` or `Makefile`, and no lint step anywhere in the repository. So
+"the code is clean" rests entirely on the test suite and on review.
+
+This is recorded rather than quietly worked around: adding a linter would be a
+change to the build and its dependencies, which is not a Step 10 seam. It is not
+a blocker — the focused and regression suites are the actual gate, and every
+Step 10 module was read against the house style — but the exact class of defect a
+linter catches (an unused import, a shadowed name, an unreachable branch) is
+currently caught only if a test happens to exercise it. One real instance was
+found and fixed by hand in Step 10: an unused module-level constant left behind
+in `tests/test_agent.py`.
+
+A follow-up decision is needed on whether a linter belongs in this repository at
+all, and if so which one and at what step. It is not assigned to Step 11.
 
 ---
 
@@ -2118,86 +2341,103 @@ not a specification.
 | **The revision bound lives with the decision, and the loop does not exist yet** | `PLAN.md` requires the revision loop to be bounded and terminating and assigns the loop itself to Step 10. `revision_decision()` is total, injectable, and returns `REVISE` only while the budget is unspent — so no caller that obeys it can loop forever, and `EXHAUSTED` is reported separately from `REJECT` because "we stopped trying" and "this could never pass" are different facts about a run | Step 9, `app/verification/revision.py` |
 | **One rule stated twice, with the copies asserted equal** | The lexical-overlap check needs *content* terms, and importing `app/retrieval`'s BM25 tokenizer would make verification depend on the retrieval stack — the boundary the package's import scan asserts. The three-line tokenizer is restated in `app/verification/claims.py`, and a test asserts the two agree, so the shared rule stays shared and the dependency does not exist | Step 9, `app/verification/claims.py`, `tests/test_verification_rules.py` |
 | **A verification is not a pipeline stage** | `verify()` is a function, as `PLAN.md` says, and the verifier holds a judge and nothing else — no store, no clock, no source path, no retrieval handle. "The verifier cannot invent evidence" is therefore a property of what it is able to do rather than a promise it keeps | Step 9, `app/verification/verifier.py` |
+| **Evidence is selected by label, because a label cannot be invented** | The reasoner answers with `E1…En` against the list this run built, and a label either resolves or does not exist — there is no path by which a source path, a chunk id or a claim can arrive from the model. The same device Step 8 used for citations, applied to the choice of what to write about | Step 10, `app/agent/prompt.py`, `agent.py` |
+| **A model's words become a fact in exactly one function** | `ReasoningAnswer` is deliberately *raw* — a topic string, labels, prose — and `_proposal_from()` is the only code that reads it, resolving each field against what the run actually offered and refusing (never trimming) what does not resolve. Keeping the raw answer and the resolved proposal as separate types is what makes "the Agent cannot invent a source" checkable rather than merely intended | Step 10, `app/agent/models.py`, `agent.py` |
+| **A `PUBLISH` is unconstructible without a passing verification** | Same instrument as `VerificationResult.__post_init__`: the invariant lives in `AgentResult.__post_init__`, so the one lie an agent could tell — reporting a publication the gate never granted — is a `ValueError` at construction instead of a post on LinkedIn. "The Agent proposes; the workflow disposes" is enforced by the type rather than by discipline | Step 10, `app/agent/models.py` |
+| **A decision not to publish is a success, and a failure is an enumerated set** | `FAILURE_REASONS = {REASONING_FAILED, INVALID_PROPOSAL}` is explicit and two members long, so "we decided not to" and "reasoning broke" can never be confused for one another, and `AgentResult.failed` is kept distinct from `not is_publishable` so a workflow does not email a person about a correct decision. Adding a failure reason later is a deliberate edit to that set, not a side effect | Step 10, `app/agent/enums.py`, `models.py` |
+| **A reasoning failure is a result; a phase failure is an exception** | `PLAN.md` Step 10 requires reasoning failure → `DO_NOT_PUBLISH` plus a notification, and forbids a weaker fallback. It says nothing of the sort about a phase that could not complete, so `GenerationError` and `VerificationError` propagate untouched: collapsing "the gate could not decide" into `DO_NOT_PUBLISH` would report a broken run as a decision, and the workflow is the layer that names the failed phase | Step 10, `app/agent/agent.py` |
+| **The revision bound is called, not reimplemented** | `PLAN.md` assigns the loop to Step 10 and the stopping rule to Step 9, so the Agent calls `revision_decision(result, attempts_made, limit=…)` and adds only a guard that *raises* if the loop outran the bound it was given. Reimplementing the rule here would have made two definitions free to disagree about when to stop, which is the one thing a bounded loop cannot afford | Step 10, `app/agent/agent.py` |
+| **A revision is driven by the verdict, not by a fresh opinion** | A `REVISE` re-drives the generator with Step 9's own `revision_notes()` as `PublishingConstraints.notes`, so the second attempt is a bounded operation over what the gate said was wrong. The Agent forms no view of its own about the draft — that would be a second, unverified opinion about text nothing had checked | Step 10, `app/agent/agent.py` |
+| **The Agent is told about its history; it does not read it** | `HistoryDigest` is a plain value built by the caller from Step 6's read service. The service is not passed into the reasoning layer, because what crosses that boundary should be exactly what a model needs and nothing else about the store should travel with it — the same argument that keeps `PublishingConstraints` a value | Step 10, `app/agent/models.py`, `history.py` |
+| **The history boundary is a narrow protocol the real service satisfies structurally** | `PublicationHistoryReader` declares five read methods and `PublishingHistory` satisfies it without the Agent importing `app.publishing.history` at all. Widening that protocol is how a read-only boundary stops being one, so its exact method set is asserted by test | Step 10, `app/agent/history.py`, `tests/test_agent_boundaries.py` |
+| **The Agent does not restate `MAX_PUBLISHES_PER_RUN`** | `PLAN.md` Step 10 forbids duplicating the gates inside the Agent, and the post limit is already enforced by `ux_publish_intents_run`. The guarantee is made **structural** instead: one optional proposal, one optional draft, a loop that returns at the first passing verification, and no publisher anywhere in the package. A copied constant would have been a second definition of a limit the database already owns | Step 10, `app/agent/models.py`, `agent.py` |
+| **Retrieval strategy selection is a recommendation drawn from a vocabulary the caller allows** | `PLAN.md` notes that `RetrievalEngine` accepts a strategy but nothing chooses one. The Agent cannot retrieve and does not, so what it produces is the strategy for a *fresh* pass at the topic it chose — and an empty vocabulary means "no choice to make", leaving the proposal with the strategy the context was assembled with, which is one that demonstrably found this evidence. Nothing in `app/retrieval/` was touched | Step 10, `app/agent/agent.py`, `models.py` |
+| **The Agent's boundary is asserted in both directions** | Forbidden imports (`sqlite3`, `chroma`, `app.state`, the publishing *service*, `app.notify`, `app.retrieval`, `app.ingestion`, `app.sync`, `app.integrations`, `app.sources`) plus an explicit allow-list of every `app.*` module it may reach, plus a source scan for write verbs. Step 6, 8 and 9 each asserted one direction; asserting the allowed set too is what makes a new import a deliberate act rather than something that slips in beside a change | Step 10, `tests/test_agent_boundaries.py` |
+| **The prompt's prohibitions are imported, not restated** | The Agent's instruction sentence is generated from `PROHIBITED_CLAIMS`, imported from `app.generation.prompt`. A second hand-written copy would be free to fall out of step with the list the generator's own test checks — and the two layers would then disagree about what a post may never invent | Step 10, `app/agent/prompt.py` |
+| **The Agent stops at the value, and that is where Step 11 begins** | `AgentResult.to_record()` produces JSON-compatible values with no clock and no environment, and nothing writes them. `PLAN.md` Step 10 keeps the write above this layer — "or the system could *forget* to record" — so the run record, the publication and the verification are all persisted by the workflow, into a schema that does not have their columns yet (Known Issue #14) | Step 10, `app/agent/models.py` |
 
 ---
 
 ## Next Step
 
-### Step 10 — Build the Autonomous Branding Agent
+### Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
 
-The next implementation task is defined in `PLAN.md` §8, Step 10.
+The next implementation task is defined in `PLAN.md` §8, Step 11.
 
-Step 9 closed the last gap in the deterministic half of the system: a draft can
-now be checked against the evidence it was written from, claim by claim, and the
-result is a structure rather than a boolean — an outcome (`PASS`,
-`REVISION_REQUIRED`, `REJECTED`), the findings behind it, the evidence the draft
-cited by provenance, and whether the advisory judge was consulted at all. What
-does not exist is anything that *decides*: what to write about, which evidence to
-select, whether there is enough value to publish at all, and what to do with a
-`REVISION_REQUIRED` verdict. Step 10 is that decider — one bounded Agent, sitting
-above generation and verification and below the workflows.
+Step 10 closed the last gap in the reasoning half of the system: something now
+decides what to write about, which evidence to write from, and whether there is
+enough value to publish at all, and it drives the revision loop under Step 9's
+bound. What does not exist is anything that *runs*: no entry point, no
+sequencing, no run record, no exit code, no phase attribution. Step 11 is that
+runner — two separate, separately executable workflows
+(`python -m app.workflows.sync`, `python -m app.workflows.branding`), each
+returning a structured run result and terminating in one of the three outcomes
+`PLAN.md` §2 defines.
 
-Constraints carried in from Step 9:
+Constraints carried in from Step 10:
 
-- **The Agent proposes; the workflow disposes.** `PLAN.md` states it directly,
-  and Step 9 is the shape it points at: `verify()` returns a result and the
-  Agent cannot turn one into a pass. `VerificationResult.__post_init__` already
-  makes a passing result that carries a finding unconstructible, so an Agent that
-  reports success it did not obtain fails loudly instead of silently.
-- **The revision loop already has its bound and its vocabulary.** `PLAN.md`
-  Step 10 owns the loop; `app/verification/revision.py` already owns the
-  *decision* it makes each turn — `PUBLISH` / `REVISE` / `REJECT` / `EXHAUSTED`,
-  bounded by `MAX_REVISION_ATTEMPTS`, total over every outcome and attempt count,
-  and asserted terminating by test. The loop Step 10 builds is a caller of
-  `revision_decision()`, not a second definition of when to stop. `EXHAUSTED` is
-  reported separately from `REJECT` on purpose: "we stopped trying" and "this
-  could never pass" are different facts about a run.
-- **`REVISION_REQUIRED` is not a dead end, because it says what to change.**
-  `VerificationResult.revision_notes()` returns one line per revisable finding —
-  which claim, and what about it — and `rejected_claims` / `unsupported_claims`
-  name the sentences. The loop's input is therefore the verdict it just received,
-  which is what makes re-driving `PostGenerator.generate()` a bounded operation
-  rather than a guess.
-- **`DO_NOT_PUBLISH` is a success and must stay reachable.** Step 9 added a
-  fourth way for a run to end without publishing and it must not swallow the
-  others: `PASS` is publishable, `REVISION_REQUIRED` is not, `REJECTED` is not
-  and is *not* a `DO_NOT_PUBLISH` — a draft that failed verification was
-  produced and has to be recorded as rejected. The Agent has to be able to
-  answer `DO_NOT_PUBLISH` before a draft exists, and that answer is a
-  first-class success, not a failure with a nicer name.
-- **The Agent reads history through the Step 6 read service and writes no
-  state.** `PLAN.md` is explicit: the Agent proposes, and a deterministic
-  workflow records — "or the system could *forget* to record". Nothing in
-  `app/verification/` writes either: `to_record()` produces the JSON-compatible
-  record and stops. The write is Step 11's, through the state store, via a schema
-  that does not have the column yet (Known Issue #14).
-- **One agent, no framework.** `PLAN.md` forbids multi-agent decomposition and
-  graph frameworks, and Step 9's LLM boundary is the precedent: the judge is a
-  small injectable protocol (`SupportJudge`) with a fake used in every test, the
-  deterministic checks are plain Python, and an unavailable judge degrades
-  visibly instead of being simulated. The Agent should be built the same way —
-  injectable, replayable under a fake, and unable to reach past the gates.
-- **The Agent cannot bypass the gates, the limits or the store.** Step 8's
-  import scan over `app/generation/` and Step 9's over `app/verification/` are
-  both AST-based assertions that a layer *cannot* reach the things it must not
-  touch (chroma, sqlite3, publishing, notify, retrieval). The Agent's boundary is
-  the natural next one: it may call generation, verification and the Step 6 read
-  service, and must not construct a publisher, a notifier, or a store handle of
-  its own.
-- **Step 10 can be built and verified offline.** `PLAN.md` Step 10's own tests
-  require the decision to be reproducible under a fake LLM, and every Step 8 and
-  Step 9 test injects a fake. Known Issue #5 (the OpenAI-family key sent to the
-  OpenRouter endpoint) is unchanged, so the first real model call is still ahead
-  of the project — and Step 10 must not be the step where the mismatch is worked
-  around in code.
+- **The workflow decides sequencing; the Agent decides content.** `PLAN.md`
+  states the split directly, and Step 10 implements exactly that half: the Agent
+  reasons and returns an `AgentResult`; it runs no phase, records nothing and
+  sends nothing. Sequencing, error handling, state recording and notification
+  are all above it.
+- **The outcome is classified by the workflow, never by the Agent.** `PLAN.md`
+  Step 11: *"the workflow — never the Agent — classifies the outcome and decides
+  whether to notify."* Step 10 makes that possible rather than merely permitted:
+  the Agent exposes `AgentFailure` and never imports a transport, and
+  `AgentResult.failed` is kept apart from `not is_publishable` so a decision not
+  to publish is never mistaken for an incident.
+- **Every phase failure is distinguishable, and two of them are exceptions on
+  purpose.** `GenerationError` and `VerificationError` propagate out of
+  `BrandingAgent.run()` by design — Step 10 does not catch them, because a phase
+  that could not complete is not a decision. The workflow wraps each phase so
+  the failure names *which* phase failed, and `AgentError` (a violated internal
+  invariant) is the third exception to expect.
+- **The record's shape already exists; the place to write it does not.**
+  `AgentResult.to_record()` and `VerificationResult.to_record()` are
+  JSON-compatible and carry no clock, so the workflow adds the run context.
+  `PLAN.md` Step 11 also owns `workflow_runs` (run id, type, start/finish,
+  status, failed phase, structured error) — a table that does not exist yet, and
+  the schema change is this step's, not Step 10's. Known Issue #14 records the
+  same gap for the verification half.
+- **Recording the publication is this step's, and is why the Agent refuses to.**
+  `PLAN.md` Step 10 keeps the write above the Agent — *"or the system could
+  forget to record"* — and Step 6 already has the write-ahead intent, the one
+  database-enforced attempt per run, and `recover_run()`. The workflow is what
+  calls them, and `0 or 1` posts is enforced there, backed by the constraint.
+- **Sync must never publish; branding must never ingest.** The two workflows
+  have different periods, failure domains and blast radii. Step 9's and Step
+  10's package import scans are the precedent for asserting this structurally
+  rather than behaviourally: a scan that fails if `app/workflows/branding`
+  reaches `app/ingestion` or `app/sync` is a property that cannot silently
+  regress, whereas "no test observed an ingest" only proves no test looked.
+- **`REQUIRES_HUMAN_INTERVENTION` needs a distinct exit status and exactly one
+  notification.** The two conditions are already detectable from values the
+  layers below return: an ambiguous publication (`requires_review`,
+  `unresolved_intents`), an unresolved earlier attempt
+  (`HistoryDigest.unresolved_ambiguity`), an expired credential, a missing
+  source. Step 7 built the notifier and its severity vocabulary; Known Issues
+  #10 and #11 record that nothing calls it and no email has ever been sent.
+- **A no-opportunity run must exit successfully and send nothing.** This is the
+  outcome Step 10 makes most likely — `NO_EVIDENCE`, `NO_VALUE`,
+  `GENERATION_DECLINED`, `GATE_REJECTED` and `REVISION_EXHAUSTED` are all
+  ordinary — so the workflow's success path has to be the one that publishes
+  nothing, and a `DO_NOT_PUBLISH` that emails the user would be the fastest way
+  to make an unattended system annoying enough to turn off.
+- **Step 11 can be built and verified offline.** Every Step 8, 9 and 10 test
+  injects a fake, and `PLAN.md` Step 11's own test list requires only fakes and a
+  fixed fixture set. Known Issue #5 (the OpenAI-family key sent to the OpenRouter
+  endpoint) is unchanged, so the first real branding run is still ahead of the
+  project — and Step 11 must not be the step where the mismatch is worked around
+  in code.
 - **Still open, and still not this step's to close:** Known Issue #8
-  (near-duplicate detection is inert until Step 11 supplies an embedder), #9 (no
-  real publish through the service yet), #10 (nothing calls the notifier), #11
-  (no email has actually been sent), #12 (a credential expiring between runs is
-  only found at publish time), #13 (nothing calls the generator yet) and #14
-  (verification results are produced but not persisted). Step 9 added a gate with
-  no caller; Step 10 adds the first real caller, and Step 11 owns the wiring that
-  persists what the gate decided.
+  (near-duplicate detection is inert until an embedder is supplied), #9 (no real
+  publish through the service yet), #12 (a credential expiring between runs is
+  only found at publish time) and #15 (no linter is configured). Step 11 is the
+  first step that can close #10, #11, #13 and #14 — the notifier, the email, the
+  generator's first real caller and the persistence of what the gates decided —
+  but only if it actually runs and records, which is what its acceptance criteria
+  ask for.
 
 
 ---
