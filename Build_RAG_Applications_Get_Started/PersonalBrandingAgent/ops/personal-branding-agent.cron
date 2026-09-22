@@ -1,0 +1,34 @@
+# Personal Branding Agent — scheduled triggers (PLAN.md Step 12)
+#
+# Cron was chosen over a systemd timer for this deployment:
+#
+# * one user, one machine, fixed coarse intervals (8h / 24h) — no second
+#   granularity, no unit dependencies, no journal integration needed;
+# * one file versus two services plus two timers plus daemon-reload plus
+#   lingering for user timers;
+# * cron works without a running systemd init (containers, minimal installs),
+#   while a timer file is dead weight there;
+# * exit status surfaces through cron directly, and output is captured in the
+#   gitignored logs/ directory below.
+#
+# Revisit for systemd timers if any of that changes (finer granularity,
+# dependency ordering, or structured journal logging become requirements).
+#
+# Install (after setting PROJECT_ROOT to the checkout path):
+#
+#     crontab ops/personal-branding-agent.cron
+#
+# The scheduler only triggers; the workflows execute. Each line runs the
+# Step 11 entry point once and exits with its status: 0 success (including a
+# run that published nothing or one post), 1 failed run, 2 needs a person,
+# 3 rejected without running (workflow already locked). No masking constructs
+# (`|| true`, `; exit 0`) may be added here — a scheduled failure must stay
+# visible outside the application.
+
+PROJECT_ROOT=/srv/PersonalBrandingAgent
+
+# Branding pipeline, every 8 hours (00:00, 08:00, 16:00).
+0 */8 * * * cd "$PROJECT_ROOT" && .venv/bin/python -m app.workflows.branding >> "$PROJECT_ROOT/logs/branding-cron.log" 2>&1
+
+# Knowledge synchronization, daily at 02:10.
+10 2 * * * cd "$PROJECT_ROOT" && .venv/bin/python -m app.workflows.sync >> "$PROJECT_ROOT/logs/sync-cron.log" 2>&1

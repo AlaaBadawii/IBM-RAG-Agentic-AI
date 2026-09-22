@@ -51,6 +51,7 @@ from app.workflows.common import (
     run_phase,
     start,
 )
+from app.workflows.scheduled import EXIT_LOCKED, WorkflowLocked, workflow_lock
 
 logger = get_logger(__name__)
 
@@ -151,6 +152,10 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
     At most one post is published per run: the Agent returns a single optional
     draft, and the publish phase is entered at most once. See the module
     docstring for the outcome table.
+
+    The whole run executes under the Step 12 overlap guard: a second
+    invocation while this workflow is locked raises :class:`WorkflowLocked`
+    without running anything.
     """
     cfg = config or BrandingConfig()
     try:
@@ -158,134 +163,135 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
     except StateStoreError as exc:
         logger.error("Branding workflow could not open the state store: %s", exc)
         raise
-    run = start(store, Workflow.BRANDING)
-    notifier = cfg.notifier_factory(store)
+    with workflow_lock(store, Workflow.BRANDING):
+        run = start(store, Workflow.BRANDING)
+        notifier = cfg.notifier_factory(store)
 
-    try:
-        context = run_phase(
-            store, run, "context", lambda: cfg.assemble_fn(store)
-        )
-        agent = cfg.agent_factory(store)
-        agent_result = run_phase(
-            store, run, "decide", lambda: agent.run(context)
-        )
-    except Escalation as esc:
-        return finish(
-            store, run, esc.outcome,
-            failed_phase=esc.phase, error=esc.error,
-            error_category=esc.error_category, notifier=notifier,
-        )
+        try:
+            context = run_phase(
+                store, run, "context", lambda: cfg.assemble_fn(store)
+            )
+            agent = cfg.agent_factory(store)
+            agent_result = run_phase(
+                store, run, "decide", lambda: agent.run(context)
+            )
+        except Escalation as esc:
+            return finish(
+                store, run, esc.outcome,
+                failed_phase=esc.phase, error=esc.error,
+                error_category=esc.error_category, notifier=notifier,
+            )
 
-    if agent_result.failed:
-        failure = agent_result.failure
-        assert failure is not None  # ``failed`` is exactly "carries a failure"
-        error = (
-            f"branding reasoning failed ({failure.category.value}): "
-            f"{failure.detail}"
-        )
+        if agent_result.failed:
+            failure = agent_result.failure
+            assert failure is not None  # ``failed`` is exactly "carries a failure"
+            error = (
+                f"branding reasoning failed ({failure.category.value}): "
+                f"{failure.detail}"
+            )
+            logger.warning("Branding run %s: %s", run.run_id, error)
+            record_phase_failure(store, run, "decide", error, "reasoning_failed",
+                                 human=False)
+            return finish(
+                store, run, RunOutcome.WORKFLOW_FAILED,
+                failed_phase="decide", error=error,
+                error_category="reasoning_failed",
+                notifier=notifier,
+                detail={"no_publish_reason": agent_result.reason.value},
+            )
+
+        if not agent_result.is_publishable:
+            reason = agent_result.reason.value if agent_result.reason else "unknown"
+            logger.info(
+                "Branding run %s decided DO_NOT_PUBLISH (%s)",
+                run.run_id, reason,
+            )
+            return finish(
+                store, run, RunOutcome.DO_NOT_PUBLISH,
+                notifier=notifier,
+                detail={
+                    "no_publish_reason": reason,
+                    "attempts_made": agent_result.attempts_made,
+                },
+            )
+
+        # The Agent proposed a verified post. Before touching the network, check
+        # whether an earlier attempt's outcome is still unknown: publishing over
+        # an ambiguity is how a duplicate happens.
+        history = cfg.history_fn(store)
+        pending = history.requires_review()
+        if pending:
+            error = (
+                "an earlier publication attempt is still awaiting human review "
+                f"({len(pending)} unresolved); refusing to publish over an ambiguity"
+            )
+            logger.warning("Branding run %s: %s", run.run_id, error)
+            record_phase_failure(store, run, "publish", error,
+                                 "unresolved_ambiguity", human=True)
+            return finish(
+                store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
+                failed_phase="publish", error=error,
+                error_category="unresolved_ambiguity",
+                notifier=notifier,
+            )
+
+        try:
+            report = run_phase(
+                store, run, "publish",
+                lambda: cfg.publish_fn(agent_result, run.run_id, store),
+            )
+        except Escalation as esc:
+            return finish(
+                store, run, esc.outcome,
+                failed_phase=esc.phase, error=esc.error,
+                error_category=esc.error_category, notifier=notifier,
+            )
+
+        if report.requires_human_intervention:
+            error = (
+                "publication requires human review: "
+                f"{report.message} (decision={report.decision.value})"
+            )
+            logger.warning("Branding run %s: %s", run.run_id, error)
+            record_phase_failure(store, run, "publish", error,
+                                 "publication_needs_review", human=True)
+            return finish(
+                store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
+                failed_phase="publish", error=error,
+                error_category="publication_needs_review",
+                notifier=notifier,
+            )
+        if report.refused:
+            logger.info(
+                "Branding run %s published nothing (duplicate refusal: %s)",
+                run.run_id, report.message,
+            )
+            return finish(
+                store, run, RunOutcome.DO_NOT_PUBLISH,
+                notifier=notifier,
+                detail={"refused": True, "refusal": report.message},
+            )
+        if report.published:
+            post_id = report.linkedin_post_id or ""
+            logger.info(
+                "Branding run %s published post %s", run.run_id, post_id
+            )
+            _report_publication(notifier, agent_result, post_id, run.run_id)
+            return finish(
+                store, run, RunOutcome.DO_NOT_PUBLISH,
+                notifier=notifier,
+                detail={"published": True, "linkedin_post_id": post_id},
+            )
+        error = f"publication failed: {report.message}"
         logger.warning("Branding run %s: %s", run.run_id, error)
-        record_phase_failure(store, run, "decide", error, "reasoning_failed",
+        record_phase_failure(store, run, "publish", error, "publication_failed",
                              human=False)
         return finish(
             store, run, RunOutcome.WORKFLOW_FAILED,
-            failed_phase="decide", error=error,
-            error_category="reasoning_failed",
-            notifier=notifier,
-            detail={"no_publish_reason": agent_result.reason.value},
-        )
-
-    if not agent_result.is_publishable:
-        reason = agent_result.reason.value if agent_result.reason else "unknown"
-        logger.info(
-            "Branding run %s decided DO_NOT_PUBLISH (%s)",
-            run.run_id, reason,
-        )
-        return finish(
-            store, run, RunOutcome.DO_NOT_PUBLISH,
-            notifier=notifier,
-            detail={
-                "no_publish_reason": reason,
-                "attempts_made": agent_result.attempts_made,
-            },
-        )
-
-    # The Agent proposed a verified post. Before touching the network, check
-    # whether an earlier attempt's outcome is still unknown: publishing over
-    # an ambiguity is how a duplicate happens.
-    history = cfg.history_fn(store)
-    pending = history.requires_review()
-    if pending:
-        error = (
-            "an earlier publication attempt is still awaiting human review "
-            f"({len(pending)} unresolved); refusing to publish over an ambiguity"
-        )
-        logger.warning("Branding run %s: %s", run.run_id, error)
-        record_phase_failure(store, run, "publish", error,
-                             "unresolved_ambiguity", human=True)
-        return finish(
-            store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
             failed_phase="publish", error=error,
-            error_category="unresolved_ambiguity",
+            error_category="publication_failed",
             notifier=notifier,
         )
-
-    try:
-        report = run_phase(
-            store, run, "publish",
-            lambda: cfg.publish_fn(agent_result, run.run_id, store),
-        )
-    except Escalation as esc:
-        return finish(
-            store, run, esc.outcome,
-            failed_phase=esc.phase, error=esc.error,
-            error_category=esc.error_category, notifier=notifier,
-        )
-
-    if report.requires_human_intervention:
-        error = (
-            "publication requires human review: "
-            f"{report.message} (decision={report.decision.value})"
-        )
-        logger.warning("Branding run %s: %s", run.run_id, error)
-        record_phase_failure(store, run, "publish", error,
-                             "publication_needs_review", human=True)
-        return finish(
-            store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
-            failed_phase="publish", error=error,
-            error_category="publication_needs_review",
-            notifier=notifier,
-        )
-    if report.refused:
-        logger.info(
-            "Branding run %s published nothing (duplicate refusal: %s)",
-            run.run_id, report.message,
-        )
-        return finish(
-            store, run, RunOutcome.DO_NOT_PUBLISH,
-            notifier=notifier,
-            detail={"refused": True, "refusal": report.message},
-        )
-    if report.published:
-        post_id = report.linkedin_post_id or ""
-        logger.info(
-            "Branding run %s published post %s", run.run_id, post_id
-        )
-        _report_publication(notifier, agent_result, post_id, run.run_id)
-        return finish(
-            store, run, RunOutcome.DO_NOT_PUBLISH,
-            notifier=notifier,
-            detail={"published": True, "linkedin_post_id": post_id},
-        )
-    error = f"publication failed: {report.message}"
-    logger.warning("Branding run %s: %s", run.run_id, error)
-    record_phase_failure(store, run, "publish", error, "publication_failed",
-                         human=False)
-    return finish(
-        store, run, RunOutcome.WORKFLOW_FAILED,
-        failed_phase="publish", error=error,
-        error_category="publication_failed",
-        notifier=notifier,
-    )
 
 
 def _report_publication(notifier: Any, agent_result: Any, post_id: str,
@@ -318,7 +324,11 @@ def _report_publication(notifier: Any, agent_result: Any, post_id: str,
 def main(argv: list[str] | None = None) -> int:
     """Module entry point: ``python -m app.workflows.branding``."""
     del argv  # no flags: the run is fully described by its recorded outcome.
-    result = run_branding()
+    try:
+        result = run_branding()
+    except WorkflowLocked as locked:
+        print(f"branding locked out: {locked}")
+        return EXIT_LOCKED
     print(
         f"branding run {result.run_id}: {result.outcome.value} "
         f"(exit {result.exit_code})"

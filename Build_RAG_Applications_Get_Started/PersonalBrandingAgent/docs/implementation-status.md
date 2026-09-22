@@ -27,13 +27,13 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 12 — Add External Scheduling, Locks & Recovery
+    Step 13 — End-to-End Autonomous Evaluation
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–11 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–12 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
@@ -67,19 +67,26 @@ Overall Progress:
     existing layers, record every phase transition and the final outcome on a
     workflow run, classify the outcome themselves, and notify exactly once on
     failure — with an ambiguous publication escalated to a person and never
-    retried. Nothing yet runs any of this on a schedule — Steps 12–14 have not
-    been started.
+    retried. And now something runs all of it on a schedule: the Step 11 entry
+    points execute under a per-workflow overlap guard backed by the Step 1
+    `locks` table — a second invocation while locked is rejected without
+    running and exits `3` — a stale lock is reclaimed only after its owner
+    process is shown to be gone (never on timeout alone), and unfinished runs
+    are reported and left untouched. The trigger itself is cron
+    (`ops/personal-branding-agent.cron`, branding every 8h, sync daily),
+    which passes exit statuses straight through. Nothing in this step runs
+    long-lived: Steps 13–14 have not been started.
 
 Last Completed Step:
-    Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
+    Step 12 — Add External Scheduling, Locks & Recovery
 
 Next Step:
-    Step 12 — Add External Scheduling, Locks & Recovery
+    Step 13 — End-to-End Autonomous Evaluation
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–11 have since been implemented, verified,
-and committed; Step 12 onwards remains untouched.
+analysis of the repository. Steps 0–12 have since been implemented, verified,
+and committed; Step 13 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -110,7 +117,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 9 | Build Evidence Verification & Revision Gates | COMPLETED |
 | 10 | Build the Autonomous Branding Agent | COMPLETED |
 | 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | COMPLETED |
-| 12 | Add External Scheduling, Locks & Recovery | NOT STARTED |
+| 12 | Add External Scheduling, Locks & Recovery | COMPLETED |
 | 13 | End-to-End Autonomous Evaluation | NOT STARTED |
 | 14 | Operational Documentation, Deployment & Final Hardening | NOT STARTED |
 
@@ -120,6 +127,73 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 12 — Add External Scheduling, Locks & Recovery
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/workflows/scheduled.py` — the scheduled-invocation guard behind
+  one public surface: `workflow_lock` (context manager), `acquire_workflow_lock`
+  / `release_workflow_lock`, `try_acquire`, `WorkflowLocked`, `EXIT_LOCKED=3`,
+  plus the `lock:` / `recovery:` phase vocabulary for guard rows.
+- **Overlap protection with no scheduler involved.** `run_sync()` and
+  `run_branding()` now execute under their per-workflow lock
+  (`workflow:sync`, `workflow:branding`) from the Step 1 `locks` table. A
+  second invocation while held records the rejection (one occurrence-counted
+  row, no `run_id`, so it never leaks into a run notification), never enters
+  the workflow, and raises `WorkflowLocked`, which the entry points convert to
+  exit `3` — distinct from the Step 11 `0/1/2`, which are preserved untouched.
+- **Stale recovery gated on liveness, never on timeout alone.** Owners are
+  `hostname:pid:token`; an expired lock whose pid is still alive on this host
+  is treated as held and refused, so an overrunning run can never gain a
+  concurrent twin. Only an expired lock with a demonstrably dead owner is
+  reclaimed, through the atomic Step 1 transaction — so two simultaneous
+  recoveries cannot both win — and every recovery is recorded and logged. An
+  unparseable owner is refused fail-closed. `LOCK_TTL_SECONDS` (6h) sits below
+  the shortest schedule interval (8h), so a crashed holder is always
+  reclaim-eligible by the next tick.
+- **Interrupted runs reported, never resolved.** After acquiring, unfinished
+  runs of the same workflow are reported (one occurrence-counted row each,
+  left `NULL`, publish state untouched — no blind retry of an ambiguity) and
+  the fresh run proceeds. An unfinished run seen while locked is the live
+  holder's own run, so it is not reported.
+- **Scheduler: cron.** `ops/personal-branding-agent.cron` triggers branding
+  every 8h and sync daily at 02:10 via the Step 11 entry points, passing exit
+  statuses straight through with no masking constructs. Chosen over a systemd
+  timer: one file, no daemon-reload/lingering, no systemd-init dependency for
+  fixed coarse intervals. Documented in `docs/operations/scheduling.md`
+  (choice, install, exit codes, manual operation, lock clearing).
+- **No long-running Python process.** Verified by scan: no loops, sleeps,
+  threads, queues, or workers in `app/workflows/` — one shot per invocation.
+
+Verified:
+- 15 focused tests (`tests/test_scheduling.py`), offline with fakes and
+  isolated temp state: rejection while locked (workflow never entered,
+  single counted row, no run created); exit mapping `0/1/2` passthrough plus
+  locked→`3`; stale recovery with the old owner named and the lock released;
+  stale-but-live and unidentifiable owners refused with the lock untouched;
+  two racing stale recoveries yield exactly one winner; pid probe against a
+  reaped child; interrupted runs reported once across ticks, left unfinished,
+  publish intent untouched; live holder's unfinished run not reported;
+  guarded branding end to end; cron file invokes both modules unmasked.
+- **Milestone:** two immediate invocations under contention produce exactly
+  one workflow run and one recorded rejection.
+- Full regression: 951 passed (936 before Step 12; the 15 new tests are the
+  whole difference, and nothing existing changed its result — all 29 Step 11
+  tests pass unmodified with the guard wired in).
+
+Files: `app/workflows/scheduled.py`,
+`app/workflows/{sync,branding,__init__}.py` (guard wiring + locked-exit
+mapping only), `ops/personal-branding-agent.cron`,
+`docs/operations/scheduling.md`, `tests/test_scheduling.py`,
+`docs/implementation-status.md`.
+
+Not implemented, deliberately: end-to-end evaluation (Step 13), deployment
+(Step 14). The first real scheduled tick is still ahead (Known Issues #5,
+#7, #9, #11 stand). New residual, recorded as Known Issue #16: pid reuse can
+make a dead owner's lock look live, causing repeated refusals — a missed run,
+never an overlap; self-heals when the pid dies.
 
 ### Step 11 — Build the 24h Knowledge-Sync and 8h Branding Workflows
 
@@ -2346,6 +2420,23 @@ all, and if so which one and at what step. It is not assigned to Step 11.
 
 ---
 
+### 16. A recycled pid can make a stale lock look live
+
+Step 12 reclaims an expired lock only after its owner pid is shown to be
+gone. If that pid has been recycled by an unrelated long-lived process, the
+liveness probe reports alive and invocations keep being rejected with the
+lock untouched.
+
+The failure direction is conservative: a missed run, never two live owners.
+It self-heals when the squatting pid dies, the rejection rows name the pid
+so an operator can verify it is unrelated, and deleting that workflow's
+`locks` row clears it (documented in `docs/operations/scheduling.md` §5).
+No code change is planned: distinguishing reuse from life would require
+start-time tracking the store does not keep, and the current behavior is the
+safe default.
+
+---
+
 ## Important Decisions / Deviations
 
 Established while finalizing the roadmap. Preserved here because losing them
@@ -2476,45 +2567,44 @@ not a specification.
 | **Exit codes are 0 / 1 / 2, owned once** | `DO_NOT_PUBLISH → 0`, `WORKFLOW_FAILED → 1`, `REQUIRES_HUMAN_INTERVENTION → 2`, in one shared mapping both entry points use. The two nonzero codes are distinct so a scheduler — and Step 12 — can tell "it broke" from "it needs you" without reading the database | Step 11, `app/workflows/common.py` |
 | **A published post is reported, not celebrated by the failure path** | A publish terminates `DO_NOT_PUBLISH`, which the failure notifier waives by design — so the workflow calls `notify_publication()` exactly once for a post that went out. Without it, the one thing the user most needs to see (what went out under their name) would be the one thing nothing reports | Step 11, `app/workflows/branding.py` |
 | **The ambiguity check runs before the network, not after** | `PublishingHistory.requires_review()` is read before the publish phase is entered: an earlier attempt still awaiting review refuses the new publish and escalates, so no request can leave the machine over an unresolved outcome. Checking after the call would already have risked the duplicate | Step 11, `app/workflows/branding.py` |
+| **Cron triggers; the application never schedules** | One user, one machine, fixed 8h/24h intervals: a two-line crontab instead of timer units plus daemon-reload plus lingering, and no dependency on a running systemd init. Exit statuses pass straight through with no masking; `0/1/2` keep their Step 11 meanings and `3` means "did not run". Revisit for systemd if sub-minute granularity, dependencies, or journal integration become requirements | Step 12, `ops/personal-branding-agent.cron`, `docs/operations/scheduling.md` |
+| **A timeout never grants a lock to a second live process** | Step 1 reclaims on expiry alone, which would silently twin an overrunning run. Owners are therefore `hostname:pid:token` and an expired-but-live owner is refused, not reclaimed; only a demonstrably dead owner is taken, through the atomic transaction, so two simultaneous recoveries cannot both win. The failure direction on doubt (unparseable owner, pid reuse) is always refusal — a missed run, never an overlap | Step 12, `app/workflows/scheduled.py` |
+| **Recovery reports; it never resolves** | Unfinished runs are occurrence-counted and left `NULL` — finishing one here would invent an outcome nobody observed — and publish state is never touched, so recovery cannot retry an ambiguity. An unfinished run seen while locked is the live holder's own, so it is not reported at all | Step 12, `app/workflows/scheduled.py` |
 
 ---
 
 ## Next Step
 
-### Step 12 — Add External Scheduling, Locks & Recovery
+### Step 13 — End-to-End Autonomous Evaluation
 
-The next implementation task is defined in `PLAN.md` §8, Step 12.
+The next implementation task is defined in `PLAN.md` §8, Step 13.
 
-Step 11 closed the execution gap: both workflows now run once, on demand, and
-record what they did. What does not exist is anything that runs them
-unattended: no external trigger, no overlap protection, no stale-lock
-recovery, and no interrupted-run detection. Step 12 is that trigger — an
-OS-level schedule plus the `locks` mechanism Step 1 already stores, with the
-workflows remaining independently executable without it.
+Step 12 closed the unattended-execution gap: both workflows run on a cron
+schedule under a per-workflow overlap guard, stale locks recover after a
+liveness check, and interrupted runs are reported without being resolved.
+What does not exist is any proof that the *system* behaves correctly when
+things go wrong: unit tests cover components, but no deterministic
+full-workflow scenarios exist for the failure catalogue `PLAN.md` Step 13
+lists (changed/deleted sources, duplicate and weak-evidence candidates,
+generation and verification failures, LinkedIn timeouts, ambiguous
+publication, expired tokens, notification delivery failure, interrupted-run
+recovery, self-ingestion attempts).
 
-Constraints carried in from Step 11:
+Constraints carried in from Step 12:
 
-- **Exit codes are the scheduler's interface.** `0` is success (including a
-  run that published nothing or one post), `1` is a failed run, `2` needs a
-  person. A scheduled failure must surface non-zero outside the application.
-- **Overlap is real.** An 8-hour workflow can outlive its window; a second
-  invocation while locked is rejected and recorded, never run concurrently.
-- **Stale locks recover automatically and are logged** — never silently, and
-  never by permitting a concurrent run.
-- **An interrupted run is detectable today** (`list_unfinished_runs()` plus
-  the `workflow_phases` trail showing which phases completed), but nothing
-  looks for it yet. That detection belongs to Step 12's invocation path.
-- **Still open, and still not this step's to close:** Known Issue #5 (the key
-  mismatch — the first real branding run will report it as
-  `REQUIRES_HUMAN_INTERVENTION`), #7 (no real sync pass yet), #8
-  (near-duplicate detection still needs an embedder wired into the workflow's
-  `PublishingService`), #9 (no real publish through the service yet), #12 (a
-  credential expiring between runs is only found at publish time) and #15 (no
-  linter). Step 11 closed #10 (the notifier is now called by both workflows),
-  #13 (the generator's first real caller exists — the Agent, driven by the
-  workflow) and #14 (the run record, the publication and the verification
-  record all have writers now). No email has still ever actually been sent
-  (#11 stands).
+- **Scenarios assert recorded outcomes, not completion.** The three run
+  outcomes, the phase trail, and the lock/recovery rows are all queryable
+  from an isolated test store — evaluation reads them, never log strings.
+- **The ambiguous-publication scenario is the most important test in the
+  suite**: it must prove a second post can never go out, using the Step 6
+  constraint plus the Step 11 pre-publish guard.
+- **Fakes only, isolated state.** LinkedIn, the LLM, and email stay faked;
+  the real LinkedIn path stays manual and explicitly invoked. Never the
+  production database.
+- **Still open, and still not this step's to close:** Known Issues #5 (key
+  mismatch), #7 (no real sync pass), #8 (near-duplicate embedder), #9 (no
+  real publish), #11 (no real email), #12 (expiry pre-check), #15 (linter),
+  #16 (pid-reuse false-live).
 
 
 ---

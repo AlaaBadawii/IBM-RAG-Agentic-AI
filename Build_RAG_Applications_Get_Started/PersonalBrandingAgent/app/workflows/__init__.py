@@ -25,6 +25,7 @@ Public surface, and deliberately nothing more:
     run_branding / BrandingConfig  the 8h entry point and its seams
     WorkflowResult                 the structured run result
     EXIT_OK / EXIT_WORKFLOW_FAILED / EXIT_REQUIRES_HUMAN_INTERVENTION
+    workflow_lock / WorkflowLocked / EXIT_LOCKED   the Step 12 overlap guard
 """
 from app.workflows.branding import BrandingConfig, run_branding
 from app.workflows.common import (
@@ -33,15 +34,23 @@ from app.workflows.common import (
     EXIT_WORKFLOW_FAILED,
     WorkflowResult,
 )
+from app.workflows.scheduled import (
+    EXIT_LOCKED,
+    WorkflowLocked,
+    workflow_lock,
+)
 from app.workflows.sync import SyncConfig, run_sync
 
 __all__ = [
+    "EXIT_LOCKED",
     "EXIT_OK",
     "EXIT_REQUIRES_HUMAN_INTERVENTION",
     "EXIT_WORKFLOW_FAILED",
     "BrandingConfig",
     "SyncConfig",
+    "WorkflowLocked",
     "WorkflowResult",
     "run_branding",
     "run_sync",
+    "workflow_lock",
 ]

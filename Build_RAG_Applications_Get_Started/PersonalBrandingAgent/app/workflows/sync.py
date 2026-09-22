@@ -33,6 +33,7 @@ from app.workflows.common import (
     run_phase,
     start,
 )
+from app.workflows.scheduled import EXIT_LOCKED, WorkflowLocked, workflow_lock
 
 logger = get_logger(__name__)
 
@@ -89,6 +90,10 @@ def run_sync(config: SyncConfig | None = None) -> WorkflowResult:
     * a source needs a person (missing path, guard refusal, a ``COMPLETED``
       source with new activity) → ``REQUIRES_HUMAN_INTERVENTION`` (exit 2,
       persisted separately + exactly one notification).
+
+    The whole run executes under the Step 12 overlap guard: a second
+    invocation while this workflow is locked raises :class:`WorkflowLocked`
+    without running anything.
     """
     cfg = config or SyncConfig()
     try:
@@ -98,72 +103,77 @@ def run_sync(config: SyncConfig | None = None) -> WorkflowResult:
         # failure that has no run row, reported without a store.
         logger.error("Sync workflow could not open the state store: %s", exc)
         raise
-    run = start(store, Workflow.SYNC)
-    notifier = cfg.notifier_factory(store)
+    with workflow_lock(store, Workflow.SYNC):
+        run = start(store, Workflow.SYNC)
+        notifier = cfg.notifier_factory(store)
 
-    try:
-        registry = run_phase(store, run, "load_registry", cfg.registry_loader)
-        sync_result = run_phase(
-            store, run, "synchronize", lambda: cfg.sync_fn(registry, store)
-        )
-    except Escalation as esc:
-        return finish(
-            store, run, esc.outcome,
-            failed_phase=esc.phase, error=esc.error,
-            error_category=esc.error_category, notifier=notifier,
-        )
+        try:
+            registry = run_phase(store, run, "load_registry", cfg.registry_loader)
+            sync_result = run_phase(
+                store, run, "synchronize", lambda: cfg.sync_fn(registry, store)
+            )
+        except Escalation as esc:
+            return finish(
+                store, run, esc.outcome,
+                failed_phase=esc.phase, error=esc.error,
+                error_category=esc.error_category, notifier=notifier,
+            )
 
-    synced = len(sync_result.synced)
-    unchanged = len(sync_result.unchanged)
-    failed = [r for r in sync_result.failed]
-    detail: dict[str, Any] = {
-        "synced": synced,
-        "unchanged": unchanged,
-        "failed": len(failed),
-    }
-    if sync_result.requires_human_intervention:
-        names = ", ".join(
-            r.source_name for r in sync_result.results
-            if r.requires_human_intervention
+        synced = len(sync_result.synced)
+        unchanged = len(sync_result.unchanged)
+        failed = [r for r in sync_result.failed]
+        detail: dict[str, Any] = {
+            "synced": synced,
+            "unchanged": unchanged,
+            "failed": len(failed),
+        }
+        if sync_result.requires_human_intervention:
+            names = ", ".join(
+                r.source_name for r in sync_result.results
+                if r.requires_human_intervention
+            )
+            error = (
+                "synchronization needs a person: "
+                f"{names or 'a source reported a condition the system cannot resolve'}"
+            )
+            logger.warning("Sync run %s requires human intervention: %s", run.run_id, error)
+            record_phase_failure(store, run, "synchronize", error,
+                                 "synchronize_needs_review", human=True)
+            return finish(
+                store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
+                failed_phase="synchronize", error=error,
+                error_category="synchronize_needs_review",
+                notifier=notifier, detail=detail,
+            )
+        if failed:
+            names = ", ".join(r.source_name for r in failed)
+            error = f"synchronization failed for {len(failed)} source(s): {names}"
+            logger.warning("Sync run %s failed: %s", run.run_id, error)
+            record_phase_failure(store, run, "synchronize", error,
+                                 "synchronize_failed", human=False)
+            return finish(
+                store, run, RunOutcome.WORKFLOW_FAILED,
+                failed_phase="synchronize", error=error,
+                error_category="synchronize_failed",
+                notifier=notifier, detail=detail,
+            )
+        logger.info(
+            "Sync run %s finished: %d synced, %d unchanged",
+            run.run_id, synced, unchanged,
         )
-        error = (
-            "synchronization needs a person: "
-            f"{names or 'a source reported a condition the system cannot resolve'}"
-        )
-        logger.warning("Sync run %s requires human intervention: %s", run.run_id, error)
-        record_phase_failure(store, run, "synchronize", error,
-                             "synchronize_needs_review", human=True)
         return finish(
-            store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
-            failed_phase="synchronize", error=error,
-            error_category="synchronize_needs_review",
-            notifier=notifier, detail=detail,
+            store, run, RunOutcome.DO_NOT_PUBLISH, notifier=notifier, detail=detail
         )
-    if failed:
-        names = ", ".join(r.source_name for r in failed)
-        error = f"synchronization failed for {len(failed)} source(s): {names}"
-        logger.warning("Sync run %s failed: %s", run.run_id, error)
-        record_phase_failure(store, run, "synchronize", error,
-                             "synchronize_failed", human=False)
-        return finish(
-            store, run, RunOutcome.WORKFLOW_FAILED,
-            failed_phase="synchronize", error=error,
-            error_category="synchronize_failed",
-            notifier=notifier, detail=detail,
-        )
-    logger.info(
-        "Sync run %s finished: %d synced, %d unchanged",
-        run.run_id, synced, unchanged,
-    )
-    return finish(
-        store, run, RunOutcome.DO_NOT_PUBLISH, notifier=notifier, detail=detail
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
     """Module entry point: ``python -m app.workflows.sync``."""
     del argv  # no flags: the registry is the configuration.
-    result = run_sync()
+    try:
+        result = run_sync()
+    except WorkflowLocked as locked:
+        print(f"sync locked out: {locked}")
+        return EXIT_LOCKED
     print(
         f"sync run {result.run_id}: {result.outcome.value} "
         f"(exit {result.exit_code})"
