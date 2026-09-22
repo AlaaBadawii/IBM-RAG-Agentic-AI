@@ -276,6 +276,32 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        version=3,
+        description="record the project a post is about, and the embedding of "
+                    "what was published, for the Step 6 duplicate checks",
+        statements=(
+            # Step 6. Three duplicate checks need three different kinds of
+            # stored data, and two of them need a column that Step 1 did not
+            # anticipate:
+            #
+            # * exact     -> ``content_hash`` (Step 1, unchanged);
+            # * near      -> the embedding of *what was published*, so a later
+            #                candidate can be compared against real posts
+            #                without re-embedding the entire history;
+            # * overuse   -> ``topic`` (Step 1) and the project the post was
+            #                about, which only the caller knows and which
+            #                cannot be derived from a content hash or from a
+            #                source path without guessing.
+            #
+            # ``publications.content`` is deliberately *not* added: the text
+            # already lives on the intent (``publications.intent_id`` is
+            # UNIQUE, so the join is 1:1), and duplicating it would let the two
+            # copies disagree about what was published.
+            "ALTER TABLE publish_intents ADD COLUMN project TEXT",
+            "ALTER TABLE publications ADD COLUMN embedding BLOB",
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.

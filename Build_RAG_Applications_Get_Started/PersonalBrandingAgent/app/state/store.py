@@ -70,6 +70,7 @@ from app.state.models import (
     Notification,
     OperationalFailure,
     Publication,
+    PublicationRecord,
     PublishIntent,
     SourceLifecycleState,
     SyncCheckpoint,
@@ -409,6 +410,7 @@ class StateStore:
                               topic: str | None = None,
                               angle: str | None = None,
                               content_hash: str | None = None,
+                              project: str | None = None,
                               ) -> PublishIntent:
         """Record the intent to publish, **before** the LinkedIn call.
 
@@ -429,8 +431,8 @@ class StateStore:
         now = utc_now_iso()
         self._write(
             "INSERT INTO publish_intents (intent_id, run_id, state, content, "
-            "content_hash, topic, angle, created_at, updated_at) "
-            "VALUES (?, ?, 'intent_created', ?, ?, ?, ?, ?, ?)",
+            "content_hash, topic, angle, project, created_at, updated_at) "
+            "VALUES (?, ?, 'intent_created', ?, ?, ?, ?, ?, ?, ?)",
             (
                 intent_id,
                 run_id,
@@ -438,6 +440,7 @@ class StateStore:
                 content_hash or content_hash_of(content),
                 topic,
                 angle,
+                project,
                 now,
                 now,
             ),
@@ -462,6 +465,43 @@ class StateStore:
             "SELECT * FROM publish_intents ORDER BY created_at DESC LIMIT ?",
             (limit,),
         )
+        return [PublishIntent.from_row(row) for row in rows]
+
+    def find_intent_by_content_hash(self, content_hash: str) -> PublishIntent | None:
+        """The most recent intent for this exact content, if any.
+
+        Exists so a caller can ask *"has this text been sent, or might it have
+        been?"* **before** spending a request on it. The lookup is written to
+        agree with ``ux_publish_intents_unresolved_content``: the only intents
+        that can be re-attempted are the ones that definitely failed, so a
+        ``failed`` intent is not returned and anything else is.
+        """
+        rows = self._read(
+            "SELECT * FROM publish_intents WHERE content_hash = ? "
+            "AND state <> 'failed' ORDER BY created_at DESC LIMIT 1",
+            (content_hash,),
+        )
+        return PublishIntent.from_row(rows[0]) if rows else None
+
+    def list_unresolved_intents(self, run_id: str | None = None
+                                ) -> list[PublishIntent]:
+        """Intents that have not reached a terminal state — oldest first.
+
+        These are the recoverable cases, and the two states mean different
+        things (see :meth:`mark_attempt_started`): ``intent_created`` is an
+        attempt that never started, ``attempt_started`` is one whose outcome
+        was never recorded and therefore may have published. Ordered by age so
+        a recovery pass handles the oldest ambiguity first.
+        """
+        sql = (
+            "SELECT * FROM publish_intents "
+            "WHERE state IN ('intent_created', 'attempt_started')"
+        )
+        params: tuple = ()
+        if run_id is not None:
+            sql += " AND run_id = ?"
+            params = (run_id,)
+        rows = self._read(sql + " ORDER BY created_at", params)
         return [PublishIntent.from_row(row) for row in rows]
 
     def mark_attempt_started(self, intent_id: str) -> PublishIntent:
@@ -494,6 +534,7 @@ class StateStore:
     def record_publication(self, intent_id: str, outcome: PublishState | str,
                            linkedin_post_id: str | None = None,
                            evidence_refs: Iterable[EvidenceRef] = (),
+                           embedding: bytes | None = None,
                            ) -> Publication:
         """Resolve a publish intent, and record the evidence it was built on.
 
@@ -503,6 +544,12 @@ class StateStore:
         An outcome of ``published`` requires a post id: a response without one
         is an ambiguity or a failure, never a success. Duplicate evidence
         references are collapsed rather than rejected.
+
+        ``embedding`` is the vector of the text that was sent, stored as opaque
+        bytes. It is recorded here because this is the one moment the text and
+        its outcome are known together; a later duplicate check compares
+        against it instead of re-embedding the whole history. Step 6 owns its
+        format; this layer never interprets it.
         """
         resolved = _coerce_enum(outcome, PublishState, "outcome")
         if resolved not in TERMINAL_PUBLISH_STATES:
@@ -539,8 +586,8 @@ class StateStore:
                 )
             self._write(
                 "INSERT INTO publications (publication_id, intent_id, run_id, "
-                "outcome, linkedin_post_id, content_hash, recorded_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "outcome, linkedin_post_id, content_hash, embedding, "
+                "recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     publication_id,
                     intent_id,
@@ -548,6 +595,7 @@ class StateStore:
                     resolved.value,
                     linkedin_post_id,
                     intent.content_hash,
+                    embedding,
                     now,
                 ),
                 f"recording publication {publication_id}",
@@ -595,6 +643,52 @@ class StateStore:
         evidence = self._evidence_for([row["publication_id"] for row in rows])
         return [
             Publication.from_row(row, evidence.get(row["publication_id"], []))
+            for row in rows
+        ]
+
+    def list_publication_records(self, *, since: str | None = None,
+                                 outcome: PublishState | str | None = None,
+                                 limit: int | None = None,
+                                 ) -> list[PublicationRecord]:
+        """Publications joined to the intents they resolved, newest first.
+
+        This is the read the publishing-history service is built on: the
+        questions it answers ("which topics did I use?", "which projects have I
+        talked about?") are about what the *intent* said, and that is the table
+        the answer lives in. Returning it as a typed join keeps the SQL here
+        rather than in the publishing layer, where it would be a second place
+        that knows the schema.
+
+        ``since`` is an inclusive lower bound on ``recorded_at`` and ``limit``
+        is optional, so a caller can ask for "everything in the last N days"
+        without silently truncating an overuse count.
+        """
+        sql = (
+            "SELECT p.publication_id, p.intent_id, p.run_id, p.outcome, "
+            "p.linkedin_post_id, p.content_hash, p.embedding, p.recorded_at, "
+            "i.topic, i.angle, i.project "
+            "FROM publications p "
+            "JOIN publish_intents i ON i.intent_id = p.intent_id"
+        )
+        conditions: list[str] = []
+        params: list = []
+        if since is not None:
+            conditions.append("p.recorded_at >= ?")
+            params.append(since)
+        if outcome is not None:
+            conditions.append("p.outcome = ?")
+            params.append(_coerce_enum(outcome, PublishState, "outcome").value)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY p.recorded_at DESC, p.publication_id DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        rows = self._read(sql, tuple(params))
+        evidence = self._evidence_for([row["publication_id"] for row in rows])
+        return [
+            PublicationRecord.from_row(row, evidence.get(row["publication_id"], []))
             for row in rows
         ]
 

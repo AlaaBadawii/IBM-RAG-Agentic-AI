@@ -14,6 +14,7 @@ Timestamps
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Iterable
 
 from app.state.enums import (
     CredentialDerivation,
@@ -142,6 +143,14 @@ class PublishIntent:
     updated_at: str
     topic: str | None = None
     angle: str | None = None
+    project: str | None = None
+    """The piece of work the post is about, as the caller named it.
+
+    Stored rather than derived: *"have I overused this project?"* is a question
+    about what the system has already said, and no content hash or source path
+    answers it without guessing which directory a path "belongs" to
+    (``PLAN.md`` Step 6, duplicate checks).
+    """
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "PublishIntent":
@@ -155,6 +164,7 @@ class PublishIntent:
             updated_at=row["updated_at"],
             topic=row["topic"],
             angle=row["angle"],
+            project=row["project"],
         )
 
 
@@ -203,6 +213,62 @@ class Publication:
             recorded_at=row["recorded_at"],
             linkedin_post_id=row["linkedin_post_id"],
             evidence=list(evidence or []),
+        )
+
+
+@dataclass(frozen=True)
+class PublicationRecord:
+    """A publication together with the intent it resolved.
+
+    :class:`Publication` answers *what happened*; this answers *what was sent*
+    — the topic, angle and project the intent carried, which live on the intent
+    and are what the publishing-history queries are actually about
+    (``PLAN.md`` Step 6: the history service must answer "which topics did I
+    use?" from stored state, not by inferring it).
+
+    The published *text* is deliberately absent. History reports what was
+    published and what it was grounded in; handing generated prose back to the
+    Agent is the loop §6.1 exists to prevent, and a caller that genuinely needs
+    the text can read it from the intent, which is where it is authoritative.
+    """
+
+    publication_id: str
+    intent_id: str
+    run_id: str
+    outcome: PublishState
+    content_hash: str
+    recorded_at: str
+    linkedin_post_id: str | None = None
+    topic: str | None = None
+    angle: str | None = None
+    project: str | None = None
+    embedding: bytes | None = None
+    """The stored vector of the published text, or ``None`` when none was
+    recorded. Opaque bytes: decoding is the publishing layer's business."""
+
+    evidence: tuple[EvidenceRef, ...] = ()
+
+    @property
+    def published(self) -> bool:
+        """True only for a confirmed publication — the authoritative history."""
+        return self.outcome is PublishState.PUBLISHED
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row, evidence: Iterable[EvidenceRef] = ()
+    ) -> "PublicationRecord":
+        return cls(
+            publication_id=row["publication_id"],
+            intent_id=row["intent_id"],
+            run_id=row["run_id"],
+            outcome=PublishState(row["outcome"]),
+            content_hash=row["content_hash"],
+            recorded_at=row["recorded_at"],
+            linkedin_post_id=row["linkedin_post_id"],
+            topic=row["topic"],
+            angle=row["angle"],
+            project=row["project"],
+            embedding=row["embedding"],
+            evidence=tuple(evidence),
         )
 
 

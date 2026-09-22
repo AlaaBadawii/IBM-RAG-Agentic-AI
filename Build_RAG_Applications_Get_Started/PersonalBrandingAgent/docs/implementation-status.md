@@ -27,32 +27,33 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 6 — Build Persistent Publishing, Idempotency & Recovery
+    Step 7 — Build Operational Failure Notifications via Email
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–5 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–6 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
-    and LinkedIn publishing is now a service an unattended workflow can call —
-    with a bounded timeout on every request, classified failures, an explicit
-    ambiguous outcome, and a credential lifecycle that warns before it fails.
-    Nothing it publishes is recorded yet: Step 6 owns that. Steps 6–14 have not
-    been started.
+    LinkedIn publishing is a service an unattended workflow can call, and every
+    publish now leaves a durable trace — a write-ahead intent written before any
+    request exists, an outcome recorded from evidence, three duplicate checks
+    over stored history, and a recovery path that turns an interruption into an
+    explicit ambiguity instead of a silent retry. Nothing reaches the user when
+    a run fails: Step 7 owns that. Steps 7–14 have not been started.
 
 Last Completed Step:
-    Step 5 — Harden the LinkedIn Integration for Autonomous Use
+    Step 6 — Build Persistent Publishing, Idempotency & Recovery
 
 Next Step:
-    Step 6 — Build Persistent Publishing, Idempotency & Recovery
+    Step 7 — Build Operational Failure Notifications via Email
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–5 have since been implemented, verified, and
-committed; Step 6 onwards remains untouched.
+analysis of the repository. Steps 0–6 have since been implemented, verified, and
+committed; Step 7 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -76,7 +77,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 3 | Build Incremental Knowledge Synchronization | COMPLETED |
 | 4 | Build the Personal Branding Context & Evidence Layer | COMPLETED |
 | 5 | Harden the LinkedIn Integration for Autonomous Use | COMPLETED |
-| 6 | Build Persistent Publishing, Idempotency & Recovery | NOT STARTED |
+| 6 | Build Persistent Publishing, Idempotency & Recovery | COMPLETED |
 | 7 | Build Operational Failure Notifications via Email | NOT STARTED |
 | 8 | Build Grounded Post Generation | NOT STARTED |
 | 9 | Build Evidence Verification & Revision Gates | NOT STARTED |
@@ -92,6 +93,175 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 6 — Build Persistent Publishing, Idempotency & Recovery
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/publishing/` — seven modules behind one public surface
+  (`__init__.py`): `enums.py` (`PublishDecision`, `DuplicateKind`,
+  `InterruptionKind`), `models.py` (frozen value objects and `evidence_ref()`),
+  `vectors.py` (the embedding ↔ BLOB helpers), `duplicates.py` (the three
+  checks), `history.py` (the read service) and `service.py`
+  (`PublishingService`).
+- `PublishingService.publish(request, run_id) -> PublishReport` is the only
+  path from a generated post to a request. It owns every publish state
+  transition and enforces them **in this order**: run the duplicate checks →
+  write the intent → mark the attempt started → call the transport → record the
+  outcome. Nothing above it touches `StateStore`, and the LinkedIn integration
+  below it still knows nothing about runs, intents, or idempotency.
+- **The intent is durable before the request exists.** `create_publish_intent`
+  commits before the transport is called; the test asserts it from *inside* the
+  fake transport, which is the only place where "before" is observable.
+- **`MAX_PUBLISHES_PER_RUN = 1` is still enforced by the database, not by
+  Python.** `ux_publish_intents_run` refuses a second intent for a run, so a
+  workflow cannot forget to check and a second attempt is rejected by SQLite
+  before any request is built. The constant exists so the code that depends on
+  the rule can say so; it is documentation, not a check.
+- **An attempt is marked before it is sent**, which is what makes the two
+  interruptions distinguishable afterwards: an intent still at `intent_created`
+  means no request left the machine, and one at `attempt_started` with no
+  publication means one may have.
+- **The outcome is recorded from evidence, never assumed.**
+  `state_for_result()` maps a post id to `published`, `UNKNOWN` to
+  `unknown_requires_review`, and everything else to `failed`. A claimed success
+  with **no post id** is recorded as `unknown_requires_review` rather than
+  `published`: the store would refuse it as a publication anyway (its CHECK
+  constraint requires an id), and "accepted, with nothing to point at" is
+  precisely the ambiguity the state exists for.
+- **An ambiguity is never retried.** `recover_run()` resolves the two
+  interruption kinds in opposite directions, on purpose: `attempt_started` →
+  `unknown_requires_review` (a post may exist; a person must confirm — retrying
+  is how the duplicate happens), and `intent_created` → `failed` (nothing was
+  sent, so the words are free for a later run). Recovery is idempotent —
+  resolved intents are terminal and are not returned again — and scoped to one
+  run.
+- **A store failure stops the publish.** `StateStoreError` propagates out of
+  `publish()`; it is never converted into a result. A refusal, a failure and an
+  ambiguity are all *reports*, because a workflow branches on them — but a run
+  that cannot record what it observed must not go on to act.
+- **Three duplicate checks over three kinds of data, never merged** (`PLAN.md`
+  Step 6 requires the distinction):
+  1. **exact** — the content hash, against `find_intent_by_content_hash()`
+     (the query that mirrors the store's unique index). A definitive failure
+     releases the text; an unresolved attempt blocks it, because a hash match
+     cannot prove the words never went out.
+  2. **near** — cosine similarity against the stored embedding of recently
+     *published* posts, using the same embedding machinery as retrieval. The
+     candidate's vector is stored with its publication
+     (`publications.embedding`), so history is never re-embedded and an old
+     post's similarity cannot drift with the embedder of the day.
+  3. **overuse** — topic, project, and per-evidence-reference counts over a
+     window, read from the stored references. Evidence is counted by
+     `(source_path, content_hash)`, never by path alone: the corpus is
+     resynchronized every 24 h, and counting by path would report a source as
+     overused when the post would be the first to cite what is now there.
+  A report says which check found what (`DuplicateKind`); on an exact match the
+  other two are not run, and a request that could never be sent is not asked to
+  produce them.
+- **The duplicate policy fails closed.** A configured embedder that raises makes
+  the near-duplicate check *unchecked*, and an unchecked required check refuses
+  the publish: publishing unchecked is unrecoverable, whereas a refusal is not.
+  `DuplicateReport` therefore keeps `unchecked` separate from `findings` —
+  "nothing matched" and "nothing was compared" must never look alike — and
+  `must_not_publish` covers both.
+- **The publishing-history read service is SQLite-only, deterministic, and
+  read-only** (`PublishingHistory`): recent publications, recent topics, recent
+  projects, evidence used, unresolved intents and what requires review. Every
+  row is attributable to a stored publication (`publication_ids` travels with
+  every count), an empty history returns empty rather than raising, and the
+  published *text is never returned by any of it* — the prose is absent from
+  every type the service hands out. That is what makes `PLAN.md` §6.1 structural
+  instead of behavioural.
+- **The layer cannot reach the knowledge base, and that is asserted
+  structurally.** A test parses every module in `app/publishing/` and fails if
+  any of them imports `chroma`, `langchain`, `app.retrieval` or `app.ingestion`
+  — there is no code path that could index a publication. A behavioural test
+  could only show that it did not happen in the cases it tried.
+- **Evidence references are `source path + content hash`.** `evidence_ref()`
+  splits the context layer's `<content_hash>:<chunk index>` provenance and
+  refuses a reference with no hash — without it, a later audit cannot
+  distinguish "grounded in evidence that has since changed" from "never
+  grounded", which is the one question the reference exists to answer.
+- **The Step 1 seams are minimal and use the existing migration mechanism.**
+  Schema migration v3 adds exactly two columns — `publish_intents.project` and
+  `publications.embedding` — and the store gained the queries the service
+  needs (`find_intent_by_content_hash()`, `list_unresolved_intents()`,
+  `list_publication_records()` plus the `PublicationRecord` value object). No
+  new persistence abstraction, no new database, no new vector store.
+- **No exactly-once claim is made anywhere.** What the system has is an at-most-
+  one-publication-attempt-per-run guarantee, a durable intent, an explicit
+  ambiguous state, and a recovery path that fails closed. Exactly-once delivery
+  to LinkedIn is not achievable without read-back (`PLAN.md` §5.1) and is not
+  promised — in the code, in a message, or in this record.
+
+Verified:
+- 67 focused tests across three files, all offline: fake transports, temporary
+  state databases, and the deterministic token-bucket embedder from
+  `tests/conftest.py`. No network, no credentials, no real publish, no LLM.
+- Acceptance: the intent is durable **before** the request — asserted from
+  inside the transport, and separately between the intent and the
+  `attempt_started` mark.
+- Acceptance: one publication per run — the second intent of a run is rejected
+  **by the database**, and the test asserts the SQLite error rather than a
+  Python guard. A later run may still publish different content.
+- Acceptance: exact duplicate rejection (refused before any request is made,
+  with nothing written for the refusal), near-duplicate detection (a reworded
+  post, similarity asserted), and topic / project / evidence overuse. The
+  project case is built from posts sharing no vocabulary at all, so a merged
+  "similarity" verdict could not have produced it.
+- Acceptance: a timeout and a transport failure after the request was sent
+  both record `UNKNOWN_REQUIRES_REVIEW`; a classified failure records `FAILED`;
+  a success records the LinkedIn post id.
+- Acceptance: `UNKNOWN` is never retried — a later run attempting the same text
+  is refused as an exact duplicate, and `recover_run()` resolves nothing but
+  the state.
+- Acceptance: a crash **after** the external call but before the local
+  recording leaves a recoverable ambiguity, not a failure. Simulated by
+  closing the store from inside the transport after a successful post: the
+  reopened store shows the intent at `attempt_started`, and recovery resolves
+  it to `UNKNOWN_REQUIRES_REVIEW` and blocks. The mirror case — a crash before
+  the attempt started — is recorded as `FAILED` and releases the content.
+- Acceptance: history queries return only stored records, every row traces back
+  to a stored publication, an empty history returns empty, and no history type
+  carries the generated text.
+- Acceptance: every evidence reference contains a content hash, and the history
+  reports evidence by path **and** hash.
+- Acceptance: publishing history never enters Chroma — asserted by the import
+  scan over the whole package.
+- Recovery is idempotent and run-scoped, and the state survives a full process
+  restart (reopened store, same rows, same decisions).
+- Full regression: **533 passed**, 1 pre-existing warning (torch CUDA), 100.9 s.
+  The pre-Step-6 baseline was 466 passed; the 67 Step 6 tests are the whole
+  difference, and nothing existing changed its result.
+
+Deviations:
+- **`project` is a stored label on the intent, not derived from evidence
+  paths.** Deriving it would mean guessing which directory a path belongs to,
+  which is the opposite of the deterministic behaviour this step is required to
+  have. It is recorded symmetric with `topic` and `angle`, and it is what makes
+  project overuse detectable from state rather than inferred from text.
+- **The published text is not copied onto `publications`.** It lives on the
+  intent, and `publications.intent_id` is UNIQUE, so the join is 1:1 and a
+  second copy could only drift. Combined with the history service never
+  returning generated text, "a generated post is never evidence about the user"
+  is a property of the types, not of a rule someone has to remember.
+- **Near-duplicate detection is inert until an embedder is supplied.** The
+  check is part of the policy only when the service is constructed with one;
+  Step 11 wires the real embedder, and Step 6 must not reach into retrieval to
+  get it. Recorded as Known Issue #8 so it cannot be mistaken for active
+  protection in the meantime.
+- **The service returns a report for everything LinkedIn did and raises only
+  for the store.** A refusal, a failure, an ambiguity and a success are normal
+  outcomes a workflow branches on; a store failure is the one thing a caller
+  must not continue past.
+- **One real publish is still outstanding, and this step did not perform it.**
+  The wrapped path is exercised end to end against fakes only. The single real
+  publish through the service remains a deliberate manual act (see the Step 5
+  record and Issue #9).
+
+---
 
 ### Step 5 — Harden the LinkedIn Integration for Autonomous Use
 
@@ -999,41 +1169,61 @@ Important notes:
 ## Current Step
 
 ```text
-Step 6 — Build Persistent Publishing, Idempotency & Recovery
+Step 7 — Build Operational Failure Notifications via Email
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 6. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 7. It is not
 duplicated here.
 
-What Step 5 leaves on the table for it:
+What Step 6 leaves on the table for it:
 
-- `publish_to_linkedin()` returns a `PublicationResult` and records **nothing**
-  about the publication. Step 6 owns the write-ahead intent, the publication
-  record, the content-hash uniqueness rule and the recovery path — the tables
-  and their CHECK constraints have existed since Step 1 and are still unused.
-- `PublicationOutcome.UNKNOWN` is reachable and has to be *handled*, not merely
-  returned. When no post id came back, Step 6 must record an unresolved
-  outcome and refuse to retry it blindly. The ambiguity is expressed here; it
-  is acted on there.
-- `retryable` is an advisory field with no consumer yet. The retry policy is
-  Step 6's, and its first obligation is to respect the difference between
-  "nothing was sent" and "we do not know whether anything was sent" — retrying
-  the second can duplicate a post that already exists.
-- The credential expiry is written to operational state but read by nothing
-  across runs. Step 6 is where a run should learn from the store that the
-  credential died between runs, rather than discovering it at publish time.
-- The one real publish through the service has not been performed (see the
-  Step 5 record). It is worth doing before Step 6 builds on the assumption
-  that the wrapped path still round-trips.
+- **The failure store has no consumer.** `operational_failures` has been written
+  since Step 3 and read by nothing. Step 7 is its first reader, and the rows it
+  needs are already there — a phase, a category and a message, with no
+  notification state on them.
+- **The three terminations are already distinguishable and are Step 6's
+  output.** `PublicationResult.requires_human_intervention`,
+  `PublishReport.requires_human_intervention` and `RecoveryReport.blocked` are
+  how a caller tells `WORKFLOW_FAILED` from `REQUIRES_HUMAN_INTERVENTION`
+  without re-deriving anything. The email's job is to carry that distinction to
+  a person, not to reconstruct it.
+- **Publishing already reports rather than raises, for exactly this reason.** A
+  refusal, a failure and an ambiguity come back as a `PublishReport`, so an
+  unattended workflow can notify on the outcome without wrapping the call. Only
+  a store failure raises — and that is the one case where the notification path
+  must work *without* the store.
+- **Recovery exists and nothing calls it.** `recover_run()` resolves a crashed
+  run into a `RecoveryReport` with a `message` and a `blocked` flag, but it is
+  invoked by hand, in tests. A workflow that does not call it leaves an
+  `attempt_started` intent unresolved, which is the one state Step 6 cannot
+  resolve on its own and a person needs to hear about.
+- **A credential warning now has somewhere to travel, but still not across
+  runs.** `PublishReport.expiry_warning` carries the warning the integration
+  returned for *this* call, and that warning rides on a publish that
+  **succeeded** — the run that should warn is the run that has nothing to fail
+  on, which is exactly the case only email can deliver. What is still missing
+  is the cross-run half: `linkedin_credential_expiry` (written since Step 5) is
+  read by nothing, so a credential that died between runs is still discovered
+  at publish time rather than before it. Step 6 left that where it found it —
+  reading the recorded expiry is outside the Step 6 contract — and it is
+  recorded here so it is not mistaken for done.
+- **SMTP must not be imported into `app/publishing/`.** The import scan over the
+  package forbids reaching the knowledge layer; the same separation keeps the
+  notification transport out of the publishing layer, so the email service
+  belongs beside the workflows, not inside them.
+- **Two Step 6 gaps are recorded and are not Step 7's to fix:** Known Issue #8
+  (near-duplicate detection is inert until Step 11 supplies an embedder) and
+  Known Issue #9 (the real publish through the service is still outstanding).
+  Step 7 must be written so that neither is silently assumed to be closed.
 
 ---
 
 ## Known Issues / Blockers
 
-Verified conditions that block or complicate implementation. Issue #1 was
-resolved by Step 0 and is kept for the record; the rest are open.
+Verified conditions that block or complicate implementation. Issues #1 and #3
+were resolved (in Steps 0 and 5) and are kept for the record; the rest are open.
 
 ### 1. ~~The application cannot currently be imported~~ — RESOLVED in Step 0
 
@@ -1181,6 +1371,36 @@ of which exist yet:
 
 Until then, `chroma_db/` holds the corpus as it was ingested in Step 0.
 
+### 8. Near-duplicate detection is implemented but not yet active
+
+Step 6 builds the near-duplicate check and tests it, but the check only runs
+when a `PublishingService` is constructed with an embedder. No entry point
+supplies one yet: the real embedder belongs to the retrieval stack, and Step 6
+is forbidden from reaching into it (`PLAN.md` §6.1 — the publishing layer must
+not touch the knowledge layer at all, which is asserted by a test).
+
+Consequence: until Step 11 wires the embedder into the workflow that calls the
+service, a real run enforces the **exact** and **overuse** checks only. Those
+two are the ones that read stored state; the near check is the one that needs a
+model. The check is not silently skipped — a detector without an embedder
+reports `can_detect_near_duplicates == False` and does not claim a comparison it
+did not make — and an embedder that *is* configured and then fails refuses the
+publish rather than proceeding unchecked.
+
+### 9. The real publish through the service has never been performed
+
+The wrapped publish path has been verified against the real API exactly once
+**before** this roadmap, through `Auth_handling/` (Step 5 baseline). Since
+then it has been exercised only against fake transports, because no
+implementation step may publish: Step 6's acceptance criteria require fakes and
+forbid a real post.
+
+So `publish_to_linkedin()` and the whole Step 6 state machine have never
+completed a real round trip together. The first real publish through
+`PublishingService` — the one that would leave a genuine `publications` row and
+a genuine `linkedin_post_id` — is a deliberate manual act, and it is the first
+thing worth doing before Step 10 hands publishing to an autonomous Agent.
+
 ---
 
 ## Important Decisions / Deviations
@@ -1243,6 +1463,16 @@ not a specification.
 | **Python 3.10 is confirmed, not assumed** | It is the floor of the pinned stack (`torch` requires `>=3.10`; `langchain`/`langchain-core` require `>=3.10.0`), the source uses nothing newer, and it is the machine's system interpreter. Resolves `PLAN.md` §12.2 item B. | `docs/operations/environment.md` §2 |
 | **`app/config.py` is the authoritative configuration module** | Root `config.py` is a re-export shim with no consumers; it is retained, documented as unused, and its removal is a follow-up — not part of Step 0 | `docs/operations/local-development.md` §1 |
 | **Secrets live only in `.env` or the gitignored token file** | Model ids, chunk/retrieval parameters, and paths grant no external access and stay committable in `app/config.py`; `SecretRedactionFilter` scrubs secret *values* from every log line | `docs/operations/security.md` §2, §4 |
+| **At most one publication attempt per run — never "exactly once"** | LinkedIn offers no read-back, so exactly-once delivery is unverifiable by construction and promising it would be false. What the system actually has: a durable intent, a database-enforced one-attempt limit, an explicit ambiguous state, and a recovery path that fails closed. The claim is refused in the code, in messages, and in this register | Step 6, `app/publishing/service.py` |
+| **The three duplicate checks stay three, over three kinds of data** | Exact reads a content hash, near reads a stored embedding, overuse reads stored topic/project/evidence references. Merging them into one similarity score would make the project case — same project, no shared vocabulary — undetectable, which is precisely the repetition a person notices | `PLAN.md` Step 6, `app/publishing/duplicates.py` |
+| **A duplicate check that could not run refuses the publish** | The failure this step exists to prevent is a repeated post, which cannot be undone; a refused publish can be retried by a person. `DuplicateReport` therefore keeps `unchecked` apart from `findings` — "nothing matched" and "nothing was compared" must never look alike | Step 6, `app/publishing/models.py` |
+| **`project` is a stored label, not derived from evidence paths** | Deriving it would mean guessing which directory a path belongs to — the opposite of a deterministic history. It is recorded symmetric with `topic`/`angle`, which is what makes project overuse answerable from state rather than inferred from text | Step 6, migration v3 |
+| **The published text is not copied onto `publications`** | The text lives on the intent and `publications.intent_id` is UNIQUE, so the join is 1:1 and a second copy could only drift. With the history service returning no generated text at all, "a generated post is never evidence about the user" becomes a property of the types instead of a rule to remember | Step 6, §6.1 |
+| **A publication stores the embedding of what was published** | Re-embedding stored history on every check would make an old post's similarity depend on the embedder of the day, so "already said this" would drift without anything being published. One vector, written at the one moment text and outcome are known together | Step 6, `publications.embedding` |
+| **Recovery resolves the two interruptions in opposite directions** | `attempt_started` → `unknown_requires_review` (a post may exist; never retried), `intent_created` → `failed` (nothing left the machine, so the words are free). One direction would either duplicate a post or strand usable content | Step 6, `recover_run()` |
+| **Publishing reports; only the store raises** | A refusal, a failure, an ambiguity and a success are normal outcomes a workflow branches on — and Step 7 has to notify on them. A store failure is the one thing a caller must not continue past, so it stays an exception | Step 6, `app/publishing/service.py` |
+| **The publishing layer is structurally unable to reach the knowledge base** | The separation is asserted by parsing every module in `app/publishing/` and failing on an import of `chroma`, `langchain`, `app.retrieval` or `app.ingestion`. A behavioural test could only show that no test looked | Step 6, `tests/test_publishing_history.py` |
+| **Near-duplicate detection is inert until an embedder is supplied** | The publishing layer may not reach into retrieval for one, so the check is part of the policy only when a service is constructed with it. Fail-closed when configured and broken; honestly absent when not configured — never silently skipped | Step 6, Known Issue #8 |
 | **Notifications use SMTP** | Provider-agnostic interface, configured for Gmail; stdlib preferred; fake transport in tests | `PLAN.md` Step 7 |
 | **Infrastructure stays minimal** | LangGraph, MCP, multi-agent, queues, Redis, PostgreSQL, microservices, Kubernetes, and distributed workers are deferred with reasons | `PLAN.md` §7 |
 | **The integration's interface is a result, never a print or a prompt** | An unattended workflow cannot read stdout and cannot answer a question. The step removes the interactive confirmation and makes the classified result the contract; a source-level test fails if `print(` or `input(` reappears anywhere in the package | Step 5, `app/integrations/linkedin/publisher.py` |
@@ -1261,42 +1491,57 @@ not a specification.
 
 ## Next Step
 
-### Step 6 — Build Persistent Publishing, Idempotency & Recovery
+### Step 7 — Build Operational Failure Notifications via Email
 
-The next implementation task is defined in `PLAN.md` §8, Step 6.
+The next implementation task is defined in `PLAN.md` §8, Step 7.
 
-Publishing works and can be called unattended; what is missing is that nothing
-about it is remembered. Step 6 makes a publish survive a crash, makes a second
-attempt at the same content impossible, and gives the ambiguous outcome
-somewhere to be recorded.
+The system now publishes, records, and recovers without a person watching — and
+tells that person nothing. Step 7 makes a failure reach the user: an SMTP
+notification service reachable from every phase, with the transport decided
+(SMTP, stdlib preferred, Gmail-configurable, all values from configuration, a
+fake transport in tests) and the three workflow outcomes already distinguished
+by the layers below it.
 
-Constraints carried in from Step 5:
+Constraints carried in from Step 6:
 
-- **The integration is a boundary, not a policy.** `publish_to_linkedin()`
-  takes text and returns a classified result; it does not know about runs,
-  intents, or idempotency, and Step 6 should not push that knowledge back into
-  it. The one thing it does write is the credential expiry, and that is a fact
-  it read rather than a claim it made.
-- **Ambiguity is already expressible — do not collapse it.** `UNKNOWN` with
-  `retryable=False` is the integration's answer when a post may exist.
-  Recording it as a failure and retrying would duplicate a post; `PLAN.md` §5.1
-  explains why there is no read-back to resolve it.
-- **The state store already carries the constraints.** One publish intent per
-  run, one unresolved intent per content hash, and `published` if and only if a
-  post id exists are enforced by SQLite as of Step 1. Step 6 should be using
-  them, not re-checking them in Python.
-- **A store failure must keep stopping the publish.** Step 5 already fails
-  closed before any request when the store is unusable; Step 6's write-ahead
-  intent extends that guarantee rather than replacing it.
-- **The credential lifecycle is not Step 6's.** Expiry detection, the warning,
-  and the return-to-human path are done; Step 6 consumes the recorded expiry
-  rather than re-deriving it.
-- **No credentials are to be committed, and nothing is to be published as part
-  of implementing this step.** The single real publish that would confirm the
-  wrapped path is a manual, deliberate act, not an implementation step.
+- **Notification is infrastructure, not Agent discretion.** `PLAN.md` is
+  explicit: a phase that fails inside the Agent still notifies because the
+  workflow wraps it. Step 6 kept that shape — publishing returns reports, so a
+  caller can notify on an outcome without exception handling — and Step 7
+  should consume outcomes, not require try/except around every call.
+- **The store cannot be assumed to be working.** A store failure is the one
+  error Step 6 deliberately lets escape as an exception. A notification path
+  that can only report through the store is therefore blind exactly when the
+  problem is the store; `PLAN.md` Step 7 lists the state store itself as a
+  phase that must be able to notify.
+- **The distinction to deliver already exists — do not re-derive it.**
+  `requires_human_intervention` (on both the result and the report) and
+  `RecoveryReport.blocked` are the difference between `WORKFLOW_FAILED` and
+  `REQUIRES_HUMAN_INTERVENTION`. Collapsing them into one "failure" email is
+  what makes an unattended system unsafe to leave alone.
+- **An ambiguous publication must reach a person, and nothing else will.**
+  `UNKNOWN_REQUIRES_REVIEW` blocks the content and is never retried; Step 6's
+  recovery resolves it and says so in a report. If that report goes nowhere,
+  the ambiguity is durable but invisible.
+- **Recovery is not automatic, and Step 7 should not make it so.**
+  `recover_run()` is called by hand today. Whether a workflow calls it before
+  publishing is a Step 11 decision about orchestration; Step 7's obligation is
+  that whatever it decides is *reportable*.
+- **No secrets in a message.** Every value comes from configuration, and the
+  same redaction discipline Step 5 applied to result messages applies to
+  notification bodies — an SMTP password must not be able to appear in a
+  delivery record.
+- **Keep the layers apart.** `app/publishing/` must not import an SMTP client
+  (its import scan forbids reaching the knowledge layer, and the same
+  separation applies upward): the notification service sits beside the
+  workflows and consumes what the lower layers report.
+- **Two open gaps are inherited, not closed:** Known Issue #8 (near-duplicate
+  detection is inert until an embedder is wired in at Step 11) and Known Issue
+  #9 (no real publish has gone through the service yet). Neither blocks Step 7,
+  and neither may be assumed fixed.
 - **Known Issue #5 (the LLM key does not match the configured provider) is
-  still not a blocker** — Step 6 publishes text it is handed. It must be
-  corrected before Step 8.
+  still not a blocker** — Step 7 sends text it is handed and generates none. It
+  must be corrected before Step 8.
 
 
 ---
