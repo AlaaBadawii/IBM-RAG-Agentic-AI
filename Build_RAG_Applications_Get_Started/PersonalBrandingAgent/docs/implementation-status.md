@@ -27,13 +27,13 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 13 — End-to-End Autonomous Evaluation
+    Step 14 — Operational Documentation, Deployment & Final Hardening
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–12 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–13 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
@@ -74,19 +74,25 @@ Overall Progress:
     process is shown to be gone (never on timeout alone), and unfinished runs
     are reported and left untouched. The trigger itself is cron
     (`ops/personal-branding-agent.cron`, branding every 8h, sync daily),
-    which passes exit statuses straight through. Nothing in this step runs
-    long-lived: Steps 13–14 have not been started.
+    which passes exit statuses straight through. And now the failure catalogue
+    is proven end to end: eighteen deterministic workflow-level scenarios run
+    the real layers together (real workflows, Agent, generator, verifier,
+    publisher, notifier) over isolated state with fakes only at the external
+    boundaries, asserting recorded outcomes and persistent state — including
+    the ambiguous-publication case, which proves a second post can never go
+    out. The manual real-LinkedIn path remains explicit and documented.
+    Nothing in this step runs long-lived: Step 14 has not been started.
 
 Last Completed Step:
-    Step 12 — Add External Scheduling, Locks & Recovery
+    Step 13 — End-to-End Autonomous Evaluation
 
 Next Step:
-    Step 13 — End-to-End Autonomous Evaluation
+    Step 14 — Operational Documentation, Deployment & Final Hardening
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–12 have since been implemented, verified,
-and committed; Step 13 onwards remains untouched.
+analysis of the repository. Steps 0–13 have since been implemented, verified,
+and committed; Step 14 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -118,7 +124,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 10 | Build the Autonomous Branding Agent | COMPLETED |
 | 11 | Build the 24h Knowledge-Sync and 8h Branding Workflows | COMPLETED |
 | 12 | Add External Scheduling, Locks & Recovery | COMPLETED |
-| 13 | End-to-End Autonomous Evaluation | NOT STARTED |
+| 13 | End-to-End Autonomous Evaluation | COMPLETED |
 | 14 | Operational Documentation, Deployment & Final Hardening | NOT STARTED |
 
 > Step names above are taken verbatim from `PLAN.md` §8. If a step is renamed
@@ -127,6 +133,62 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 13 — End-to-End Autonomous Evaluation
+
+Status: COMPLETED
+
+Implemented:
+- New suite `tests/test_autonomous_evaluation.py`: 18 scenarios plus a
+  milestone, all offline with fakes and isolated temporary state (SQLite,
+  Chroma with deterministic embeddings, throwaway git repos, scripted
+  reasoner/LLM/judge, fake LinkedIn and email transports). A socket-blocking
+  autouse fixture fails any test that attempts a real network call; the
+  production database is never touched.
+- **Real layers underneath, fakes only at the boundaries.** Sync scenarios
+  run `run_sync` over the real `sync_all` + real ingestion pipeline + real
+  Chroma. Branding scenarios run `run_branding` over the real `BrandingAgent`
+  (real `PostGenerator`, real `EvidenceVerifier`), the real
+  `PublishingService`, and the real `NotificationService`. Timeout and
+  token-expiry scenarios run the genuine `publish_to_linkedin` over a fake
+  HTTP layer, so the real Step 5 classification is exercised with zero
+  packets.
+- **Every scenario asserts its recorded outcome and persistent state**:
+  run outcome, failed phase, phase trail, intent/publication rows, evidence
+  references, notification rows, and fake call counts where safety depends
+  on them.
+- **Ambiguous publication (the most important case):** `UNKNOWN` is recorded
+  `unknown_requires_review` and escalates; a second invocation is blocked by
+  the guard with no new `publish` work; the external attempt count stays at
+  exactly one across both runs.
+- **Interrupted recovery:** a SIGKILL aftermath (stale dead-pid lock,
+  unfinished run, recorded phase, stranded intent) is reclaimed, reported
+  once, and left unresolved — the old run stays unfinished and the intent
+  stays `intent_created`.
+- **Docs:** `docs/evaluation/autonomous-evaluation.md` (scenario catalogue
+  with expected outcomes) and `docs/evaluation/manual-linkedin.md` (the
+  explicit, interactive, never-automated real-LinkedIn path, which remains
+  available and untouched).
+
+Verified:
+- 20 focused tests (18 scenarios + locked-exit mapping + milestone), plus a
+  milestone that runs the full 18-scenario set twice from clean state and
+  asserts identical outcome vectors.
+- Full regression: 971 passed (951 before Step 13; the 20 new tests are the
+  whole difference, and nothing existing changed its result).
+
+Earlier-step defects discovered: none. One investigation during development
+(a `CHECK constraint failed` on credential-expiry recording) traced to a
+self-contradictory eval fixture (token issued after its own expiry), which
+the Step 1 constraint rightly rejects; the fixture was corrected to
+consistent dates. No Step 0–12 code was changed.
+
+Files: `tests/test_autonomous_evaluation.py`,
+`docs/evaluation/{autonomous-evaluation,manual-linkedin}.md`,
+`docs/implementation-status.md`.
+
+Not implemented, deliberately: deployment documentation and final hardening
+(Step 14). Known Issues #5, #7, #9, #11, #12, #15, #16 stand.
 
 ### Step 12 — Add External Scheduling, Locks & Recovery
 
@@ -2570,41 +2632,40 @@ not a specification.
 | **Cron triggers; the application never schedules** | One user, one machine, fixed 8h/24h intervals: a two-line crontab instead of timer units plus daemon-reload plus lingering, and no dependency on a running systemd init. Exit statuses pass straight through with no masking; `0/1/2` keep their Step 11 meanings and `3` means "did not run". Revisit for systemd if sub-minute granularity, dependencies, or journal integration become requirements | Step 12, `ops/personal-branding-agent.cron`, `docs/operations/scheduling.md` |
 | **A timeout never grants a lock to a second live process** | Step 1 reclaims on expiry alone, which would silently twin an overrunning run. Owners are therefore `hostname:pid:token` and an expired-but-live owner is refused, not reclaimed; only a demonstrably dead owner is taken, through the atomic transaction, so two simultaneous recoveries cannot both win. The failure direction on doubt (unparseable owner, pid reuse) is always refusal — a missed run, never an overlap | Step 12, `app/workflows/scheduled.py` |
 | **Recovery reports; it never resolves** | Unfinished runs are occurrence-counted and left `NULL` — finishing one here would invent an outcome nobody observed — and publish state is never touched, so recovery cannot retry an ambiguity. An unfinished run seen while locked is the live holder's own, so it is not reported at all | Step 12, `app/workflows/scheduled.py` |
+| **Evaluation asserts recorded state, and cannot reach the network** | Scenarios drive the real workflow boundaries with fakes only at the external edges; a socket-blocking fixture fails any test that dials out, and the milestone asserts the full outcome vector twice from clean state. Reproducibility is constructed, not hoped for | Step 13, `tests/test_autonomous_evaluation.py` |
 
 ---
 
 ## Next Step
 
-### Step 13 — End-to-End Autonomous Evaluation
+### Step 14 — Operational Documentation, Deployment & Final Hardening
 
-The next implementation task is defined in `PLAN.md` §8, Step 13.
+The next implementation task is defined in `PLAN.md` §8, Step 14.
 
-Step 12 closed the unattended-execution gap: both workflows run on a cron
-schedule under a per-workflow overlap guard, stale locks recover after a
-liveness check, and interrupted runs are reported without being resolved.
-What does not exist is any proof that the *system* behaves correctly when
-things go wrong: unit tests cover components, but no deterministic
-full-workflow scenarios exist for the failure catalogue `PLAN.md` Step 13
-lists (changed/deleted sources, duplicate and weak-evidence candidates,
-generation and verification failures, LinkedIn timeouts, ambiguous
-publication, expired tokens, notification delivery failure, interrupted-run
-recovery, self-ingestion attempts).
+Step 13 proved the failure catalogue end to end: eighteen deterministic
+scenarios over isolated state assert recorded outcomes, not completion —
+including ambiguity handling, interrupted-run recovery, lock contention,
+self-ingestion refusal, and the notification-delivery-failure path. What does
+not exist is the operator-facing whole: the architecture, state model,
+registry, lifecycles, credential handling, notification behavior, scheduler
+setup, recovery procedures, and security posture written down outside the
+code; real ADR files for the accepted decisions; and a documented
+reproduction of a working scheduled system from a clean checkout.
 
-Constraints carried in from Step 12:
+Constraints carried in from Step 13:
 
-- **Scenarios assert recorded outcomes, not completion.** The three run
-  outcomes, the phase trail, and the lock/recovery rows are all queryable
-  from an isolated test store — evaluation reads them, never log strings.
-- **The ambiguous-publication scenario is the most important test in the
-  suite**: it must prove a second post can never go out, using the Step 6
-  constraint plus the Step 11 pre-publish guard.
-- **Fakes only, isolated state.** LinkedIn, the LLM, and email stay faked;
-  the real LinkedIn path stays manual and explicitly invoked. Never the
-  production database.
-- **Still open, and still not this step's to close:** Known Issues #5 (key
-  mismatch), #7 (no real sync pass), #8 (near-duplicate embedder), #9 (no
-  real publish), #11 (no real email), #12 (expiry pre-check), #15 (linter),
-  #16 (pid-reuse false-live).
+- **Documentation describes what the code does.** The evaluated contracts —
+  three recorded outcomes, phase trails, lock/recovery rows, the duplicate
+  and ambiguity safeguards, the manual-only real-LinkedIn path — are the
+  source material, not aspirations.
+- **The evaluated suite is the regression gate.** Step 14's hardening must
+  keep all 971 tests green; any documentation-driven code change is minimal
+  and re-verified.
+- **Still open:** Known Issues #5 (key mismatch), #7 (no real sync pass),
+  #8 (near-duplicate embedder), #9 (no real publish), #11 (no real email),
+  #12 (expiry pre-check), #15 (linter), #16 (pid-reuse false-live). Step 14
+  is documentation and hardening — it closes #4's remainder and the ADR gap,
+  not the runtime firsts, which stay deliberate manual acts.
 
 
 ---
@@ -2646,6 +2707,6 @@ its code was written — only because its criteria passed.
 | [`architecture/`](architecture/) | System design — how the system is intended to work |
 | [`decisions/ADRs/`](decisions/ADRs/) | Architecture decision records |
 | [`retrieval/`](retrieval/) | Retrieval milestone — concepts and measured results |
-| [`evaluation/`](evaluation/) | Evaluation results *(not yet written)* |
+| [`evaluation/`](evaluation/) | Evaluation results (autonomous scenarios + manual LinkedIn path, written in Step 13; retrieval evaluation alongside the retrieval docs) |
 | [`operations/`](operations/) | Operational documentation — local development, environment, security (written in Step 0) |
 | [`phases/`](phases/) | Foundational phase documents (phases 01–02; superseded by `PLAN.md` Steps 0–14) |
