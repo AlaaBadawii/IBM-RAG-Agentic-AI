@@ -73,3 +73,48 @@ def test_generation_params_use_openai_compatible_names():
     """Watsonx-style max_new_tokens must NOT appear in OpenRouter config."""
     assert "max_tokens" in config.GENERATION_PARAMS
     assert "max_new_tokens" not in config.GENERATION_PARAMS
+
+
+# --- Step 7: notification configuration --------------------------------------
+
+def test_smtp_has_no_default_addresses():
+    """The mechanism is decided; the addresses are the user's (PLAN.md §12.2 C).
+
+    A hardcoded sender or recipient would be a value this repository chose for
+    somebody else's mailbox, so the required settings start empty and the
+    application runs without them.
+    """
+    assert config.SMTP_HOST == ""
+    assert config.SMTP_SENDER == ""
+    assert config.SMTP_RECIPIENT == ""
+    assert config.SMTP_PASSWORD == ""
+
+
+def test_smtp_defaults_are_bounded_and_encrypted():
+    assert config.SMTP_PORT == 587
+    assert config.SMTP_TLS == "starttls"
+    assert config.SMTP_TIMEOUT_SECONDS == 30.0
+    assert config.SMTP_REPEAT_AFTER_HOURS == 24.0
+
+
+def test_smtp_settings_read_from_env(monkeypatch):
+    _reload_with(
+        monkeypatch,
+        SMTP_HOST="smtp.gmail.com",
+        SMTP_PORT="465",
+        SMTP_SENDER="owner@example.com",
+        SMTP_RECIPIENT="owner@example.com",
+        SMTP_PASSWORD="app-password",
+        SMTP_TLS="ssl",
+    )
+    assert config.SMTP_HOST == "smtp.gmail.com"
+    assert config.SMTP_PORT == 465
+    assert config.SMTP_SENDER == "owner@example.com"
+    assert config.SMTP_PASSWORD == "app-password"
+    assert config.SMTP_TLS == "ssl"
+
+
+def test_an_unknown_tls_mode_is_a_configuration_error(monkeypatch):
+    """A typo in TLS mode must not become a silently unencrypted connection."""
+    with pytest.raises(ConfigError, match="SMTP_TLS"):
+        _reload_with(monkeypatch, SMTP_TLS="STARTLS")

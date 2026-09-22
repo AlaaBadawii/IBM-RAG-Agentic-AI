@@ -928,12 +928,24 @@ class StateStore:
 
     def list_notifications(self, run_id: str | None = None,
                            delivery_state: DeliveryState | str | None = None,
+                           failure_id: str | None = None,
                            limit: int = 50) -> list[Notification]:
+        """Delivery records, newest first, optionally filtered.
+
+        ``failure_id`` was added in Step 7 for the notification layer's noise
+        control: "was *this* failure already reported a moment ago" is a
+        question only a read filtered by the failure can answer, and a failure
+        that recurs across runs keeps the ``failure_id`` it was first recorded
+        with while its ``occurrence_count`` grows.
+        """
         clauses: list[str] = []
         params: list[object] = []
         if run_id is not None:
             clauses.append("run_id = ?")
             params.append(run_id)
+        if failure_id is not None:
+            clauses.append("failure_id = ?")
+            params.append(failure_id)
         if delivery_state is not None:
             state = _coerce_enum(delivery_state, DeliveryState, "delivery_state")
             clauses.append("delivery_state = ?")

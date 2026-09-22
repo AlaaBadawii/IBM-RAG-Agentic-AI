@@ -127,6 +127,46 @@ LINKEDIN_MAX_COMMENTARY_CHARS = _env_int("LINKEDIN_MAX_COMMENTARY_CHARS", 3000)
 LINKEDIN_CLIENT_ID = _env_str("LINKEDIN_CLIENT_ID", "")
 LINKEDIN_CLIENT_SECRET = _env_str("LINKEDIN_CLIENT_SECRET", "")
 
+# --- Email notification (PLAN.md Step 7) ----------------------------------
+# The transport is decided (SMTP, §12.1 decision 3); the *addresses* are not,
+# and they are also not secrets the repository may hold. Every value here has
+# an empty or neutral default, so the application imports and runs without any
+# mail configuration — a run that never fails needs no notifier, and a run
+# that fails without a notifier says so in its delivery record instead of
+# crashing (app/notify/config.py). Validation is therefore lazy, like
+# require_openrouter_key() below.
+SMTP_HOST = _env_str("SMTP_HOST", "")
+SMTP_PORT = _env_int("SMTP_PORT", 587)
+SMTP_SENDER = _env_str("SMTP_SENDER", "")
+SMTP_RECIPIENT = _env_str("SMTP_RECIPIENT", "")
+SMTP_USERNAME = _env_str("SMTP_USERNAME", "")
+# An app password for a Gmail account is a credential like any other: it comes
+# from configuration and is redacted by the logging filter (see
+# logging_config.known_secrets).
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD") or ""
+
+#: How the connection is secured. ``starttls`` is submission on 587, ``ssl`` is
+#: implicit TLS on 465, ``none`` is an unencrypted relay (a local one, or a
+#: test double). Constrained here so a typo is a configuration error at import
+#: rather than a silently unencrypted connection at send time.
+SMTP_TLS_CHOICES = ("starttls", "ssl", "none")
+SMTP_TLS = _env_str("SMTP_TLS", "starttls").strip().lower()
+if SMTP_TLS not in SMTP_TLS_CHOICES:
+    raise ConfigError(
+        f"SMTP_TLS must be one of {', '.join(SMTP_TLS_CHOICES)}, got {SMTP_TLS!r}"
+    )
+
+# Every SMTP connection is bounded, for the same reason every LinkedIn request
+# is: an unattended workflow blocked on a socket is indistinguishable from one
+# that has crashed. A notification is best-effort infrastructure and may never
+# hold a run open.
+SMTP_TIMEOUT_SECONDS = _env_float("SMTP_TIMEOUT_SECONDS", 30.0)
+
+# Noise control (PLAN.md Step 7): a failure that recurs every run must not
+# produce an email every run. The *first* occurrence always notifies; repeats
+# of the same failure inside this window do not.
+SMTP_REPEAT_AFTER_HOURS = _env_float("SMTP_REPEAT_AFTER_HOURS", 24.0)
+
 
 def require_openrouter_key() -> str:
     """Return the OpenRouter API key or raise ConfigError.

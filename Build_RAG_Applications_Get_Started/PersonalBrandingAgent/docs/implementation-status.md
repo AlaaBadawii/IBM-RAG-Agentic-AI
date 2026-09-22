@@ -27,33 +27,37 @@ do not belong in this file.
 
 ```text
 Current Step:
-    Step 7 — Build Operational Failure Notifications via Email
+    Step 8 — Build Grounded Post Generation
 
 Status:
     NOT STARTED
 
 Overall Progress:
-    Steps 0–6 COMPLETED. The environment is reproducible, the operational state
+    Steps 0–7 COMPLETED. The environment is reproducible, the operational state
     store exists, the source registry defines exactly which directories are
     evidence about the user, synchronization is incremental, the context layer
     turns a retrieval result into named, ranked, provenance-preserving sections,
-    LinkedIn publishing is a service an unattended workflow can call, and every
-    publish now leaves a durable trace — a write-ahead intent written before any
+    LinkedIn publishing is a service an unattended workflow can call, every
+    publish leaves a durable trace — a write-ahead intent written before any
     request exists, an outcome recorded from evidence, three duplicate checks
     over stored history, and a recovery path that turns an interruption into an
-    explicit ambiguity instead of a silent retry. Nothing reaches the user when
-    a run fails: Step 7 owns that. Steps 7–14 have not been started.
+    explicit ambiguity instead of a silent retry — and a failure can now reach a
+    person: a run outcome or a recorded phase failure composes an SMTP
+    notification, sends it through a provider-agnostic transport configured
+    entirely from the environment, and records the delivery as an outcome
+    distinct from the failure it carried. Nothing generated a post yet: Step 8
+    owns that. Steps 8–14 have not been started.
 
 Last Completed Step:
-    Step 6 — Build Persistent Publishing, Idempotency & Recovery
+    Step 7 — Build Operational Failure Notifications via Email
 
 Next Step:
-    Step 7 — Build Operational Failure Notifications via Email
+    Step 8 — Build Grounded Post Generation
 ```
 
 The roadmap was rewritten and finalized after an architecture and readiness
-analysis of the repository. Steps 0–6 have since been implemented, verified, and
-committed; Step 7 onwards remains untouched.
+analysis of the repository. Steps 0–7 have since been implemented, verified, and
+committed; Step 8 onwards remains untouched.
 
 ```text
 Sources registered:  29          (8 ACTIVE · 20 COMPLETED · 1 PLANNED)
@@ -78,7 +82,7 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 | 4 | Build the Personal Branding Context & Evidence Layer | COMPLETED |
 | 5 | Harden the LinkedIn Integration for Autonomous Use | COMPLETED |
 | 6 | Build Persistent Publishing, Idempotency & Recovery | COMPLETED |
-| 7 | Build Operational Failure Notifications via Email | NOT STARTED |
+| 7 | Build Operational Failure Notifications via Email | COMPLETED |
 | 8 | Build Grounded Post Generation | NOT STARTED |
 | 9 | Build Evidence Verification & Revision Gates | NOT STARTED |
 | 10 | Build the Autonomous Branding Agent | NOT STARTED |
@@ -93,6 +97,132 @@ Status vocabulary: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `COMPLETED`
 ---
 
 ## Completed Steps
+
+### Step 7 — Build Operational Failure Notifications via Email
+
+Status: COMPLETED
+
+Implemented:
+- Created `app/notify/` — seven modules beside the workflows (not inside them):
+  `enums.py` (`NotificationDecision`, `WaiverReason`,
+  `NotificationFailureCategory`), `errors.py`
+  (`NotificationDeliveryError`, `NotificationConfigurationError`), `config.py`
+  (`SMTPConfig`, `smtp_config()`, `require_smtp()`, `missing_settings()`),
+  `models.py` (`NotificationMessage`, `NotificationReport`), `messages.py`
+  (composition), `transport.py` (`EmailTransport` protocol + `SMTPTransport`),
+  `service.py` (`NotificationService`).
+- **The decision is deterministic infrastructure.** `NotificationService`
+  exposes exactly two entry points: `notify_run(run_id)` for the workflow
+  wrapper (the run's recorded outcome is the input) and `notify_failure(failure)`
+  for a phase (the recorded failure is the input). Neither asks the Agent, and
+  neither re-derives severity: `WORKFLOW_FAILED` vs
+  `REQUIRES_HUMAN_INTERVENTION` is read off `requires_human_intervention` and
+  the run outcome Step 1 constrains.
+- **A normal outcome is waived, never emailed.** `DO_NOT_PUBLISH` and an
+  unfinished run return `NotificationDecision.WAIVED` with
+  `WaiverReason.NORMAL_OUTCOME` and touch neither the transport nor the store.
+  A `DO_NOT_PUBLISH` run that got past a recorded phase failure is still waived:
+  the run outcome is the recorded fact, not the presence of a failure row.
+- **The transport is a protocol, and the only implementation is stdlib.**
+  `EmailTransport` (`name` · `recipient` · `describe` · `send`) is the whole
+  contract, so a fake and `SMTPTransport` are interchangeable. `SMTPTransport`
+  uses `smtplib` with `timeout=` on every connection, STARTTLS or implicit TLS
+  per configuration, and `login()` only when a username is configured. No new
+  dependency: `smtplib` is stdlib (`PLAN.md` §12.1 decision 3).
+- **Configuration is entirely environmental.** `app/config.py` gained
+  `SMTP_HOST · SMTP_PORT · SMTP_SENDER · SMTP_RECIPIENT · SMTP_USERNAME ·
+  SMTP_PASSWORD · SMTP_TLS · SMTP_TIMEOUT_SECONDS · SMTP_REPEAT_AFTER_HOURS`,
+  all with empty or neutral defaults, and `.env.example` documents them. The
+  addresses (`PLAN.md` §12.2 open item C) are the user's, so nothing in the
+  repository invents one; an unknown `SMTP_TLS` value is a `ConfigError` at
+  import, not a silently unencrypted connection at send time.
+- **The distinction between the two failures is the data model.**
+  `notifications.delivery_state` records the delivery; `operational_failures`
+  keeps the failure. A delivery failure writes only the notification row, with
+  `error_message` and a category — `configuration` (fix the variables),
+  `authentication` (fix the app password), `transport` (the network or the mail
+  server). The failing phase's row, the run's outcome and `occurrence_count` are
+  untouched by it, and a `FAILED` delivery is never counted as having reported
+  the failure, so the next run tries again.
+- **Redaction is one list, not two.** `app/logging_config.py` now exposes
+  `known_secrets()` (with `SMTP_PASSWORD` added to `SECRET_ENV_VARS`) and
+  `redact()`; the logging filter is one consumer of that list and `app/notify`
+  is another. Composed subjects and bodies, the recorded `error_message`, and
+  the reason string logged on a delivery failure all pass through it — the last
+  one matters because the text comes from a mail server, which is external
+  input. `SMTPConfig.password` is `repr=False`, and the recorded
+  `notifications.smtp_config` is `host:port tls=mode` only: no username, no
+  password, no message body anywhere in the table.
+- **Noise control uses the store, not a second store.** A repeat of a failure
+  already reported inside `SMTP_REPEAT_AFTER_HOURS` (default 24h) is waived with
+  `WaiverReason.REPEAT_SUPPRESSED`; only `sent` rows count, so a delivery that
+  failed does not suppress the next attempt. The first occurrence has no prior
+  row, so it cannot be suppressed — the property `PLAN.md` insists on, enforced
+  by the shape of the check rather than by a flag. The lookup needed one
+  additive read: `StateStore.list_notifications(..., failure_id=None)` (no
+  schema change).
+- **The store is optional for exactly one reason.** The state store is itself a
+  phase that must be able to report (`PLAN.md` Step 7, reachability table), so
+  `NotificationService(store=None)` still composes and sends, and its report
+  says `recorded is False` instead of pretending the delivery was written down.
+  Everything that *reads* — `notify_run` — requires the store and raises
+  `StateStoreError` without it.
+- **The notification layer cannot reach the knowledge or publishing layers**,
+  and the publishing layer cannot send mail: both directions are asserted by
+  AST import scans (mirroring the Step 6 scan over `app/publishing/`), so
+  "SMTP is not imported into `app/publishing/`" is a property of the code rather
+  than a rule someone has to remember.
+
+Verified:
+- `tests/test_notify_service.py` (56 tests) and `tests/test_notify_transport.py`
+  (17 tests) — decision, composition, delivery records, delivery-failure
+  categories, noise control, redaction, layer isolation, and the SMTP
+  connection itself against a recording fake of `smtplib`.
+- `tests/test_logging.py` (1 new test) and `tests/test_config.py` (4 new tests).
+- **No test opens a socket or reads a credential.** The only SMTP code under
+  test is `SMTPTransport` with `smtplib.SMTP`/`SMTP_SSL` replaced by recording
+  fakes; every other test uses `CapturingTransport`.
+- Acceptance criteria, one by one: a failed unattended run produces exactly one
+  message through the fake transport and exactly one stored row; a
+  `DO_NOT_PUBLISH` run produces none; every phase in the reachability table can
+  report a failure (parametrized over all sixteen phase names, including
+  `state_store`); no secret appears in a message, a subject, a delivery record
+  or a logged reason; a transport failure leaves the original failure, its
+  `occurrence_count` and the run outcome intact and is separately observable;
+  a missing setting raises a `ConfigError` naming the variable and opens no
+  connection; duplicate suppression never hides a first occurrence and does not
+  suppress the next attempt after a failed delivery.
+- Full suite: **614 passed** (`536` before Step 7; the 78 new tests are the
+  whole difference, and nothing existing changed its result).
+
+Deviations:
+- **Nothing calls the notifier yet, and that is deliberate.** Step 7's
+  obligation is that any outcome a workflow records is *reportable*; which
+  workflow calls `notify_run`, and whether it calls `recover_run()` first, is
+  Step 11's orchestration decision. `PLAN.md` Step 7 was explicit that the
+  scheduled runs are not wired here, and this record keeps that visible rather
+  than implying an alert would arrive today. Recorded as Known Issue #10.
+- **No email has ever actually been sent.** `smtplib` is exercised only against
+  a fake that records what it was asked to do. The first real delivery is a
+  deliberate manual act, like the first real publish (Known Issue #9), and
+  `SMTP_*` is unset in `.env` today — so a failure right now is recorded as a
+  `configuration` delivery failure, which is the designed behaviour for an
+  unconfigured notifier and not a silent no-op. Recorded as Known Issue #11.
+- **No write-ahead `pending` row.** The delivery row is written once, after the
+  attempt, with its final state. Step 6 wrote the publish intent *before* the
+  call because a duplicate post is unrecoverable; an unsent email is not — the
+  failure it reported is already durable, and a crash mid-send leaves no false
+  claim behind. `update_notification_delivery()` therefore remains unused, as
+  the seam for a provider with a genuinely asynchronous send.
+- **A failure that a run recovered from still leaves an alertable row.** A
+  phase can record a failure and the run still terminate `DO_NOT_PUBLISH`; the
+  run is then waived, but the failure row itself is notifiable if a caller asks
+  for it by `notify_failure`. That is intended — the run-level decision and the
+  failure-level decision are different questions — but it does mean a phase that
+  records transient failures it handles will accumulate rows that only a
+  deliberate `notify_failure` call would report.
+
+---
 
 ### Step 6 — Build Persistent Publishing, Idempotency & Recovery
 
@@ -1188,54 +1318,60 @@ Important notes:
 ## Current Step
 
 ```text
-Step 7 — Build Operational Failure Notifications via Email
+Step 8 — Build Grounded Post Generation
 Status: NOT STARTED
 ```
 
 The full specification — reason, scope, implementation approach, tests, failure
-handling, and acceptance criteria — is in `PLAN.md` §8, Step 7. It is not
+handling, and acceptance criteria — is in `PLAN.md` §8, Step 8. It is not
 duplicated here.
 
-What Step 6 leaves on the table for it:
+What Step 7 leaves on the table for it:
 
-- **The failure store has no consumer.** `operational_failures` has been written
-  since Step 3 and read by nothing. Step 7 is its first reader, and the rows it
-  needs are already there — a phase, a category and a message, with no
-  notification state on them.
-- **The three terminations are already distinguishable and are Step 6's
-  output.** `PublicationResult.requires_human_intervention`,
-  `PublishReport.requires_human_intervention` and `RecoveryReport.blocked` are
-  how a caller tells `WORKFLOW_FAILED` from `REQUIRES_HUMAN_INTERVENTION`
-  without re-deriving anything. The email's job is to carry that distinction to
-  a person, not to reconstruct it.
-- **Publishing already reports rather than raises, for exactly this reason.** A
-  refusal, a failure and an ambiguity come back as a `PublishReport`, so an
-  unattended workflow can notify on the outcome without wrapping the call. Only
-  a store failure raises — and that is the one case where the notification path
-  must work *without* the store.
-- **Recovery exists and nothing calls it.** `recover_run()` resolves a crashed
-  run into a `RecoveryReport` with a `message` and a `blocked` flag, but it is
-  invoked by hand, in tests. A workflow that does not call it leaves an
-  `attempt_started` intent unresolved, which is the one state Step 6 cannot
-  resolve on its own and a person needs to hear about.
-- **A credential warning now has somewhere to travel, but still not across
-  runs.** `PublishReport.expiry_warning` carries the warning the integration
-  returned for *this* call, and that warning rides on a publish that
-  **succeeded** — the run that should warn is the run that has nothing to fail
-  on, which is exactly the case only email can deliver. What is still missing
-  is the cross-run half: `linkedin_credential_expiry` (written since Step 5) is
-  read by nothing, so a credential that died between runs is still discovered
-  at publish time rather than before it. Step 6 left that where it found it —
-  reading the recorded expiry is outside the Step 6 contract — and it is
-  recorded here so it is not mistaken for done.
-- **SMTP must not be imported into `app/publishing/`.** The import scan over the
-  package forbids reaching the knowledge layer; the same separation keeps the
-  notification transport out of the publishing layer, so the email service
-  belongs beside the workflows, not inside them.
-- **Two Step 6 gaps are recorded and are not Step 7's to fix:** Known Issue #8
+- **A failure that is now reachable has nothing to report yet.** `app/notify/`
+  composes and sends; `notify_run()` and `notify_failure()` are the two entry
+  points; and nothing calls either of them (Known Issue #10). Step 8 is the
+  first layer whose outcome is worth an email, so it is the first place the
+  interface meets a producer — and it must still not be the thing that sends.
+- **Three outcomes are already distinguishable and are the caller's input.**
+  `WorkflowOutcome`'s `DO_NOT_PUBLISH` / `WORKFLOW_FAILED` /
+  `REQUIRES_HUMAN_INTERVENTION` and `notify_failure()`'s
+  `WORKFLOW_FAILED` / `REQUIRES_HUMAN_INTERVENTION` labelling are how a run says
+  what happened. Generation has to fit that vocabulary: a declining draft is
+  `DO_NOT_PUBLISH` (waived, no email), and only a genuine generation failure is
+  `WORKFLOW_FAILED`.
+- **A run can be notified without a working store, and generation should not
+  need one.** `notify_failure()` deliberately needs no store and reports
+  `recorded is False`. Generation writes no state at all (`PLAN.md` Step 8), so
+  a generation failure is exactly the kind of thing that has to be reportable
+  while the store is the thing that is broken.
+- **The redaction list is single and shared.** `known_secrets()` and `redact()`
+  in `app/logging_config.py` are consumed by the log filter *and* by
+  `app/notify`; `SMTPConfig.secrets()` feeds the same machinery. Anything Step 8
+  logs or returns as metadata must be built the same way rather than inventing
+  its own scrubbing.
+- **Both import scans now point at Step 8's package.** An AST scan fails if
+  `app/notify/` imports `app.publishing/`, `app.retrieval/`, `app.ingestion/`,
+  `chroma` or `langchain`, and another fails if `app/publishing/` imports
+  `smtplib` or `app.notify`. A generation package sits between context assembly
+  and verification and must not shortcut either boundary — reaching retrieval
+  for evidence is Step 9's job to check, not generation's to do.
+- **`list_notifications()` gained a read filter and the schema gained nothing.**
+  Noise control reads `sent` rows through `failure_id=` instead of a new table
+  or column. Step 8 writes no state, so it should need no store method at all —
+  if it appears to, that is a signal the persistence boundary is being crossed.
+- **Known Issue #5 is a blocker for this step, not for the last one.** The
+  configured LLM key does not match the configured provider; Step 7 was immune
+  because it generates nothing, and Step 8 makes a real model call. It must be
+  corrected before Step 8 starts.
+- **Two gaps remain open and are not Step 8's to fix:** Known Issue #8
   (near-duplicate detection is inert until Step 11 supplies an embedder) and
   Known Issue #9 (the real publish through the service is still outstanding).
-  Step 7 must be written so that neither is silently assumed to be closed.
+  Step 8 must be written so that neither is silently assumed to be closed.
+- **No email has ever actually been sent (Known Issue #11).** `SMTP_*` is unset
+  in `.env`, so the transport has only ever run against the fake. Step 8 does
+  not change that, and must not be the step where a credential is invented to
+  make an end-to-end run look finished.
 
 ---
 
@@ -1422,6 +1558,53 @@ thing worth doing before Step 10 hands publishing to an autonomous Agent.
 
 ---
 
+### 10. Nothing calls the notification service yet
+
+Step 7 built the alerting path and proved it works end to end through a fake
+transport, but no workflow invokes it. Which run calls `notify_run()`, whether
+it calls `recover_run()` first, and how a phase failure inside the Agent is
+wrapped so it notifies regardless — all of that is Step 11's orchestration.
+
+Consequence today: a failing run still records its outcome and its failures,
+and still sends nothing, because nothing asks it to. This is the designed state
+at the end of Step 7 (`PLAN.md` Step 7 forbade wiring the scheduled workflows),
+and it is recorded so that "notifications exist" is not read as "a person is
+being told".
+
+---
+
+### 11. No email has ever actually been sent
+
+`SMTPTransport` is exercised only against a fake that replaces `smtplib`'s
+client classes, and every other test uses a capturing fake. No message has left
+this machine, and the real path — a Gmail app password, STARTTLS on 587, a
+sender that matches the account — has never run.
+
+Two things also remain the user's to produce: the four required settings
+(`PLAN.md` §12.2 open item C) are not set in the local `.env`, and the app
+password has to be created in the Google account. Until then a failure is
+recorded as a delivery failure with the `configuration` category — loud in the
+state store, and the correct behaviour for an unconfigured notifier.
+
+---
+
+### 12. A credential that expires between runs is still only discovered at publish time
+
+Step 5 created `linkedin_credential_expiry` and wrote it on every attempt, and
+Step 6 carries the integration's warning on a report that **succeeded** —
+`PublishReport.expiry_warning` reaches a caller for *this* call. The cross-run
+half is still missing: nothing reads the recorded expiry, so a credential that
+dies while no run is executing is discovered by the next publish rather than
+before it — which is the one place a warning arrives too late to be useful.
+
+Step 6 recorded this as outside its contract and left it where it found it; this
+entry was carried in the Step 7 handoff notes and is preserved here rather than
+dropped when those notes were replaced. It is a Step 11 concern (a workflow that
+checks before it publishes), not a Step 7 or Step 8 one, and it is written down
+so it is not mistaken for done.
+
+---
+
 ## Important Decisions / Deviations
 
 Established while finalizing the roadmap. Preserved here because losing them
@@ -1505,62 +1688,77 @@ not a specification.
 | **A request with no timeout is unrepresentable** | An unattended workflow blocked on a socket is indistinguishable from a crashed one, except that it holds the run lock (Step 12). The client refuses a non-positive timeout at construction, so "no timeout" cannot be configured | Step 5, `app/integrations/linkedin/client.py` |
 | **The credential path is defined once, and the definition is tested** | The defect this step exists to fix was a token written in one directory and looked for in another. `app/paths.py` owns the canonical path and an AST-based test fails if any `Auth_handling/` script drifts from it | Step 5, `app/paths.py`, `tests/test_linkedin_credentials.py` |
 | **Step 5 adds exactly one table, and it records a fact rather than an action** | Step 5 stores nothing about publishing — that is Step 6's authority. `linkedin_credential_expiry` exists because a credential that dies between two runs has to be detectable by the run that comes after, and there is nowhere else durable for it | Step 5, `app/state/schema.py` |
+| **Nobody chooses to notify; the outcome decides** | `NotificationService` has exactly two entry points — `notify_run(run_id)` and `notify_failure(failure)` — and neither asks the Agent anything. `PLAN.md` is explicit that a phase failing inside the Agent still notifies because the workflow wraps it, so notification is infrastructure with a deterministic trigger, not a judgement call a model can be wrong about | Step 7, `app/notify/service.py` |
+| **Severity is read, never re-derived** | `WORKFLOW_FAILED` and `REQUIRES_HUMAN_INTERVENTION` already exist on the layers below as `requires_human_intervention` and `RecoveryReport.blocked`. The message layer reuses that vocabulary instead of inventing a second severity enum, so the two can never drift apart into a system that files an ambiguity as an ordinary failure | Step 7, `app/notify/enums.py`, `app/notify/messages.py` |
+| **The store is optional so that the store can be the thing that failed** | A store failure is the one error Step 6 deliberately lets escape, and `PLAN.md` lists the state store itself as a phase that must be able to notify. `notify_failure()` therefore works with no store at all and reports `recorded is False`; only `notify_run()` requires one, because a run id is meaningless without a store to look it up in | Step 7, `app/notify/service.py` |
+| **A delivery failure is a separate row from the failure it reports** | The `notifications` table records the attempt, not the incident: `delivery_state` is `pending`/`sent`/`failed`, and a failed delivery leaves the `operational_failures` row and the run's outcome exactly as they were. An undelivered alert must not be able to make a failed run look handled, and a sent alert must not be able to make it look successful | Step 7, `app/state/schema.py` (Step 1 table), `app/notify/service.py` |
+| **One redaction list, consumed by the log filter and the notifier both** | `SMTP_PASSWORD` joins the secret environment list, and `known_secrets()`/`redact()` became the single definition both the logging filter and `app/notify` call. A second list would be a second thing to forget, and the transport scrubs its own exception text before the service scrubs the result, so neither the log nor the delivery record can carry the password | Step 7, `app/logging_config.py`, `app/notify/transport.py`, `app/notify/service.py` |
+| **Only a `sent` row suppresses the next alert, and a first occurrence is never suppressed** | Rate limiting reads `notifications` filtered by `failure_id` **and** `delivery_state='sent'` — a failed delivery must not silence the retry that follows it, which would turn a broken mail server into a silent outage. There is no prior row on a first occurrence, so the first one always sends | Step 7, `app/notify/service.py`, `app/state/store.py` |
+| **The quiet window is a read filter, not a schema change** | `list_notifications()` gained an optional `failure_id`, following Step 6's precedent of adding store read methods rather than tables. Suppression is derived from the rows that exist, so nothing has to be migrated and a `sent` row stays a pure record of what happened | Step 7, `app/state/store.py` |
+| **The layer separation is asserted in both directions, structurally** | An AST scan fails if `app/notify/` imports `chroma`, `langchain`, `app.retrieval`, `app.ingestion` or `app.publishing`, and a second scan fails if `app/publishing/` imports `smtplib` or `app.notify`. A behavioural test could only show that no test looked; this makes the notification transport structurally unreachable from the publishing layer | Step 7, `tests/test_notify_service.py` |
+| **An unsent email is not a safety hazard, so there is no write-ahead row** | Step 6 writes a `pending` intent *before* the request because an unrecorded post is a duplicate risk. An unrecorded email risks a repeated email, which the noise control already bounds — so the delivery row is written once, after the attempt, carrying its final state | Step 7, `app/notify/service.py` |
 
 ---
 
 ## Next Step
 
-### Step 7 — Build Operational Failure Notifications via Email
+### Step 8 — Build Grounded Post Generation
 
-The next implementation task is defined in `PLAN.md` §8, Step 7.
+The next implementation task is defined in `PLAN.md` §8, Step 8.
 
-The system now publishes, records, and recovers without a person watching — and
-tells that person nothing. Step 7 makes a failure reach the user: an SMTP
-notification service reachable from every phase, with the transport decided
-(SMTP, stdlib preferred, Gmail-configurable, all values from configuration, a
-fake transport in tests) and the three workflow outcomes already distinguished
-by the layers below it.
+Steps 0–7 built everything around generation: the evidence layer assembles named,
+ranked, provenance-preserving sections; publishing is a service an unattended
+workflow can call; and a failure can now reach a person. Nothing has ever
+produced a post. Step 8 is that bounded transformation — a candidate post and
+its metadata from assembled context — and it is deliberately not the centre of
+the system: context assembly decides what is worth saying and Step 9 decides
+whether it was said truthfully.
 
-Constraints carried in from Step 6:
+Constraints carried in from Step 7:
 
-- **Notification is infrastructure, not Agent discretion.** `PLAN.md` is
-  explicit: a phase that fails inside the Agent still notifies because the
-  workflow wraps it. Step 6 kept that shape — publishing returns reports, so a
-  caller can notify on an outcome without exception handling — and Step 7
-  should consume outcomes, not require try/except around every call.
-- **The store cannot be assumed to be working.** A store failure is the one
-  error Step 6 deliberately lets escape as an exception. A notification path
-  that can only report through the store is therefore blind exactly when the
-  problem is the store; `PLAN.md` Step 7 lists the state store itself as a
-  phase that must be able to notify.
-- **The distinction to deliver already exists — do not re-derive it.**
-  `requires_human_intervention` (on both the result and the report) and
-  `RecoveryReport.blocked` are the difference between `WORKFLOW_FAILED` and
-  `REQUIRES_HUMAN_INTERVENTION`. Collapsing them into one "failure" email is
-  what makes an unattended system unsafe to leave alone.
-- **An ambiguous publication must reach a person, and nothing else will.**
-  `UNKNOWN_REQUIRES_REVIEW` blocks the content and is never retried; Step 6's
-  recovery resolves it and says so in a report. If that report goes nowhere,
-  the ambiguity is durable but invisible.
-- **Recovery is not automatic, and Step 7 should not make it so.**
-  `recover_run()` is called by hand today. Whether a workflow calls it before
-  publishing is a Step 11 decision about orchestration; Step 7's obligation is
-  that whatever it decides is *reportable*.
-- **No secrets in a message.** Every value comes from configuration, and the
-  same redaction discipline Step 5 applied to result messages applies to
-  notification bodies — an SMTP password must not be able to appear in a
-  delivery record.
-- **Keep the layers apart.** `app/publishing/` must not import an SMTP client
-  (its import scan forbids reaching the knowledge layer, and the same
-  separation applies upward): the notification service sits beside the
-  workflows and consumes what the lower layers report.
-- **Two open gaps are inherited, not closed:** Known Issue #8 (near-duplicate
-  detection is inert until an embedder is wired in at Step 11) and Known Issue
-  #9 (no real publish has gone through the service yet). Neither blocks Step 7,
-  and neither may be assumed fixed.
-- **Known Issue #5 (the LLM key does not match the configured provider) is
-  still not a blocker** — Step 7 sends text it is handed and generates none. It
-  must be corrected before Step 8.
+- **Notification is already the wrapper's job, not the generator's.** A
+  generation failure ends the run with `DO_NOT_PUBLISH` and the workflow
+  notifies through `notify_run()`. Generation must therefore report a
+  distinguishable outcome — "generation failed" vs "generated, but declined for
+  insufficient evidence" — and must not send anything itself.
+- **A declining result is a normal outcome, not a failure.** `PLAN.md` Step 8
+  requires the chain to accept an insufficient-evidence signal and decline
+  rather than fabricate. Step 7 waives `DO_NOT_PUBLISH` precisely because it is
+  a success; a decline must land there, so it belongs in the structured result
+  and not in an exception.
+- **`REQUIRES_HUMAN_INTERVENTION` remains reserved for things a person must
+  resolve.** Using it for a low-quality draft would make the one label that
+  means "stop and look" routine, and Step 7's email would stop meaning anything.
+- **The failure path must be reachable without the Agent.** Step 7's store is
+  optional so a broken store can still be reported; Step 8 should keep the same
+  shape by taking context as an explicit input, so a generation run can be
+  driven and observed without the retrieval or publishing layers being alive.
+- **Secrets stay out of generated text and its metadata.** The model id, prompt
+  version and parameters returned with the draft are audit data, and the same
+  single redaction list (`known_secrets()` / `redact()`) applies to anything a
+  failure message or log line is built from.
+- **The generation layer writes no state.** `PLAN.md` Step 8 is explicit:
+  persistence happens only at the publish step. `app/publishing/` owns the trace
+  and Step 7's `notifications` table records only deliveries — neither is
+  generation's to write.
+- **Do not reach across the layer lines.** `app/notify/`'s import scan forbids
+  reaching `app.publishing/`, `app.retrieval/` and `app.ingestion/`;
+  `app/publishing/`'s scan forbids reaching `smtplib` and `app.notify`. A
+  generation package sits between context assembly and verification and is
+  subject to the same discipline — Step 9 is the layer that must be able to
+  read what it produced.
+- **Known Issue #5 must be corrected before this step starts.** The configured
+  LLM key does not match the configured provider, and Step 7 was unaffected only
+  because it generates nothing. Step 8 makes a real model call, so the
+  mismatch is a blocker for it and not for the work committed here.
+- **Two inherited gaps stay open and are not Step 8's to close:** Known Issue #8
+  (near-duplicate detection is inert until an embedder is supplied at Step 11)
+  and Known Issue #9 (no real publish has gone through the service yet).
+  Neither blocks generation; neither may be assumed fixed.
+- **Nothing schedules or orchestrates this yet.** Step 11 owns the workflows and
+  Step 12 owns the schedule. Step 7 added an interface with no caller
+  (Known Issue #10) and has never sent a real email (Known Issue #11); Step 8
+  should add a layer, not a runner.
 
 
 ---

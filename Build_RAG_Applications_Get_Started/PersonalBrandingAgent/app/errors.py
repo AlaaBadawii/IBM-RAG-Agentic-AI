@@ -84,3 +84,15 @@ class StateConstraintError(StateStoreError):
 
     Either way the caller's obligation is the same: do not proceed.
     """
+
+
+class NotificationError(AppError):
+    """Raised when the notification path cannot do its job at all.
+
+    A *delivery* failure — the mail server refused, the password is wrong, the
+    connection timed out — is **not** one of these: it is a recorded outcome
+    with a category of its own, because the workflow failure it was reporting
+    must survive it (``PLAN.md`` Step 7). What remains here is the case where
+    the notifier cannot even attempt a delivery, which is a configuration
+    defect the caller has to fix.
+    """

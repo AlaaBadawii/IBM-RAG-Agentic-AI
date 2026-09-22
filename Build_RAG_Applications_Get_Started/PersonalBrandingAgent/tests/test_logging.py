@@ -67,6 +67,26 @@ def test_a_missing_or_broken_token_file_never_breaks_logging(monkeypatch,
     SecretRedactionFilter()  # construction must not raise either
 
 
+def test_the_smtp_password_is_redacted_too(monkeypatch):
+    """Step 7 adds a credential to configuration; it must be covered like the rest.
+
+    The app password authenticates the account that sends the alerts, so a
+    filter that missed it would leak a live credential into the log the moment
+    a mail server echoed it back.
+    """
+    from app.logging_config import known_secrets
+
+    monkeypatch.setenv("SMTP_PASSWORD", "the-gmail-app-password")
+    assert "the-gmail-app-password" in known_secrets()
+
+    redaction = SecretRedactionFilter()
+    record = _record("SMTPAuthenticationError: 535 rejected "
+                     "the-gmail-app-password")
+    assert redaction.filter(record)
+    assert "the-gmail-app-password" not in record.getMessage()
+    assert REDACTED in record.getMessage()
+
+
 def test_redaction_filter_leaves_normal_messages():
     redaction = SecretRedactionFilter()
     record = logging.LogRecord(
