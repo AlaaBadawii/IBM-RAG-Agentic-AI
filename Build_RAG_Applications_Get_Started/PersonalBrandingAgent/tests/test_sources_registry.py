@@ -279,15 +279,29 @@ class TestCommittedRegistry:
     def test_the_registry_is_not_its_own_source(self, committed_registry):
         assert "sources.yaml" not in {s.local_path.name for s in committed_registry}
 
-    def test_covers_the_sources_the_inspection_identified(self, committed_registry):
-        assert {
+    def test_covers_exactly_the_periodic_sync_scope(self, committed_registry):
+        """Periodic sync covers the five roots the user named — no more.
+
+        ``sync_all`` iterates this registry and nothing else, so this exact
+        set *is* the periodic sync scope: ~/LLMs (IBM, AI_Agents, AI_Hackthon
+        sources), ~/Quizey, ~/DevOps, ~/DataBases, and
+        ~/DSA-Python-LeetCode-130. ~/ALX, ~/FastAPI and ~/Portfolio are
+        deliberately outside it.
+        """
+        assert set(committed_registry.names) == {
             "ibm-genai-coursework",
+            "ai-agents",
+            "hackathon-lectures",
+            "hackathon-practice-lab",
             "quizey-v2",
-            "alx-quizey",          # distinct from quizey-v2; the corpus insists
-            "alx-airbnb-clone-v2",
+            "quizey-platform",
+            "jenkins-practice",
+            "kodekloud-devops-specialization",
+            "devops-lab",
             "kubernetes-lab",
             "databases-mongodb-crud",
-        } <= set(committed_registry.names)
+            "dsa-python-leetcode-130",
+        }
 
     def test_the_third_party_ibm_template_is_registered_nowhere(self, committed_registry):
         """Style_Finder is IBM's course template, not the user's work."""

@@ -323,37 +323,6 @@ sources:
       statement of the product's architecture and status.
 
   # ===========================================================================
-  # ~/FastAPI
-  # ===========================================================================
-  - name: fastapi-shipment-api
-    type: filesystem
-    local_path: /home/alaabadawii/FastAPI/course_practical_app
-    lifecycle: ACTIVE
-    include: *source_code
-    description: >
-      The FastAPI shipment/seller API. A plain directory — not a repository —
-      whose content is the basis of in_progress_projects/fastapi_shipment_api.md.
-      The corpus cites this work at /home/alaabadawii/FastAPI/app/main.py,
-      which does not exist; the real path is this one.
-
-  - name: exit-project-studyflow
-    type: git
-    local_path: /home/alaabadawii/FastAPI/ExitProject
-    repo_identity: "untracked: no remote and no commits (unborn master)"
-    ref: master
-    lifecycle: PLANNED
-    include: *source_code
-    description: >
-      A repository with ZERO COMMITS — initialized, and holding 11 planning
-      documents plus a StudyFlow scaffold, but no history at all. It is the
-      case that makes 'git source' mean something more than 'has a remote'.
-      Lifecycle PLANNED because the work is designed and not yet started; if
-      it acquires content, plan_for() raises a status-review signal.
-    exclude:
-      - pattern: "studyflow/venv/"
-        reason: "59 MB virtual environment"
-
-  # ===========================================================================
   # ~/DevOps
   # ===========================================================================
   - name: jenkins-practice
@@ -399,206 +368,6 @@ sources:
       a downloaded 129 MB minikube binary, which no include pattern reaches.
 
   # ===========================================================================
-  # ~/ALX — 20 repositories, triaged individually
-  # ===========================================================================
-  - name: alx-airbnb-clone-v1
-    type: git
-    local_path: /home/alaabadawii/ALX/AirBnB_clone
-    repo_identity: https://github.com/AlaaBadawii/AirBnB_clone.git
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      The original AirBnB clone (48 commits, all authored by the user) — the
-      console/object-model stage. Cited by the corpus for console.py.
-
-  - name: alx-airbnb-clone-v2
-    type: git
-    local_path: /home/alaabadawii/ALX/AirBnB_clone_v2
-    repo_identity: https://github.com/AlaaBadawii/AirBnB_clone_v2.git
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      The version where the Flask/SQLAlchemy web layer and the database storage
-      engine appear. 55 of 150 commits are the user's. Cited by the corpus for
-      web_flask/ and models/engine/db_storage.py.
-
-  - name: alx-backend
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-backend
-    repo_identity: https://github.com/AlaaBadawii/alx-backend
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: "Backend fundamentals curriculum projects (39 commits)."
-
-  - name: alx-backend-javascript
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-backend-javascript
-    repo_identity: https://github.com/AlaaBadawii/alx-backend-javascript
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: "JavaScript/Node backend track (96 commits)."
-
-  - name: alx-backend-python
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-backend-python
-    repo_identity: https://github.com/AlaaBadawii/alx-backend-python
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: "Advanced Python backend track (53 commits)."
-
-  - name: alx-backend-storage
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-backend-storage
-    repo_identity: https://github.com/AlaaBadawii/alx-backend-storage
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: "MySQL/NoSQL storage track (46 commits)."
-
-  - name: alx-backend-user-data
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-backend-user-data
-    repo_identity: https://github.com/AlaaBadawii/alx-backend-user-data
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      Authentication and personal-data track (144 commits), cited by
-      completed_projects/alx_backend_user_data.md.
-
-  - name: alx-system-engineering-devops
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-system_engineering-devops
-    repo_identity: https://github.com/AlaaBadawii/alx-system_engineering-devops
-    ref: master
-    lifecycle: COMPLETED
-    include: *shell_repo
-    description: >
-      Systems/DevOps track — shell, networking, configuration management (258
-      commits). Uses the shell_repo profile because 127 of its files are
-      extensionless ALX shell scripts. Its default branch is master, not main;
-      the two ALX repositories here that still use the older name are this one
-      and alx-higher-level-programming.
-    exclude:
-      # shell_repo admits everything, so the binary types it would otherwise
-      # pick up are named here.
-      - pattern: "**/*.png"
-        reason: "diagram images, not authored text"
-      - pattern: "**/*.jpg"
-        reason: "diagram images, not authored text"
-      - pattern: "**/*.pdf"
-        reason: "exported documents, not authored text"
-      - pattern: "**/*.tar"
-        reason: "archives"
-      - pattern: "**/*.gz"
-        reason: "archives"
-      - pattern: "**/*.zip"
-        reason: "archives"
-
-  - name: alx-files-manager
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-files_manager
-    repo_identity: https://github.com/AlaaBadawii/alx-files_manager
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      The file manager API (2 commits) — Node/Redis/MongoDB, documented in
-      completed_projects/files_manager.md.
-
-  - name: alx-higher-level-programming
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-higher_level_programming
-    repo_identity: https://github.com/AlaaBadawii/alx-higher_level_programming
-    ref: master
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      Python, JavaScript and C across the higher-level programming foundation
-      (274 commits) — genuinely mixed-language, which is why the include
-      profile spans languages rather than naming one. Its default branch is
-      master, not main.
-
-  - name: alx-interview
-    type: git
-    local_path: /home/alaabadawii/ALX/alx-interview
-    repo_identity: https://github.com/AlaaBadawii/alx-interview
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: "Interview algorithm practice (33 commits)."
-
-  - name: alx-program-revision
-    type: git
-    local_path: /home/alaabadawii/ALX/alx_program_Revision
-    repo_identity: https://github.com/AlaaBadawii/alx_program_Revision.git
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      Self-study revision material (10 commits) — the largest single source at
-      roughly 1,600 admitted files, spanning Python, C and SQL. Cited by
-      completed_projects/alx_interview_algorithms.md.
-
-  - name: alx-simple-shell
-    type: git
-    local_path: /home/alaabadawii/ALX/simple_shell
-    repo_identity: https://github.com/FaroukBinLhouita/simple_shell
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      The simple_shell team project — a C program. NOTE: the remote belongs to
-      the user's teammate, not to the user; the corpus records this explicitly
-      and the AUTHORS file lists both. 53 of 101 commits are the user's.
-      Provenance is recorded here rather than assumed from the remote.
-
-  - name: alx-taskey
-    type: git
-    local_path: /home/alaabadawii/ALX/taskey
-    repo_identity: https://github.com/AlaaBadawii/taskey
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      The Taskey Flask task API (28 commits). Its remote URL locally embeds a
-      GitHub personal access token; the identity recorded here is the
-      sanitized form. See the security note at the end of this file.
-
-  - name: alx-quizey
-    type: git
-    local_path: /home/alaabadawii/ALX/Quizey
-    repo_identity: https://github.com/AlaaBadawii/Quizey.git
-    ref: main
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      Quizey V1 — the early version of the current project, and a different
-      repository from Quizey/Quizey_V2. The corpus is emphatic that these are
-      not the same repository; registering both separately is what keeps that
-      distinction machine-readable.
-
-  # ===========================================================================
-  # ~/Portfolio
-  # ===========================================================================
-  - name: portfolio
-    type: git
-    local_path: /home/alaabadawii/Portfolio
-    repo_identity: https://github.com/AlaaBadawii/AlaaBadawii.github.io.git
-    ref: main
-    lifecycle: ACTIVE
-    include: *source_code
-    description: >
-      The public static site (21 commits), published from this repository.
-      Active because it is the outward-facing artifact that changes as new work
-      lands.
-
-  # ===========================================================================
   # ~/DataBases — found by inspection, not among the roots PLAN.md declares
   # ===========================================================================
   - name: databases-mongodb-crud
@@ -611,6 +380,23 @@ sources:
       completed_projects/mongodb_pymongo_crud_service.md. A plain directory,
       not a repository. Included because the corpus's own audit notes that it
       is the only content under ~/DataBases.
+
+  # ===========================================================================
+  # ~/DSA-Python-LeetCode-130 — periodically changing; added to the sync scope
+  # by the user (previously recorded under not_registered)
+  # ===========================================================================
+  - name: dsa-python-leetcode-130
+    type: git
+    local_path: /home/alaabadawii/DSA-Python-LeetCode-130
+    repo_identity: https://github.com/AlaaBadawii/DSA-Python-LeetCode-130.git
+    ref: main
+    lifecycle: ACTIVE
+    include: *source_code
+    description: >
+      DSA-in-Python course practice (7 commits: 5 authored by the user, 2 by
+      copilot-swe-agent[bot]). Foundations/intermediate/advanced tracks with
+      README notes plus a small number of solution scripts. Active because it
+      is one of the five roots the user named as periodically changing.
 
 
 # --- Considered and deliberately not registered --------------------------------
@@ -669,15 +455,6 @@ not_registered:
 
   - path: /home/alaabadawii/FastAPI/fastapi_venv
     reason: "164 MB virtual environment; the reason sources exclude venvs structurally rather than by name."
-
-  - path: /home/alaabadawii/DSA-Python-LeetCode-130
-    reason: >
-      A 7-commit repository of DSA practice (5 authored by the user, 2 by
-      copilot-swe-agent[bot]), found during the inspection. Not among the roots
-      PLAN.md §5.3 declares and not referenced anywhere in the corpus, so it is
-      recorded here rather than registered: adding a new workspace root is a
-      decision for the user, and the registry should not quietly widen the set
-      of things it reads.
 
   - path: /home/alaabadawii/Cline
     reason: "Agent-tooling configuration (Hooks, Rules, Workflows); not the user's work."
