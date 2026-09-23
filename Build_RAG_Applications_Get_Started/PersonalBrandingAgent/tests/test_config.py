@@ -139,3 +139,76 @@ def test_an_unknown_tls_mode_is_a_configuration_error(monkeypatch):
     """A typo in TLS mode must not become a silently unencrypted connection."""
     with pytest.raises(ConfigError, match="SMTP_TLS"):
         _reload_with(monkeypatch, SMTP_TLS="STARTLS")
+
+
+# --- OpenRouter provider configuration ---------------------------------------
+
+#: Obviously fake, in the OpenRouter family. Never a real secret: the clients
+#: below are constructed but never invoked, so no packet leaves the machine.
+FAKE_OPENROUTER_KEY = "sk-or-v1-test-key-0000"
+
+
+def _client_defaults():
+    from app.agent.llm import _make_llm as agent_make_llm
+    from app.generation.generator import _make_llm as generation_make_llm
+    from app.verification.judge import _make_llm as judge_make_llm
+
+    return {
+        "agent reasoner": agent_make_llm,
+        "generation": generation_make_llm,
+        "support judge": judge_make_llm,
+    }
+
+
+def test_configured_key_reaches_the_openrouter_endpoint(monkeypatch):
+    """Correctly configured: the key is sent to the OpenRouter provider.
+
+    Every LLM boundary (Agent reasoner, generator, advisory judge) builds
+    the same OpenAI-compatible client against OPENROUTER_BASE_URL. Building
+    the client object opens nothing — this test pins the wiring, offline.
+    """
+    _reload_with(monkeypatch, OPENROUTER_API_KEY=FAKE_OPENROUTER_KEY)
+    for name, make_llm in _client_defaults().items():
+        client = make_llm("deepseek/deepseek-test", {"temperature": 0.0})
+        assert client.openai_api_key.get_secret_value() == FAKE_OPENROUTER_KEY, name
+        assert client.openai_api_base == "https://openrouter.ai/api/v1", name
+        assert client.model_name == "deepseek/deepseek-test", name
+
+
+def test_provider_mismatch_is_not_masked_in_code(monkeypatch):
+    """Incorrectly configured: a non-OpenRouter endpoint is passed through.
+
+    The code does not validate or rewrite the provider — an OpenAI-family
+    key against the OpenRouter endpoint (or vice versa) fails at call time
+    as an authentication error, classified downstream, never silently fixed
+    up here.
+    """
+    _reload_with(monkeypatch, OPENROUTER_API_KEY=FAKE_OPENROUTER_KEY,
+                 OPENROUTER_BASE_URL="https://api.openai.com/v1")
+    for name, make_llm in _client_defaults().items():
+        client = make_llm("deepseek/deepseek-test", {"temperature": 0.0})
+        assert client.openai_api_base == "https://api.openai.com/v1", name
+        assert client.openai_api_key.get_secret_value() == FAKE_OPENROUTER_KEY
+
+
+def test_missing_key_names_the_openrouter_variable(monkeypatch):
+    """Missing: the error names the expected variable, not the alias."""
+    _reload_with(monkeypatch)
+    with pytest.raises(ConfigError, match="OPENROUTER_API_KEY"):
+        config.require_openrouter_key()
+
+
+def test_env_example_names_the_openrouter_key():
+    """The template must expect an OpenRouter key, unambiguously."""
+    from pathlib import Path
+
+    lines = (Path(config.__file__).resolve().parents[1] / ".env.example"
+             ).read_text(encoding="utf-8").splitlines()
+    values = {
+        line.split("=", 1)[0].strip(): line.split("=", 1)[1].strip()
+        for line in lines
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+    }
+    assert "OPENROUTER_API_KEY" in values
+    assert "YOUR" in values["OPENROUTER_API_KEY"]
+    assert "sk-or-v1" in "\n".join(lines)

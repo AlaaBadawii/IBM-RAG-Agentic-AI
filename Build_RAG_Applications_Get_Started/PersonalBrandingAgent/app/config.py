@@ -176,8 +176,10 @@ def require_openrouter_key() -> str:
     """
     if not OPENROUTER_API_KEY:
         raise ConfigError(
-            "OpenRouter API key missing: set OPENAI_API_KEY (or "
-            "OPENROUTER_API_KEY) in .env. Only needed for multi-query "
-            "retrieval; all other strategies run fully local."
+            "OpenRouter API key missing: set OPENROUTER_API_KEY "
+            "(OPENAI_API_KEY is accepted as an alias) in .env with an "
+            "OpenRouter key (sk-or-v1-…). Needed for multi-query retrieval, "
+            "generation, verification judging, and Agent reasoning; all other "
+            "strategies run fully local."
         )
     return OPENROUTER_API_KEY
