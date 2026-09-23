@@ -5,8 +5,9 @@ IN PROGRESS. The autonomous system described in `PLAN.md` is implemented
 through Step 14: knowledge synchronization, branding context, generation,
 verification, bounded Agent reasoning, persistent publishing, notifications,
 workflows, and scheduling all exist as code under `app/`. The project is
-approaching its first public introduction (see Launch milestone below). No
-launch post has been published as of this writing.
+approaching its first public introduction (see Launch milestone below). One
+post has been published (2026-09-23, a certification post); the launch post
+itself has not.
 
 ## Identity
 - Name: **Abu Prompt**
@@ -73,11 +74,12 @@ Introducing the system itself — what it is, what it demonstrably does, and
 what it deliberately does not do yet — is a meaningful potential publishing
 opportunity the autonomous Agent may recognize from this context.
 
-This records an opportunity, not an outcome: **no launch post has been
-published as of this writing**, and nothing here instructs the Agent to
-publish. Whether any post goes out remains the Agent's decision under the
-normal flow above, subject to generation, verification, and publishing
-safeguards.
+This records an opportunity, not an outcome: **the launch post itself has not
+been published**, and nothing here instructs the Agent to publish. One post
+has gone out since this was written — the 2026-09-23 certification post above,
+published by a scheduled run. Whether any further post goes out remains the
+Agent's decision under the normal flow above, subject to generation,
+verification, and publishing safeguards.
 
 ## Planned, not implemented
 `@AbuPrompt` mention-triggered responses are **planned, not implemented**.

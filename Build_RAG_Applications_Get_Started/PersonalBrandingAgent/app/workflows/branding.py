@@ -63,13 +63,32 @@ __all__ = ["BRANDING_PHASES", "BrandingConfig", "main", "run_branding"]
 
 
 def _default_assemble(store: StateStore):
-    """The real context binding: retrieval, then the Step 4 assembler."""
-    from app.context import build_context
-    from app.retrieval.engine import RetrievalEngine
+    """The real context binding: retrieval, then the Step 4 assembler.
 
-    result = RetrievalEngine().retrieve(
+    The retrieval is **stratified by the corpus's own priority order**, not by
+    similarity to the query. :mod:`app.retrieval.strata` carries the evidence
+    and states plainly that this ordering is a deliberate policy override —
+    read it before changing anything here.
+
+    Two layers of narrowing, both necessary and neither sufficient alone:
+
+    * the corpus (:data:`app.retrieval.scope.CURATED`) — the synchronized
+      ``@source/*`` mirrors are 94% of the collection and, unscoped, take every
+      candidate slot a general-purpose query has to offer;
+    * the stratum — inside the curated corpus, certificates answer this query
+      better than projects do, measurably: their *median* document outranks the
+      best ``completed_projects`` document. Scoping alone returned five
+      certificates, no project, and not the file recording the very system the
+      Agent was deciding whether to announce.
+
+    The query is unchanged, and it is not a knob: three rewordings were
+    measured against the scoped corpus and none put the target in the top-5.
+    """
+    from app.context import build_context
+    from app.retrieval.strata import stratified_retrieve
+
+    result = stratified_retrieve(
         "recent professional work, projects, and achievements worth sharing",
-        strategy="hybrid",
     )
     return build_context(result, store)
 

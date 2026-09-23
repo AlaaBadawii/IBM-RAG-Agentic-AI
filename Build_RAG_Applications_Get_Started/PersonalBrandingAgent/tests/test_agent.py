@@ -1150,6 +1150,7 @@ def test_abu_prompt_evidence_text_reaches_the_reasoning_prompt(state_store):
     from app.paths import DATA_DIR
 
     documents = []
+    chunks_per_category: dict[str, int] = {}
     for relative, category in (
         ("public_positioning/abu_prompt.md", "public_positioning"),
         ("in_progress_projects/personal_branding_agent.md",
@@ -1160,12 +1161,24 @@ def test_abu_prompt_evidence_text_reaches_the_reasoning_prompt(state_store):
             pytest.skip("abu prompt corpus not present")
         text = clean_text(path.read_text(encoding="utf-8"))
         digest = content_hash(text)
-        for index, chunk in enumerate(chunk_document(text)):
+        chunks = chunk_document(text)
+        chunks_per_category[category] = (
+            chunks_per_category.get(category, 0) + len(chunks)
+        )
+        for index, chunk in enumerate(chunks):
             documents.append(doc(
                 relative, category=category,
                 chunk_id=f"{digest}:{index}", content=chunk.page_content,
             ))
-    assert len(documents) == 11
+
+    # The counts are read off the chunking rather than pinned to a literal. The
+    # corpus file is a living document — correcting one stale line in it moved
+    # this from 6 chunks to 7 and broke a hard-coded total — so what is asserted
+    # here is the *shape*: both files present, exactly one of them evidence.
+    assert set(chunks_per_category) == {
+        "public_positioning", "in_progress_projects",
+    }
+    evidence_chunks = chunks_per_category["in_progress_projects"]
 
     ctx = build_context(RetrievalResult(
         query="Abu Prompt", strategy="vector", documents=documents,
@@ -1177,10 +1190,11 @@ def test_abu_prompt_evidence_text_reaches_the_reasoning_prompt(state_store):
         history=read_publication_history(None),
     )).body()
 
-    # Six evidence labels (the in_progress_projects chunks); positioning
-    # stays guidance and takes no label.
-    assert "[E6]" in body
-    assert "[E7]" not in body
+    # Every evidence chunk is labelled, in order, and positioning stays
+    # guidance and takes no label — so the last label is exactly the evidence
+    # count and there is no next one.
+    assert f"[E{evidence_chunks}]" in body
+    assert f"[E{evidence_chunks + 1}]" not in body
     for phrase in ("Abu Prompt", "@AbuPrompt", "أبو برومبت"):
         assert phrase in body
     assert "planned, not implemented" in body
