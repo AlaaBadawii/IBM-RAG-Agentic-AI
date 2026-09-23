@@ -330,6 +330,55 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ON workflow_phases (run_id, started_at)",
         ),
     ),
+    Migration(
+        version=5,
+        description="record why a run published nothing, on the run itself",
+        statements=(
+            # The DO_NOT_PUBLISH reason (NoPublishReason value) used to live
+            # only in the in-memory WorkflowResult detail and in log lines —
+            # both gone when the process exits. Recording it on the run makes
+            # "why did this run publish nothing?" answerable by a query.
+            # Unconstrained TEXT, like workflow_runs.workflow: the vocabulary
+            # belongs to the agent layer, not to this store.
+            "ALTER TABLE workflow_runs ADD COLUMN no_publish_reason TEXT",
+        ),
+    ),
+    Migration(
+        version=6,
+        description="persisted schedule expectations and missed-window record "
+                    "for offline-gap recovery",
+        statements=(
+            # A laptop that is powered off misses scheduled ticks silently:
+            # cron never fires, so no run, row, or notification exists for
+            # the owed execution. These tables let the next invocation detect
+            # each missed tick and record the deterministic determination
+            # (eligible / expired / needs_review) instead of losing it.
+            """
+            CREATE TABLE schedule_policy (
+                workflow             TEXT PRIMARY KEY,
+                interval_seconds     INTEGER NOT NULL CHECK (interval_seconds > 0),
+                grace_seconds        INTEGER NOT NULL CHECK (grace_seconds >= 0),
+                expire_after_seconds INTEGER NOT NULL
+                                     CHECK (expire_after_seconds > grace_seconds),
+                updated_at           TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE missed_windows (
+                window_id       TEXT PRIMARY KEY,
+                workflow        TEXT NOT NULL,
+                expected_at     TEXT NOT NULL,
+                detected_at     TEXT NOT NULL,
+                determination   TEXT NOT NULL CHECK (determination IN (
+                                     'eligible', 'expired', 'needs_review')),
+                covering_run_id TEXT REFERENCES workflow_runs (run_id),
+                note            TEXT
+            )
+            """,
+            "CREATE INDEX ix_missed_windows_workflow "
+            "ON missed_windows (workflow, expected_at)",
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.
@@ -349,6 +398,8 @@ TABLES: tuple[str, ...] = (
     "locks",
     "linkedin_credential_expiry",
     "workflow_phases",
+    "schedule_policy",
+    "missed_windows",
 )
 
 

@@ -58,6 +58,10 @@ class WorkflowRun:
     finished_at: str | None = None
     outcome: RunOutcome | None = None
     failed_phase: str | None = None
+    no_publish_reason: str | None = None
+    """Why a DO_NOT_PUBLISH run published nothing (a NoPublishReason value).
+    Unconstrained prose to this layer — the vocabulary belongs to the agent —
+    and NULL for runs that published, failed, or predate the column."""
 
     @property
     def finished(self) -> bool:
@@ -74,6 +78,7 @@ class WorkflowRun:
             finished_at=row["finished_at"],
             outcome=RunOutcome(raw) if raw is not None else None,
             failed_phase=row["failed_phase"],
+            no_publish_reason=row["no_publish_reason"],
         )
 
 
@@ -121,6 +126,67 @@ class SourceLifecycleState:
             source_name=row["source_name"],
             lifecycle=LifecycleState(row["lifecycle"]),
             updated_at=row["updated_at"],
+            note=row["note"],
+        )
+
+
+@dataclass(frozen=True)
+class SchedulePolicy:
+    """One workflow's persisted schedule expectation.
+
+    The intervals mirror the cron triggers (branding every 8h, sync daily);
+    persisting them here — rather than parsing cron — is what makes a missed
+    tick detectable from state alone. ``grace_seconds`` absorbs trigger skew
+    and long runs; a tick older than ``expire_after_seconds`` is recorded as
+    lapsed rather than still owed.
+    """
+
+    workflow: str
+    interval_seconds: int
+    grace_seconds: int
+    expire_after_seconds: int
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "SchedulePolicy":
+        return cls(
+            workflow=row["workflow"],
+            interval_seconds=row["interval_seconds"],
+            grace_seconds=row["grace_seconds"],
+            expire_after_seconds=row["expire_after_seconds"],
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass(frozen=True)
+class MissedWindow:
+    """One scheduled tick with no run behind it, and what was decided.
+
+    ``eligible`` — the window is recent; the current run covers it.
+    ``expired`` — the window lapsed; the current run proceeds fresh and no
+    catch-up publication is owed (none exists by construction).
+    ``needs_review`` — a publication ambiguity is unresolved, so no publish
+    may go out until a person confirms; the existing pre-publish guard
+    enforces that, this row records why.
+    """
+
+    window_id: str
+    workflow: str
+    expected_at: str
+    detected_at: str
+    determination: str
+    covering_run_id: str | None = None
+    note: str | None = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "MissedWindow":
+        return cls(
+            window_id=row["window_id"],
+            workflow=row["workflow"],
+            expected_at=row["expected_at"],
+            detected_at=row["detected_at"],
+            determination=row["determination"],
+            covering_run_id=row["covering_run_id"],
             note=row["note"],
         )
 

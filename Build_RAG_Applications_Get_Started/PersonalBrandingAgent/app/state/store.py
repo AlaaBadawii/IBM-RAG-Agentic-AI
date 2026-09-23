@@ -67,11 +67,13 @@ from app.state.models import (
     EvidenceRef,
     Lock,
     LockAcquisition,
+    MissedWindow,
     Notification,
     OperationalFailure,
     Publication,
     PublicationRecord,
     PublishIntent,
+    SchedulePolicy,
     SourceLifecycleState,
     SyncCheckpoint,
     WorkflowPhase,
@@ -260,18 +262,23 @@ class StateStore:
         return self.get_run(new_id)  # type: ignore[return-value]
 
     def finish_run(self, run_id: str, outcome: RunOutcome | str,
-                   failed_phase: str | None = None) -> WorkflowRun:
+                   failed_phase: str | None = None,
+                   no_publish_reason: str | None = None) -> WorkflowRun:
         """Resolve a run to exactly one of the three outcomes.
 
         This is the only way a run acquires an outcome, so "how did this run
         end?" is answerable by a query and never has to be inferred from a
-        log line or an exit code at read time.
+        log line or an exit code at read time. ``no_publish_reason`` carries
+        a DO_NOT_PUBLISH run's reason (a NoPublishReason value) onto the row
+        itself; it stays NULL for every other outcome.
         """
         resolved = _coerce_enum(outcome, RunOutcome, "outcome")
         cursor = self._write(
             "UPDATE workflow_runs SET outcome = ?, finished_at = ?, "
-            "failed_phase = ? WHERE run_id = ? AND outcome IS NULL",
-            (resolved.value, utc_now_iso(), failed_phase, run_id),
+            "failed_phase = ?, no_publish_reason = ? "
+            "WHERE run_id = ? AND outcome IS NULL",
+            (resolved.value, utc_now_iso(), failed_phase, no_publish_reason,
+             run_id),
             f"finishing run {run_id}",
         )
         if cursor.rowcount == 0:
@@ -316,6 +323,97 @@ class StateStore:
             "ORDER BY started_at"
         )
         return [WorkflowRun.from_row(row) for row in rows]
+
+    def last_finished_run(self, workflow: Workflow | str) -> WorkflowRun | None:
+        """The most recently finished run of one workflow, if any.
+
+        Schedules are measured against finished runs: an unfinished run may
+        belong to a crashed invocation and must never read as coverage of an
+        owed tick.
+        """
+        name = workflow.value if isinstance(workflow, Workflow) else str(workflow)
+        rows = self._read(
+            "SELECT * FROM workflow_runs WHERE workflow = ? "
+            "AND outcome IS NOT NULL ORDER BY finished_at DESC, started_at "
+            "DESC, run_id DESC LIMIT 1",
+            (name,),
+        )
+        return WorkflowRun.from_row(rows[0]) if rows else None
+
+    # -- schedule expectations and missed ticks --------------------------------
+
+    def ensure_schedule_policy(self, workflow: Workflow | str, *,
+                               interval_seconds: int, grace_seconds: int,
+                               expire_after_seconds: int) -> SchedulePolicy:
+        """Seed one workflow's schedule expectation, once.
+
+        ``INSERT OR IGNORE``: the row is written by the first invocation that
+        needs it and never overwritten by later ones, so tuning the policy is
+        a deliberate operator edit rather than something every run re-decides.
+        """
+        name = workflow.value if isinstance(workflow, Workflow) else str(workflow)
+        self._write(
+            "INSERT OR IGNORE INTO schedule_policy (workflow, "
+            "interval_seconds, grace_seconds, expire_after_seconds, "
+            "updated_at) VALUES (?, ?, ?, ?, ?)",
+            (name, interval_seconds, grace_seconds, expire_after_seconds,
+             utc_now_iso()),
+            f"ensuring schedule policy for {name}",
+        )
+        policy = self.get_schedule_policy(name)
+        assert policy is not None
+        return policy
+
+    def get_schedule_policy(self, workflow: Workflow | str) -> SchedulePolicy | None:
+        """One workflow's persisted schedule expectation, if seeded."""
+        name = workflow.value if isinstance(workflow, Workflow) else str(workflow)
+        rows = self._read(
+            "SELECT * FROM schedule_policy WHERE workflow = ?", (name,)
+        )
+        return SchedulePolicy.from_row(rows[0]) if rows else None
+
+    def record_missed_window(self, workflow: Workflow | str, *,
+                             expected_at: str, determination: str,
+                             covering_run_id: str | None = None,
+                             note: str | None = None,
+                             window_id: str | None = None) -> MissedWindow:
+        """Record one owed tick and its determination, idempotently.
+
+        The window id is deterministic (workflow + expected tick), so a crash
+        between detection and the next finished run re-records the same ticks
+        without duplicating rows.
+        """
+        name = workflow.value if isinstance(workflow, Workflow) else str(workflow)
+        wid = window_id or f"{name}:{expected_at}"
+        self._write(
+            "INSERT OR IGNORE INTO missed_windows (window_id, workflow, "
+            "expected_at, detected_at, determination, covering_run_id, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (wid, name, expected_at, utc_now_iso(), determination,
+             covering_run_id, note),
+            f"recording missed window {wid}",
+        )
+        rows = self._read(
+            "SELECT * FROM missed_windows WHERE window_id = ?", (wid,)
+        )
+        return MissedWindow.from_row(rows[0])
+
+    def list_missed_windows(self, workflow: Workflow | str | None = None
+                            ) -> list[MissedWindow]:
+        """Missed ticks in expected order, optionally for one workflow."""
+        if workflow is None:
+            rows = self._read(
+                "SELECT * FROM missed_windows ORDER BY expected_at, window_id"
+            )
+        else:
+            name = (workflow.value if isinstance(workflow, Workflow)
+                    else str(workflow))
+            rows = self._read(
+                "SELECT * FROM missed_windows WHERE workflow = ? "
+                "ORDER BY expected_at, window_id",
+                (name,),
+            )
+        return [MissedWindow.from_row(row) for row in rows]
 
     # -- workflow phases -----------------------------------------------------
 
