@@ -1,42 +1,107 @@
-# Personal Branding Agent — RAG over personal data for LinkedIn
+# Personal Branding Agent — autonomous personal-branding system (Abu Prompt)
 
 ## Status
-IN PROGRESS — actively being built (this folder is the working repo). This is a
-course-project application of RAG from the IBM GenAI curriculum.
+IN PROGRESS. The autonomous system described in `PLAN.md` is implemented
+through Step 14: knowledge synchronization, branding context, generation,
+verification, bounded Agent reasoning, persistent publishing, notifications,
+workflows, and scheduling all exist as code under `app/`. The project is
+approaching its first public introduction (see Launch milestone below). No
+launch post has been published as of this writing.
 
-## What it aims to do
-An agent that uses **RAG over personal data** (from `data/` markdown) to generate
-authentic LinkedIn posts in the user's voice, then publishes them via the
-LinkedIn API, running as a Flask web app with a human-in-the-loop review step.
+## Identity
+- Name: **Abu Prompt**
+- Handle: **@AbuPrompt**
+- Arabic: **أبو برومبت**
 
-## Core loop (from PLAN.md)
-1. Ingest -> chunk + embed -> Chroma vector store
-2. Index -> retrieval on topic
-3. Retrieve relevant context
-4. Generate LinkedIn post (LLM via OpenRouter, user voice/style)
-5. Review (human-in-the-loop edit/approve)
-6. Publish (LinkedIn API; OAuth handled in `Auth_handling/`)
+This is the public identity of this system. Brand-facing detail lives in
+`../public_positioning/abu_prompt.md`; this file records the engineering
+facts.
 
-## Intended stack
-OpenRouter (free-tier Llama), sentence-transformers/all-MiniLM-L6-v2 embeddings,
-Chroma (local persistent), LangChain LCEL, Flask + vanilla HTML/JS, existing
-LinkedIn OAuth flow.
+## What it is
+A personal-branding automation system built around Alaa's own technical
+knowledge, projects, lessons, and evidence. It retrieves grounded personal
+context from the `data/` corpus, evaluates content opportunities, reasons
+about publish-worthiness, generates a candidate post, verifies it against
+evidence through deterministic gates, and publishes to LinkedIn only when
+every safeguard passes — otherwise it records `DO_NOT_PUBLISH`.
 
-## What exists so far
-- `data/` — the knowledge base (`completed_projects/`, `in_progress_projects/`,
-  `in_progress_courses/`, `certificates/`, `evidence/`, `vision_goals/`,
-  `writing_style/`, `stories_lessons/`) that will be the RAG corpus.
-- `config.py` — app config (API keys, model IDs, paths).
-- `Auth_handling/` — working LinkedIn OAuth (linkedin_oauth_setup.py,
-  linkedin_tokens.json, test_post.py).
-- `requirements.txt`, `.env`, `.gitignore`, `RAG_Lab.ipynb`.
+## What is actually implemented
+All of the following exist as code in this repository:
 
-## Not yet built (plan → pending)
-`ingest.py`, `retriever.py`, `generator.py`, `app.py`, `templates/index.html`,
-`prompts/linkedin_prompt.txt` — the RAG indexing/generation/publish pipeline is
-still to be built. PLAN.md lists these as pending steps.
+- grounded personal context (`app/context/` — assembly, evidence hierarchy,
+  coverage reporting, insufficient-evidence state)
+- content-opportunity evaluation (`app/agent/reasoning.py`,
+  `app/agent/prompt.py` — topic candidates from non-empty evidence sections)
+- bounded Agent reasoning (`app/agent/agent.py` — one `BrandingAgent` proposing
+  from retrieved evidence only; revision bound owned by verification)
+- grounded post generation (`app/generation/` — LCEL chain from assembled
+  context and selected evidence)
+- deterministic evidence verification (`app/verification/` — authoritative
+  gates plus advisory LLM assist; `revision_decision` owns PASS / REVISE /
+  REJECT with a bound)
+- safe/idempotent LinkedIn publishing (`app/publishing/` intent state machine
+  plus `app/integrations/linkedin/` classified transport; at most one
+  publication attempt per workflow run)
+- persistent workflow state (`app/state/` — SQLite: runs, checkpoints,
+  intents, publications, failures, notifications, locks)
+- scheduled 8-hour branding workflow (`app/workflows/branding.py`, triggered
+  by `ops/personal-branding-agent.cron` every 8 hours)
+- incremental knowledge synchronization (`app/sync/` over the `sources.yaml`
+  registry into the existing ingestion pipeline; checkpoints in the state
+  store)
+- failure notification and recovery safeguards (`app/notify/` SMTP service;
+  `WORKFLOW_FAILED` / `REQUIRES_HUMAN_INTERVENTION` persisted with exactly one
+  notification; overlap locks with stale-lock recovery)
+
+## Normal flow
+```text
+knowledge/context
+→ BrandingAgent
+→ generation
+→ verification
+→ publishing safeguards
+→ publish OR DO_NOT_PUBLISH
+```
+
+`DO_NOT_PUBLISH` is a successful workflow outcome, not a failure. No post is
+required on any run; the system prefers no post over weak, repetitive,
+unsupported, or low-value content.
+
+## Launch milestone
+The project is approaching its **first public introduction of Abu Prompt**.
+Introducing the system itself — what it is, what it demonstrably does, and
+what it deliberately does not do yet — is a meaningful potential publishing
+opportunity the autonomous Agent may recognize from this context.
+
+This records an opportunity, not an outcome: **no launch post has been
+published as of this writing**, and nothing here instructs the Agent to
+publish. Whether any post goes out remains the Agent's decision under the
+normal flow above, subject to generation, verification, and publishing
+safeguards.
+
+## Planned, not implemented
+`@AbuPrompt` mention-triggered responses are **planned, not implemented**.
+No comment monitoring, reply logic, or mention handling exists in the system.
+
+```text
+No @AbuPrompt mention
+→ ignore
+
+@AbuPrompt without a meaningful question/request
+→ ignore
+
+@AbuPrompt + meaningful question/request
+→ future system may consider responding
+```
+
+Any future response must use the same grounded-context → generation →
+verification safety chain, as a separate reactive workflow — never mixed into
+proactive publishing. See `PLAN.md` Step 14 and
+`../public_positioning/abu_prompt.md` for the positioning half of this plan.
 
 ## Provenance
-`/home/alaabadawii/LLMs/IBM/course-2/PersonalBrandingAgent/PLAN.md`
-`/home/alaabadawii/LLMs/IBM/course-2/PersonalBrandingAgent/requirements.txt`
-`/home/alaabadawii/LLMs/IBM/course-2/PersonalBrandingAgent/Auth_handling/`
+- `app/context/`, `app/agent/`, `app/generation/`, `app/verification/`
+- `app/publishing/`, `app/integrations/linkedin/`, `app/state/`
+- `app/workflows/branding.py`, `app/sync/`, `sources.yaml`
+- `app/notify/`, `ops/personal-branding-agent.cron`
+- `PLAN.md` Steps 0–14 (Step 14 names the `@AbuPrompt` future capability)
