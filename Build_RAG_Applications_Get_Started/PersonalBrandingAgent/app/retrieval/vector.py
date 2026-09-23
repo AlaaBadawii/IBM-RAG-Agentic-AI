@@ -27,17 +27,41 @@ logger = get_logger(__name__)
 class VectorRetriever:
     """Semantic similarity search over the ingested corpus."""
 
-    def __init__(self, store=None, embeddings=None):
+    def __init__(self, store=None, embeddings=None, scope=None):
         self._store = store
         # When a store is injected, its embedding function is authoritative
         # (tests inject a store whose embedding_function is FakeEmbeddings).
         self._embeddings = embeddings
+        # A restriction on which chunks this retriever may see at all. Held
+        # rather than passed per call, so every caller of this retriever —
+        # including the strategies that wrap it — inherits it.
+        self._scope = scope
+
+    @property
+    def scope(self):
+        """The corpus this retriever is restricted to, or ``None``."""
+        return self._scope
 
     @property
     def store(self):
         if self._store is None:
             self._store = get_vector_store()
         return self._store
+
+    def _effective_filter(self, filter: dict | None) -> dict | None:
+        """The caller's filter, narrowed by this retriever's scope.
+
+        The two are AND-ed rather than one replacing the other: a scope is a
+        statement about which corpus is being searched, and a caller's filter
+        is a statement about which documents within it are wanted. Dropping
+        either would answer a different question than the one asked — and
+        silently, since the results would still look plausible.
+        """
+        if self._scope is None or self._scope.where is None:
+            return filter
+        if filter is None:
+            return self._scope.where
+        return {"$and": [self._scope.where, filter]}
 
     def _embed_query(self, query: str) -> list[float]:
         if self._embeddings is not None:
@@ -57,14 +81,16 @@ class VectorRetriever:
             query: user question.
             top_k: number of results.
             filter: optional Chroma `where` filter (see metadata.py) —
-                used directly by the metadata-aware strategy.
+                used directly by the metadata-aware strategy. Combined with
+                this retriever's scope when it has one.
         """
         started = time.perf_counter()
+        effective_filter = self._effective_filter(filter)
         query_embedding = self._embed_query(query)
         response = self.store._collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
-            where=filter,
+            where=effective_filter,
             include=["documents", "metadatas", "distances"],
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
@@ -96,6 +122,8 @@ class VectorRetriever:
                 "latency_ms": round(elapsed_ms, 1),
                 "k_requested": top_k,
                 "filter": filter,
+                "scope": self._scope.name if self._scope is not None else None,
+                "effective_filter": effective_filter,
                 "score_semantics": "cosine distance (lower = more similar)",
             },
         )

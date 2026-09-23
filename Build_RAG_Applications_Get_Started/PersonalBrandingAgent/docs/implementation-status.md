@@ -2572,6 +2572,45 @@ properly needs a confirmation-attesting operation with its own audit design
 
 ---
 
+### 18. `openrouter/free` routes each call to a different model
+
+Discovered in Phase 4 while diagnosing why every real run failed
+`REASONING_FAILED`. `MODEL_ID=openrouter/free` is not a model but an
+auto-router, and it does not route consistently: eight consecutive judge
+calls were served by **eight distinct models** (`nex-agi/nex-n2.5-mini`,
+`inclusionai/ling-3.0-flash-fin`, `nvidia/nemotron-3-super-120b-a12b`,
+`poolside/laguna-xs-2.1`, `nvidia/nemotron-3-ultra-550b-a55b`,
+`liquid/lfm-2.5-2.6b`, …), and two byte-identical Agent requests at
+`temperature: 0.0` returned opposite decisions.
+
+Two consequences, both measured:
+
+* **`max_tokens` cannot be sized.** The cap must cover a reasoning model's
+  hidden reasoning *and* the JSON it emits, and the requirement moves with
+  whichever model answers. At 500 every Agent run truncated
+  (`finish_reason: "length"`, 605 reasoning tokens against a 500 cap, reply
+  ending mid-string). At 3000 the Agent parses, but the same value truncated
+  the judge: `nvidia/nemotron-3.5-lightning:free` spent 3,452 reasoning
+  tokens and emitted no JSON. At 4000 the judge parsed on 7 of 8 calls — and
+  the eighth did not truncate at all: `liquid/lfm-2.5-2.6b` answered inside
+  budget and its answer contained no verdicts, because the model was too
+  small to follow the schema. No cap fixes that, and no cap bounds a
+  requirement set by an unknown model.
+* **Step 10's reproducibility requirement holds only under a fake LLM.**
+  `temperature: 0.0` is not sufficient under a router, so "the same context
+  produces the same decision" is not true of production today.
+
+The failure mode is fail-closed — a degraded judge leaves the deterministic
+gates to decide, and an unparseable Agent answer is `DO_NOT_PUBLISH` with no
+draft — so this is a reliability defect, not a safety one. Both halves need
+the same fix: **pin the model**. Deferred, because choosing one is a cost
+decision rather than an implementation step. Raised budgets (Agent 3000,
+judge 4000) are mitigations that reduce how often an unlucky route is hit,
+and are documented as such at `app/agent/llm.py::AGENT_PARAMETERS` and
+`app/verification/judge.py::SUPPORT_JUDGE_PARAMETERS`.
+
+---
+
 ### 16. A recycled pid can make a stale lock look live
 
 Step 12 reclaims an expired lock only after its owner pid is shown to be

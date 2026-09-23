@@ -22,25 +22,40 @@ from app.retrieval.vector import VectorRetriever
 
 
 class RetrievalEngine:
-    """Single entry point for all retrieval strategies."""
+    """Single entry point for all retrieval strategies.
 
-    def __init__(self, store=None, llm=None, reranker=None):
+    ``scope`` restricts every strategy this engine runs to one corpus — see
+    :mod:`app.retrieval.scope`. It is set here rather than passed per call so
+    that a caller who asked for the curated corpus cannot get the mirrors
+    back by choosing a different strategy, and ``None`` means what every
+    existing caller already gets: the whole collection.
+    """
+
+    def __init__(self, store=None, llm=None, reranker=None, scope=None):
         """All collaborators are injectable for tests; production wiring
         happens lazily on first use."""
         self._store = store
         self._llm = llm
         self._reranker = reranker
+        self._scope = scope
         self._vector = None
         self._bm25 = None
 
+    @property
+    def scope(self):
+        """The corpus this engine is restricted to, or ``None`` for all of it."""
+        return self._scope
+
     def _get_vector(self) -> VectorRetriever:
         if self._vector is None:
-            self._vector = VectorRetriever(store=self._store)
+            self._vector = VectorRetriever(store=self._store, scope=self._scope)
         return self._vector
 
     def _get_bm25(self) -> BM25Retriever:
         if self._bm25 is None:
-            self._bm25 = BM25Retriever(store=self._get_vector().store)
+            self._bm25 = BM25Retriever(
+                store=self._get_vector().store, scope=self._scope
+            )
         return self._bm25
 
     def retrieve(self, query: str, strategy: str = "vector",
@@ -52,6 +67,7 @@ class RetrievalEngine:
             strategy: one of STRATEGIES.
             top_k: number of documents to return.
             filters: metadata filters (only used by the 'metadata' strategy).
+                Combined with, never substituted for, this engine's scope.
         """
         if strategy not in STRATEGIES:
             raise RetrievalError(

@@ -63,9 +63,35 @@ JUDGE_PROMPT_VERSION = "support-judge-v1"
 
 SUPPORT_JUDGE_PARAMETERS: Mapping[str, Any] = {
     # A judge is asked for a boolean and a sentence per claim; a long answer
-    # is a sign it is doing something else. Zero temperature because the same
-    # draft and the same evidence should not produce two different gates.
-    "max_tokens": 600,
+    # is a sign it is doing something else.
+    #
+    # Same arithmetic as ``app.agent.llm.AGENT_PARAMETERS``: the cap covers the
+    # model's hidden reasoning as well as the JSON it finally emits. At 600 the
+    # judge was truncated on every run, which surfaced only as
+    # ``degraded: True`` with "the support judge did not answer with JSON" —
+    # because the advisory layer is *allowed* to degrade, that failure was
+    # silent by design while the deterministic gates still owned the outcome.
+    #
+    # 4000, not the Agent's 3000: measured against the live provider, 3000 was
+    # still truncated. The router served ``nvidia/nemotron-3.5-lightning:free``
+    # for that call, which spent 3452 reasoning tokens against the 3000 cap and
+    # emitted no JSON at all (``finish_reason: "length"``). At 4000 the same
+    # request parsed on 7 of 8 consecutive calls.
+    #
+    # That 7-of-8 is the honest number, and it is why this value is a
+    # mitigation rather than a fix. The eighth call did **not** truncate — it
+    # answered within budget and the answer contained no verdicts, because the
+    # router had served ``liquid/lfm-2.5-2.6b:free``, a model too small to
+    # follow the schema. Eight consecutive calls were served by eight
+    # *different* models. No fixed cap bounds a requirement that moves with an
+    # unknown model, and no cap fixes a model that cannot follow the
+    # instruction; both need the model pinned. Until then a degraded judgement
+    # is possible on any run, and the deterministic gates remain the only ones
+    # allowed to decide the outcome.
+    #
+    # Zero temperature because the same draft and the same evidence should not
+    # produce two different gates.
+    "max_tokens": 4000,
     "temperature": 0.0,
 }
 

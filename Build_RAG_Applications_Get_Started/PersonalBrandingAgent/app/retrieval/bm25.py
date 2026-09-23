@@ -13,7 +13,10 @@ Why BM25 exists alongside vector search:
 
 BM25 here runs over the SAME chunks stored in Chroma (fetched once via
 Chroma.get), so vector and BM25 are always comparing the same universe of
-documents — that's what makes RRF fusion meaningful.
+documents — that's what makes RRF fusion meaningful. A retriever given a
+:class:`~app.retrieval.scope.CorpusScope` indexes only that scope, so the
+same statement holds for the scoped universe; see ``scope.py`` for why the
+scope is applied here rather than to the results.
 
 Score semantics: BM25 scores are unbounded positive numbers (higher =
 better) and are NOT comparable to cosine distances or cross-encoder
@@ -59,9 +62,21 @@ def tokenize(text: str) -> list[str]:
 class BM25Retriever:
     """BM25 over the ingested corpus chunks."""
 
-    def __init__(self, store=None):
+    def __init__(self, store=None, scope=None):
         self._store = store
+        # A scope is applied when the index is BUILT, not when it is queried.
+        # BM25's scores are relative to the document set it was fitted on —
+        # IDF, average document length — so filtering results out afterwards
+        # would leave every score computed against a corpus that includes the
+        # documents the caller asked not to see. Scoping the index is also
+        # what makes the exclusion total: a mirror chunk that is not in the
+        # index cannot occupy a candidate slot at any rank.
+        self._scope = scope
         self._bm25 = None
+        self._built = False
+        self._chunk_ids: list[str] = []
+        self._docs: list[str] = []
+        self._metas: list[dict] = []
 
     @property
     def store(self):
@@ -69,21 +84,47 @@ class BM25Retriever:
             self._store = VectorRetriever().store
         return self._store
 
+    @property
+    def scope(self):
+        """The corpus this index was built over, or ``None`` for all of it."""
+        return self._scope
+
     def _build_index(self):
-        """Fetch all chunks from Chroma and index them with BM25."""
+        """Fetch chunks from Chroma, keep the ones in scope, and index them."""
         result = self.store.get(include=["documents", "metadatas"])
-        self._chunk_ids = list(result["ids"])
-        self._docs = list(result["documents"])
-        self._metas = [m or {} for m in result["metadatas"]]
-        self._tokens = [tokenize(doc) for doc in self._docs]
-        self._bm25 = BM25Okapi(self._tokens)
-        logger.info("BM25 index built over %d chunks", len(self._docs))
+        chunk_ids = list(result["ids"])
+        docs = list(result["documents"])
+        metas = [m or {} for m in result["metadatas"]]
+
+        if self._scope is not None:
+            keep = [i for i, meta in enumerate(metas)
+                    if self._scope.includes(meta)]
+            chunk_ids = [chunk_ids[i] for i in keep]
+            docs = [docs[i] for i in keep]
+            metas = [metas[i] for i in keep]
+
+        self._chunk_ids = chunk_ids
+        self._docs = docs
+        self._metas = metas
+        self._tokens = [tokenize(doc) for doc in docs]
+        # An empty scope is a real answer — a corpus that holds nothing the
+        # caller may see — not a reason to fall back to the unscoped index.
+        # BM25Okapi cannot be fitted on an empty document set, so the index
+        # stays None and `retrieve` returns nothing rather than everything.
+        self._bm25 = BM25Okapi(self._tokens) if self._tokens else None
+        self._built = True
+        logger.info(
+            "BM25 index built over %d chunks%s",
+            len(self._docs),
+            f" (scope={self._scope.name})" if self._scope is not None else "",
+        )
 
     def retrieve(self, query: str, top_k: int = TOP_K) -> RetrievalResult:
         started = time.perf_counter()
-        if self._bm25 is None:  # never built (or invalidate() was called)
+        if not self._built:  # never built (or invalidate() was called)
             self._build_index()
-        scores = self._bm25.get_scores(tokenize(query))
+        scores = (self._bm25.get_scores(tokenize(query))
+                  if self._bm25 is not None else [0.0] * len(self._docs))
         elapsed_ms = (time.perf_counter() - started) * 1000
 
         # NOTE: BM25 scores can be NEGATIVE for terms that appear in (nearly)
@@ -113,21 +154,24 @@ class BM25Retriever:
             diagnostics={
                 "latency_ms": round(elapsed_ms, 1),
                 "corpus_chunks": len(self._docs),
-                "chunks_with_nonzero_score": int((scores > 0).sum()),
+                "scope": self._scope.name if self._scope is not None else None,
+                "chunks_with_nonzero_score": sum(1 for s in scores if s > 0),
                 "score_semantics": "BM25 lexical score (higher = better, unbounded)",
             },
         )
 
     def invalidate(self) -> None:
         """Force index rebuild on next retrieve (after re-ingestion)."""
-        self._index = None
         self._bm25 = None
+        self._built = False
 
     # Exposed for hybrid retrieval: full scored ranking, no top_k cut.
     def rank_all(self, query: str) -> list[tuple[float, int]]:
         """Return (score, corpus_index) for every chunk with score > 0,
         best first — used by fusion to build the BM25 ranking list."""
-        if self._bm25 is None:
+        if not self._built:
             self._build_index()
+        if self._bm25 is None:
+            return []
         scores = self._bm25.get_scores(tokenize(query))
         return _rank_scores(scores)

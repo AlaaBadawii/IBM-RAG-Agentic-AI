@@ -36,11 +36,29 @@ logger = get_logger(__name__)
 AGENT_PARAMETERS: Mapping[str, Any] = {
     # A decision, a short angle and a list of labels. A long answer is a sign
     # the model is writing the post instead of choosing what to write about.
+    #
+    # The cap is not a length limit on the answer, though. A reasoning model
+    # spends output tokens on hidden reasoning *before* it emits the JSON, and
+    # this budget covers both. At 500 the configured model was cut off inside
+    # the object — ``finish_reason: "length"``, 605 reasoning tokens against a
+    # 500 cap, the reply ending mid-string — so ``parse_reasoning_answer``
+    # found no JSON and every run ended ``REASONING_FAILED`` with no draft and
+    # no decision. 3000 leaves room for the reasoning plus the ~120-token
+    # answer. A truncation presents as ``finish_reason: "length"`` and "did
+    # not answer with JSON", never as a short answer, so raise this whenever
+    # the configured model changes.
+    #
     # Zero temperature because the same context should not produce two
     # different decisions, and ``PLAN.md`` Step 10 requires the decision to be
     # reproducible under a fake LLM and traceable to a prompt version under a
-    # real one.
-    "max_tokens": 500,
+    # real one. Temperature is not sufficient for that on its own: a routing
+    # provider such as ``openrouter/free`` can return opposite decisions for
+    # byte-identical requests at 0.0, and it serves a *different model* to
+    # each call — eight consecutive judge calls were served by eight distinct
+    # models. Both the reproducibility gap and the token budget are therefore
+    # properties of the routing provider rather than of this constant, and
+    # neither is closed until the model is pinned.
+    "max_tokens": 3000,
     "temperature": 0.0,
 }
 

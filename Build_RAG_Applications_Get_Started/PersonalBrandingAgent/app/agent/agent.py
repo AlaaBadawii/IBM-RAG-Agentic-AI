@@ -121,7 +121,7 @@ class BrandingAgent:
         verifier,
         *,
         history: PublicationHistoryReader | None = None,
-        strategies: Sequence[str] = (),
+        strategies: Sequence[str] = ("vector", "bm25", "hybrid"),
         revision_limit: int = MAX_REVISION_ATTEMPTS,
         history_limit: int = DEFAULT_DIGEST_LIMIT,
         prompt_version: str = AGENT_PROMPT_VERSION,
@@ -144,11 +144,22 @@ class BrandingAgent:
                 run has — never an error, and never a reason to refuse to
                 publish the first post.
             strategies: the retrieval vocabulary the reasoner may choose from
-                for a fresh pass at the chosen topic. Empty means *no choice to
-                make*, and the proposal keeps the strategy the context was
-                assembled with — which is a real strategy that really produced
-                this evidence, rather than a default invented here. See
-                :meth:`propose` for why choosing one is this step's at all.
+                for a fresh pass at the chosen topic. The default is the three
+                strategies that run locally with no further collaborator —
+                ``vector``, ``bm25`` and ``hybrid``; ``app.retrieval.models``
+                also has ``metadata``, ``multi_query`` and ``reranked``, which
+                are left out by default because they need a filter, an LLM or a
+                cross-encoder respectively. This must not be empty while the
+                answer schema asks for ``"<a listed retrieval strategy>"``:
+                :func:`~app.agent.prompt.build_reasoning_prompt` renders no
+                RETRIEVAL STRATEGIES block for an empty tuple, so the model is
+                asked to name one of nothing and every answer it can give is
+                refused by :meth:`_proposal_from`. Empty is still accepted, and
+                still means *no choice to make* — the proposal then keeps the
+                strategy the context was assembled with, which is a real
+                strategy that really produced this evidence rather than a
+                default invented here. See :meth:`propose` for why choosing one
+                is this step's at all.
             revision_limit: how many times a revisable draft may be rewritten
                 before the run ends. Injectable so a caller with a different
                 budget does not have to reimplement the stopping rule; passed

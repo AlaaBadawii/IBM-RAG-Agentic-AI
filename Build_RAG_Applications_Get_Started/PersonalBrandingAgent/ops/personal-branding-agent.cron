@@ -25,7 +25,7 @@
 # (`|| true`, `; exit 0`) may be added here — a scheduled failure must stay
 # visible outside the application.
 
-PROJECT_ROOT=/srv/PersonalBrandingAgent
+PROJECT_ROOT=/home/alaabadawii/LLMs/IBM/Build_RAG_Applications_Get_Started/PersonalBrandingAgent
 
 # Branding pipeline, every 8 hours (00:00, 08:00, 16:00).
 0 */8 * * * cd "$PROJECT_ROOT" && .venv/bin/python -m app.workflows.branding >> "$PROJECT_ROOT/logs/branding-cron.log" 2>&1

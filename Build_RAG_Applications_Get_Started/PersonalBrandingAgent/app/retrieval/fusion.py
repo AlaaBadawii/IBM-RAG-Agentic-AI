@@ -45,7 +45,14 @@ class HybridRetriever:
     def __init__(self, vector_retriever: VectorRetriever | None = None,
                  bm25_retriever: BM25Retriever | None = None):
         self._vector = vector_retriever or VectorRetriever()
-        self._bm25 = bm25_retriever or BM25Retriever(store=self._vector.store)
+        # The BM25 half inherits the vector half's scope. RRF compares
+        # *rankings*, so if the two halves searched different corpora the
+        # ranks would not be commensurable and the fusion would be
+        # meaningless — a document could rank first among a corpus the other
+        # half never saw.
+        self._bm25 = bm25_retriever or BM25Retriever(
+            store=self._vector.store, scope=self._vector.scope
+        )
 
     def retrieve(self, query: str, top_k: int = TOP_K,
                  candidates_per_strategy: int = HYBRID_CANDIDATES) -> RetrievalResult:

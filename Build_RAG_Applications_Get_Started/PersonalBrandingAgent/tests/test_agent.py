@@ -666,9 +666,44 @@ def test_without_a_strategy_vocabulary_the_contexts_own_strategy_is_kept():
     is a real one that really found this evidence, not one invented here."""
     ctx = evidence_context()
 
-    result = agent(FakeReasoner(proposal_answer())).propose(ctx)
+    result = agent(FakeReasoner(proposal_answer()),
+                   strategies=()).propose(ctx)
 
     assert result.strategy == ctx.strategy == "vector"
+
+
+def test_the_agent_offers_a_retrieval_vocabulary_by_default():
+    """The default must not be empty while the answer schema asks the reasoner
+    to name a listed strategy.
+
+    An empty vocabulary renders no RETRIEVAL STRATEGIES block, so the model is
+    asked to name one of nothing and *every* answer it can give is refused —
+    the run ends at INVALID_PROPOSAL with no draft. That is what production
+    did, and it is invisible to a test suite whose every agent is built with an
+    explicit vocabulary.
+    """
+    ctx = evidence_context()
+
+    for strategy in ("vector", "bm25", "hybrid"):
+        proposal = agent(FakeReasoner(proposal_answer(strategy=strategy))).propose(ctx)
+
+        assert isinstance(proposal, AgentProposal)
+        assert proposal.strategy == strategy
+
+
+def test_the_default_vocabulary_is_the_one_the_prompt_lists():
+    """The vocabulary offered and the vocabulary the prompt names are the same
+    set — the mismatch between them is what refused the model's answer."""
+    from app.agent.prompt import build_reasoning_prompt
+
+    reasoner = FakeReasoner()
+    agent(reasoner).propose(evidence_context())
+
+    rendered = build_reasoning_prompt(reasoner.requests[0]).render()
+
+    assert "RETRIEVAL STRATEGIES" in rendered
+    for strategy in ("vector", "bm25", "hybrid"):
+        assert f"- {strategy}" in rendered
 
 
 def test_topics_are_the_contexts_own_non_empty_evidence_sections():
