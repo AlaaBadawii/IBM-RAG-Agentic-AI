@@ -8,10 +8,15 @@ from pathlib import Path
 import pytest
 from langchain_chroma import Chroma
 
+from app.errors import IngestionError
 from app.ingestion.chunker import chunk_document, chunk_id, clean_text, content_hash
 from app.ingestion.loader import SourceFile, discover_markdown
 from app.ingestion.metadata import DocumentMetadata, extract_metadata
-from app.ingestion.pipeline import run_ingestion
+from app.ingestion.pipeline import (
+    _batched_add_documents,
+    _max_batch_size,
+    run_ingestion,
+)
 
 
 # ---------------------------------------------------------------- loader ---
@@ -283,7 +288,7 @@ def test_pipeline_skips_zero_byte_file_without_failing(tmp_path, fake_embeddings
 def test_pipeline_skips_whitespace_only_file_without_failing(tmp_path,
                                                              fake_embeddings,
                                                              monkeypatch):
-    """Whitespace-only content cleans to ``"\\n"``, which also chunks to zero."""
+    """Whitespace-only content cleans to ``"\n"``, which also chunks to zero."""
     data = _make_kb(tmp_path)
     (data / "evidence" / "backend" / "blank.md").write_text("   \n  \n\t\n")
     store = _store_for(tmp_path, fake_embeddings)
@@ -296,3 +301,128 @@ def test_pipeline_skips_whitespace_only_file_without_failing(tmp_path,
     assert stats["total_chunks_in_store"] > 0
     assert all(documents and ids for documents, ids in writes)
     assert store.get(where={"source": "evidence/backend/blank.md"})["ids"] == []
+
+
+# ------------------------------------------------- oversized write batches ---
+
+def _long_text(words: int = 2000) -> str:
+    return " ".join(f"word{i}" for i in range(words))
+
+
+def test_max_batch_size_is_read_from_the_backend(tmp_path, fake_embeddings):
+    """The limit tracks the Chroma client; a store naming none gets None."""
+    from types import SimpleNamespace
+
+    assert _max_batch_size(_store_for(tmp_path, fake_embeddings)) > 0
+    assert _max_batch_size(SimpleNamespace()) is None
+
+
+def test_small_batches_still_use_one_write(tmp_path, fake_embeddings, monkeypatch):
+    data = _make_kb(tmp_path)
+    store = _store_for(tmp_path, fake_embeddings)
+    writes = _watch_add_documents(monkeypatch, store)
+
+    stats = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    assert stats["files_added"] == 2
+    assert len(writes) == stats["files_added"]
+    limit = _max_batch_size(store)
+    assert all(len(documents) <= limit for documents, _ in writes)
+
+
+def test_oversized_file_is_split_into_valid_batches(tmp_path, fake_embeddings,
+                                                    monkeypatch):
+    """A file with more chunks than the backend accepts takes several writes."""
+    from langchain_core.documents import Document
+
+    monkeypatch.setattr(
+        "app.ingestion.pipeline._max_batch_size", lambda store: 3
+    )
+    data = tmp_path / "data"
+    (data / "evidence").mkdir(parents=True)
+    text = _long_text()
+    (data / "evidence" / "long.md").write_text(text)
+    store = _store_for(tmp_path, fake_embeddings)
+    writes = _watch_add_documents(monkeypatch, store)
+
+    stats = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    expected = len(chunk_document(clean_text(text)))
+    assert expected > 3
+    assert stats["files_added"] == 1
+    assert stats["chunks_added"] == expected
+    assert len(writes) > 1
+    assert all(len(documents) <= 3 for documents, _ in writes)
+    # Ordering and content-addressed IDs survive the split.
+    doc_hash = content_hash(clean_text(text))
+    assert [i for _, ids in writes for i in ids] == [
+        chunk_id(doc_hash, i) for i in range(expected)
+    ]
+    assert [doc.page_content for docs, _ in writes for doc in docs] == [
+        c.page_content for c in chunk_document(clean_text(text))
+    ]
+    assert stats["total_chunks_in_store"] == expected
+
+
+def test_real_shaped_oversized_batch_splits_correctly(tmp_path, fake_embeddings,
+                                                       monkeypatch):
+    """17,414 documents (the primer-dataset.json shape) split per the limit."""
+    from langchain_core.documents import Document
+
+    store = _store_for(tmp_path, fake_embeddings)
+    limit = _max_batch_size(store)
+    assert limit and 0 < limit < 17414
+
+    seen = []
+
+    def record(documents, ids=None, **kwargs):
+        seen.append((list(documents), list(ids or [])))
+
+    monkeypatch.setattr(store, "add_documents", record)
+    documents = [Document(page_content=f"chunk {i}") for i in range(17414)]
+    ids = [f"id:{i}" for i in range(17414)]
+    _batched_add_documents(store, documents, ids)
+
+    full, rest = divmod(17414, limit)
+    assert [len(documents) for documents, _ in seen] == (
+        [limit] * full + ([rest] if rest else [])
+    )
+    assert [i for _, batch_ids in seen for i in batch_ids] == ids
+    assert [d.page_content for docs, _ in seen for d in docs] == [
+        f"chunk {i}" for i in range(17414)
+    ]
+
+
+def test_later_batch_failure_keeps_failure_semantics_and_converges(
+    tmp_path, fake_embeddings, monkeypatch
+):
+    """Batch 2 of 3 fails: IngestionError out, partial prefix stays, retry heals."""
+    monkeypatch.setattr(
+        "app.ingestion.pipeline._max_batch_size", lambda store: 2
+    )
+    data = tmp_path / "data"
+    (data / "evidence").mkdir(parents=True)
+    (data / "evidence" / "long.md").write_text(_long_text())
+    store = _store_for(tmp_path, fake_embeddings)
+
+    original = store.add_documents
+    calls = []
+
+    def flaky(documents, ids=None, **kwargs):
+        calls.append((list(documents), list(ids or [])))
+        if len(calls) == 2:
+            raise RuntimeError("boom in batch two")
+        return original(documents, ids=ids, **kwargs)
+
+    monkeypatch.setattr(store, "add_documents", flaky)
+    with pytest.raises(IngestionError, match="boom in batch two"):
+        run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+    # The first batch's prefix remains; nothing beyond it was written.
+    assert store._collection.count() == 2
+
+    monkeypatch.setattr(store, "add_documents", original)
+    stats = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    assert stats["files_updated"] == 1
+    assert stats["total_chunks_in_store"] == stats["chunks_updated"]
+    assert store._collection.count() == stats["chunks_updated"] > 2

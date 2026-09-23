@@ -164,6 +164,51 @@ def _resolve_store(embeddings, store) -> Chroma:
     return store or get_vector_store(embeddings or get_embeddings())
 
 
+def _max_batch_size(store) -> int | None:
+    """The backend's max write batch, or None when the store names none.
+
+    Read from the Chroma client itself — ``get_max_batch_size`` on current
+    versions, the ``max_batch_size`` attribute on older ones (the same two
+    probes ``langchain_chroma`` uses) — so the limit tracks the backend
+    instead of a number copied into this file. A store that names no limit
+    (test fakes) takes the single write it always did.
+    """
+    client = getattr(store, "_client", None)
+    if client is None:
+        return None
+    getter = getattr(client, "get_max_batch_size", None)
+    if callable(getter):
+        try:
+            limit = int(getter())
+        except Exception:
+            return None
+        return limit if limit > 0 else None
+    legacy = getattr(client, "max_batch_size", None)
+    try:
+        limit = int(legacy) if legacy is not None else None
+    except (TypeError, ValueError):
+        return None
+    return limit if limit and limit > 0 else None
+
+
+def _batched_add_documents(store, documents, ids) -> None:
+    """Write one file's chunks without exceeding the backend's batch limit.
+
+    Slices are sequential, so document/ID ordering, content addressing, and
+    the per-file statistics counted by the caller are unchanged however many
+    writes one file takes. Never issues an empty write.
+    """
+    if not documents:
+        return
+    limit = _max_batch_size(store)
+    if limit is None or len(documents) <= limit:
+        store.add_documents(documents, ids=ids)
+        return
+    for start in range(0, len(documents), limit):
+        batch = documents[start:start + limit]
+        store.add_documents(batch, ids=ids[start:start + limit])
+
+
 def _index_documents(store: Chroma, loaded, stored: dict, stats: dict, *,
                      owned: dict[str, str] | None = None) -> set[str]:
     """Index loaded documents. The single place content reaches Chroma.
@@ -185,10 +230,6 @@ def _index_documents(store: Chroma, loaded, stored: dict, stats: dict, *,
         existing_ids = stored.get(source.relative_path, [])
         existing_hash = _hash_of_existing(store, existing_ids)
 
-        if existing_ids and existing_hash == doc_hash:
-            stats["files_unchanged"] += 1
-            continue
-
         chunks = chunk_document(text)
         if not chunks:
             # An empty or whitespace-only file cleans to text the splitter
@@ -209,7 +250,32 @@ def _index_documents(store: Chroma, loaded, stored: dict, stats: dict, *,
         ]
         ids = [chunk_id(doc_hash, i) for i in range(len(chunk_documents))]
 
-        if owned is not None and ids and ids[0] in owned:
+        if (
+            existing_ids
+            and existing_hash == doc_hash
+            # A failed batched write can leave a prefix of a file's chunks
+            # behind (batches run in order, so the first chunk is the one
+            # most likely present). The hash alone would then read
+            # "unchanged" and the missing tail would never be written, so
+            # coverage of the deterministic id set is part of "unchanged" —
+            # a partial file falls through to the delete-then-add path below
+            # and converges on retry.
+            and set(existing_ids) >= set(ids)
+        ):
+            stats["files_unchanged"] += 1
+            continue
+
+        if (
+            owned is not None
+            and ids
+            and ids[0] in owned
+            # ...except when the owner is the file itself: that is the trace
+            # of its own interrupted batched write (see above), not a second
+            # file with identical content, and skipping it would record a
+            # partial index as a success. A genuinely duplicate file is still
+            # skipped — its owner is a different key.
+            and owned[ids[0]] != source.relative_path
+        ):
             # Two admitted files with identical cleaned text share one content
             # address, and Chroma's key space cannot hold both. The first in
             # path order keeps it; the second is skipped and *reported*, because
@@ -237,7 +303,7 @@ def _index_documents(store: Chroma, loaded, stored: dict, stats: dict, *,
         else:
             stats["files_added"] += 1
             stats["chunks_added"] += len(chunk_documents)
-        store.add_documents(chunk_documents, ids=ids)
+        _batched_add_documents(store, chunk_documents, ids)
         if owned is not None:
             for new_id in ids:
                 owned[new_id] = source.relative_path
