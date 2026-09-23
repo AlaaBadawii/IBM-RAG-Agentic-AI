@@ -123,6 +123,14 @@ class EvidenceOption:
     evidence_state: str | None
     section: str
     category: str = ""
+    content: str = ""
+    """The chunk exactly as stored. The reasoner judges publish-worthiness
+    from substance, not from metadata alone: shown only a source path and an
+    evidence state, it cannot tell "no evidence" from "evidence with no
+    declared state"."""
+    content_hash: str = ""
+    """The chunk's content hash, so a decision stays attributable to the exact
+    bytes it rested on."""
 
     @property
     def identity(self) -> tuple[str, str]:

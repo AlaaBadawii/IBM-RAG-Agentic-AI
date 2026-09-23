@@ -43,6 +43,7 @@ from app.agent import (
     parse_reasoning_answer,
     topic_candidates,
 )
+from app.agent.models import HistoryDigest
 from app.agent.history import read_publication_history
 from app.context.builder import build_context
 from app.context.enums import EvidenceStatus
@@ -1025,6 +1026,129 @@ def test_the_prompt_separates_the_opportunities_from_the_evidence():
     assert "OPPORTUNITIES" in prompt.body()
     assert "EVIDENCE" in prompt.body()
     assert prompt.messages()[0]["role"] == "system"
+
+
+# --------------------------------------- evidence text in the prompt ---
+
+def _prompt_body(state_store, documents, history=None):
+    """A reasoning prompt body over hand-built documents and a temp store."""
+    ctx = build_context(RetrievalResult(
+        query="a topic", strategy="vector", documents=list(documents),
+        diagnostics={},
+    ), state_store)
+    return build_reasoning_prompt(ReasoningRequest(
+        context=ctx, topics=topic_candidates(ctx),
+        evidence=evidence_options(ctx),
+        history=history if history is not None
+        else read_publication_history(None),
+    )).body()
+
+
+def test_reasoning_prompt_carries_evidence_text_with_attribution(state_store):
+    """The diagnosed bug: the reasoner saw metadata but not substance.
+
+    A model shown only source paths and evidence states cannot tell "no
+    evidence" from "evidence with no declared state" — the exact confusion
+    observed live. The text, source path, and content hash must all travel
+    with each label, exactly once each.
+    """
+    body = _prompt_body(state_store, [
+        doc("evidence/backend/fastapi.md", category="evidence",
+            chunk_id="a1b2c3:0", content=EVIDENCE_TEXT,
+            evidence_state="VERIFIED"),
+        doc("projects/portfolio.md", category="completed_projects",
+            chunk_id="b2c3d4:0", content=OTHER_EVIDENCE_TEXT,
+            evidence_state="DOCUMENTED"),
+    ])
+    assert EVIDENCE_TEXT in body
+    assert OTHER_EVIDENCE_TEXT in body
+    assert "evidence/backend/fastapi.md" in body
+    assert "projects/portfolio.md" in body
+    assert "a1b2c3" in body
+    assert "b2c3d4" in body
+    assert body.count("a1b2c3:0") == 1
+    assert body.count("b2c3d4:0") == 1
+
+
+def test_reasoning_prompt_keeps_guidance_text_out_of_the_evidence(state_store):
+    """Evidence and guidance stay separated: style/positioning text must not
+    become something the model can cite, even though it shapes the post."""
+    body = _prompt_body(state_store, [
+        doc("evidence/backend/fastapi.md", category="evidence",
+            chunk_id="a1b2c3:0", content=EVIDENCE_TEXT,
+            evidence_state="VERIFIED"),
+        doc("writing_style/alaa_writing_style.md", category="writing_style",
+            document_type="writing_style", chunk_id="d4e5f6:1",
+            content=STYLE_TEXT),
+        doc("public_positioning/portfolio.md", category="public_positioning",
+            document_type="positioning", chunk_id="d4e5f6:0",
+            content=POSITIONING_TEXT),
+    ])
+    assert EVIDENCE_TEXT in body
+    assert STYLE_TEXT not in body
+    assert POSITIONING_TEXT not in body
+
+
+def test_published_post_text_never_enters_the_reasoning_prompt(state_store):
+    """History travels as counts and ids, never as post text: a generated
+    post must never become evidence for the next decision."""
+    digest = HistoryDigest(topics=(UsageCount(
+        value="evidence", uses=2, last_used_at="2026-01-01T00:00:00Z",
+        publication_ids=("pub-1",),
+    ),))
+    body = _prompt_body(state_store, [
+        doc("evidence/backend/fastapi.md", category="evidence",
+            chunk_id="a1b2c3:0", content=EVIDENCE_TEXT,
+            evidence_state="VERIFIED"),
+    ], history=digest)
+    assert "Recently covered topics: evidence (2)" in body
+    assert PASSING_POST not in body
+    assert EVIDENCE_TEXT in body
+
+
+def test_abu_prompt_evidence_text_reaches_the_reasoning_prompt(state_store):
+    """End of the diagnosed chain on real corpus files: chunked with the
+    production chunker, assembled through the production context builder,
+    the prompt carries the substantive Abu Prompt content — identity,
+    capabilities, and the planned/implemented distinction."""
+    from app.ingestion.chunker import chunk_document, clean_text, content_hash
+    from app.paths import DATA_DIR
+
+    documents = []
+    for relative, category in (
+        ("public_positioning/abu_prompt.md", "public_positioning"),
+        ("in_progress_projects/personal_branding_agent.md",
+         "in_progress_projects"),
+    ):
+        path = DATA_DIR / relative
+        if not path.exists():
+            pytest.skip("abu prompt corpus not present")
+        text = clean_text(path.read_text(encoding="utf-8"))
+        digest = content_hash(text)
+        for index, chunk in enumerate(chunk_document(text)):
+            documents.append(doc(
+                relative, category=category,
+                chunk_id=f"{digest}:{index}", content=chunk.page_content,
+            ))
+    assert len(documents) == 11
+
+    ctx = build_context(RetrievalResult(
+        query="Abu Prompt", strategy="vector", documents=documents,
+        diagnostics={},
+    ), state_store)
+    body = build_reasoning_prompt(ReasoningRequest(
+        context=ctx, topics=topic_candidates(ctx),
+        evidence=evidence_options(ctx),
+        history=read_publication_history(None),
+    )).body()
+
+    # Six evidence labels (the in_progress_projects chunks); positioning
+    # stays guidance and takes no label.
+    assert "[E6]" in body
+    assert "[E7]" not in body
+    for phrase in ("Abu Prompt", "@AbuPrompt", "أبو برومبت"):
+        assert phrase in body
+    assert "planned, not implemented" in body
 
 
 def test_the_answer_parser_is_strict_about_the_shape_and_forgiving_about_fences():

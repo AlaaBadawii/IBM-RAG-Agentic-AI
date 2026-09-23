@@ -58,7 +58,7 @@ __all__ = [
 #: to the prompt that produced it instead of being explained by whatever the
 #: prompt says today. The same convention as ``PROMPT_VERSION`` (Step 8) and
 #: ``JUDGE_PROMPT_VERSION`` (Step 9).
-AGENT_PROMPT_VERSION = "branding-agent-v1"
+AGENT_PROMPT_VERSION = "branding-agent-v2"
 
 #: How many already-published rows of each kind the prompt lists. Bounded so a
 #: long history cannot make a prompt grow without limit; the digest itself is
@@ -164,6 +164,8 @@ def evidence_options(context: PersonalBrandingContext
                 evidence_state=item.evidence_state,
                 section=section.name,
                 category=item.category,
+                content=item.content,
+                content_hash=(item.metadata or {}).get("content_hash") or "",
             ))
     return tuple(options)
 
@@ -291,18 +293,29 @@ def _opportunities_block(topics: tuple[TopicCandidate, ...]) -> str:
 
 
 def _evidence_block(options: tuple[EvidenceOption, ...]) -> str:
+    """The only material a decision may rest on, with its text attached.
+
+    Content is the chunk exactly as stored — the same rule the generation
+    prompt applies when the writer receives evidence. A reasoner shown
+    metadata but not substance cannot tell "no evidence" from "evidence with
+    no declared state", and a model asked to judge publish-worthiness blind
+    is being invited to invent. Labels still mediate every selection; the
+    text is what the labels stand for.
+    """
     if not options:
         return ""
     lines = [
         f"[{option.label}] source: {option.source} "
         f"(chunk {option.chunk_id}, section {option.section}, "
         f"category {option.category or 'none'}, "
-        f"evidence state: {option.evidence_state or NO_STATE_LABEL})"
+        f"content hash: {option.content_hash or 'unknown'}, "
+        f"evidence state: {option.evidence_state or NO_STATE_LABEL})\n"
+        f"{option.content.strip()}"
         for option in options
     ]
     return (
         "The only evidence that exists. Select by label; never name a label "
-        "that is not here.\n" + "\n".join(lines)
+        "that is not here.\n" + "\n\n".join(lines)
     )
 
 
