@@ -141,7 +141,10 @@ def _new_stats(files_discovered: int) -> dict:
     ``files_skipped_duplicate_content`` is always present and is always 0 in
     corpus mode: the condition it counts needs two admitted files with
     byte-identical cleaned text, which a curated corpus does not produce but a
-    set of real repositories can.
+    set of real repositories can. ``files_skipped_empty`` counts admitted
+    files whose cleaned text the splitter turns into zero chunks (empty or
+    whitespace-only files) — skipped before any store write, because the
+    store rejects an empty batch.
     """
     return {
         "files_discovered": files_discovered,
@@ -150,6 +153,7 @@ def _new_stats(files_discovered: int) -> dict:
         "files_unchanged": 0,
         "files_removed": 0,
         "files_skipped_duplicate_content": 0,
+        "files_skipped_empty": 0,
         "chunks_added": 0,
         "chunks_updated": 0,
         "chunks_removed": 0,
@@ -186,6 +190,19 @@ def _index_documents(store: Chroma, loaded, stored: dict, stats: dict, *,
             continue
 
         chunks = chunk_document(text)
+        if not chunks:
+            # An empty or whitespace-only file cleans to text the splitter
+            # turns into zero chunks. There is nothing to embed, and handing
+            # an empty batch to the store makes it reject the write
+            # ("Expected Embeddings to be non-empty ..."), failing the whole
+            # cycle over one empty file. Skip it and say so.
+            stats["files_skipped_empty"] += 1
+            logger.warning(
+                "Skipped %s: it produced zero chunks (empty or "
+                "whitespace-only after cleaning); nothing to index",
+                source.relative_path,
+            )
+            continue
         chunk_documents = [
             Document(page_content=chunk.page_content, metadata=meta.to_chroma_metadata())
             for chunk in chunks
@@ -316,6 +333,7 @@ def main() -> None:
     print(f"  files updated    : {stats['files_updated']}")
     print(f"  files unchanged  : {stats['files_unchanged']}")
     print(f"  files removed    : {stats['files_removed']}")
+    print(f"  files skipped (empty): {stats['files_skipped_empty']}")
     print(f"  chunks added     : {stats['chunks_added']}")
     print(f"  chunks updated   : {stats['chunks_updated']}")
     print(f"  chunks removed   : {stats['chunks_removed']}")

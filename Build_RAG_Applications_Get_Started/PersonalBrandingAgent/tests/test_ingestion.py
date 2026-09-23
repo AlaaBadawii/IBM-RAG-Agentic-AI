@@ -234,3 +234,65 @@ def test_pipeline_metadata_reaches_chroma(tmp_path, fake_embeddings):
     assert metas[0]["category"] == "evidence"
     assert metas[0]["domain"] == "backend"
     assert metas[0]["evidence_state"] == "VERIFIED"
+
+
+# ------------------------------------------------------- zero-chunk files ---
+
+def _watch_add_documents(monkeypatch, store):
+    """Record every store write; the store must never see an empty batch."""
+    original = store.add_documents
+    calls = []
+
+    def spy(documents, ids=None, **kwargs):
+        calls.append((list(documents), list(ids or [])))
+        return original(documents, ids=ids, **kwargs)
+
+    monkeypatch.setattr(store, "add_documents", spy)
+    return calls
+
+
+def test_pipeline_skips_zero_byte_file_without_failing(tmp_path, fake_embeddings,
+                                                       monkeypatch):
+    """A 0-byte admitted file cleans to zero chunks: skipped, not fatal.
+
+    Before the guard this reached ``add_documents([], ids=[])`` and Chroma
+    rejected the empty embeddings list, failing the whole cycle with
+    ``IngestionError`` while the checkpoint never advanced.
+    """
+    data = _make_kb(tmp_path)
+    (data / "evidence" / "backend" / "empty.md").write_text("")
+    store = _store_for(tmp_path, fake_embeddings)
+    writes = _watch_add_documents(monkeypatch, store)
+
+    stats = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    assert stats["files_added"] == 2
+    assert stats["files_skipped_empty"] == 1
+    assert stats["total_chunks_in_store"] > 0
+    assert writes, "the non-empty files must still reach the store"
+    assert all(documents and ids for documents, ids in writes)
+    assert store.get(where={"source": "evidence/backend/empty.md"})["ids"] == []
+
+    # A second run over the same tree is equally safe: the empty file is
+    # skipped again rather than crashing idempotency.
+    rerun = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+    assert rerun["files_skipped_empty"] == 1
+    assert rerun["total_chunks_in_store"] == stats["total_chunks_in_store"]
+
+
+def test_pipeline_skips_whitespace_only_file_without_failing(tmp_path,
+                                                             fake_embeddings,
+                                                             monkeypatch):
+    """Whitespace-only content cleans to ``"\\n"``, which also chunks to zero."""
+    data = _make_kb(tmp_path)
+    (data / "evidence" / "backend" / "blank.md").write_text("   \n  \n\t\n")
+    store = _store_for(tmp_path, fake_embeddings)
+    writes = _watch_add_documents(monkeypatch, store)
+
+    stats = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    assert stats["files_added"] == 2
+    assert stats["files_skipped_empty"] == 1
+    assert stats["total_chunks_in_store"] > 0
+    assert all(documents and ids for documents, ids in writes)
+    assert store.get(where={"source": "evidence/backend/blank.md"})["ids"] == []
