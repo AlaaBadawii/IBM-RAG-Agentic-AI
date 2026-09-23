@@ -58,6 +58,11 @@ def _default_registry_loader() -> Registry:
     return load_registry()
 
 
+def _default_notifier(store: StateStore):
+    """The real notification binding: the Step 7 service over SMTP config."""
+    return NotificationService(store)
+
+
 @dataclass
 class SyncConfig:
     """The sync workflow's seams. Defaults are the real layers; tests inject
@@ -65,7 +70,7 @@ class SyncConfig:
     default bindings are used."""
 
     store_factory: Callable[[], StateStore] = field(
-        default_factory=StateStore
+        default_factory=lambda: StateStore
     )
     registry_loader: Callable[[], Registry] = field(
         default_factory=lambda: _default_registry_loader
@@ -74,7 +79,7 @@ class SyncConfig:
         default_factory=lambda: _default_sync
     )
     notifier_factory: Callable[[StateStore], Any] = field(
-        default_factory=lambda store: NotificationService(store)
+        default_factory=lambda: _default_notifier
     )
 
 

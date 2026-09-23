@@ -26,20 +26,43 @@ Public surface, and deliberately nothing more:
     WorkflowResult                 the structured run result
     EXIT_OK / EXIT_WORKFLOW_FAILED / EXIT_REQUIRES_HUMAN_INTERVENTION
     workflow_lock / WorkflowLocked / EXIT_LOCKED   the Step 12 overlap guard
+
+Exports are resolved lazily (PEP 562) so that executing
+``python -m app.workflows.<name>`` imports the submodule exactly once:
+an eager import here would execute the module both as
+``app.workflows.<name>`` and as ``__main__``.
 """
-from app.workflows.branding import BrandingConfig, run_branding
-from app.workflows.common import (
-    EXIT_OK,
-    EXIT_REQUIRES_HUMAN_INTERVENTION,
-    EXIT_WORKFLOW_FAILED,
-    WorkflowResult,
-)
-from app.workflows.scheduled import (
-    EXIT_LOCKED,
-    WorkflowLocked,
-    workflow_lock,
-)
-from app.workflows.sync import SyncConfig, run_sync
+import importlib
+
+_LAZY_EXPORTS = {
+    "BrandingConfig": ("app.workflows.branding", "BrandingConfig"),
+    "EXIT_LOCKED": ("app.workflows.scheduled", "EXIT_LOCKED"),
+    "EXIT_OK": ("app.workflows.common", "EXIT_OK"),
+    "EXIT_REQUIRES_HUMAN_INTERVENTION": (
+        "app.workflows.common", "EXIT_REQUIRES_HUMAN_INTERVENTION"),
+    "EXIT_WORKFLOW_FAILED": ("app.workflows.common", "EXIT_WORKFLOW_FAILED"),
+    "SyncConfig": ("app.workflows.sync", "SyncConfig"),
+    "WorkflowLocked": ("app.workflows.scheduled", "WorkflowLocked"),
+    "WorkflowResult": ("app.workflows.common", "WorkflowResult"),
+    "run_branding": ("app.workflows.branding", "run_branding"),
+    "run_sync": ("app.workflows.sync", "run_sync"),
+    "workflow_lock": ("app.workflows.scheduled", "workflow_lock"),
+}
+
+
+def __getattr__(name: str):
+    """Import a public name on first use, keeping ``__all__`` unchanged."""
+    try:
+        module_name, attr = _LAZY_EXPORTS[name]
+    except KeyError:
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}") from None
+    module = importlib.import_module(module_name)
+    return getattr(module, attr)
+
+
+def __dir__():
+    return sorted(list(globals()) + list(_LAZY_EXPORTS))
 
 __all__ = [
     "EXIT_LOCKED",

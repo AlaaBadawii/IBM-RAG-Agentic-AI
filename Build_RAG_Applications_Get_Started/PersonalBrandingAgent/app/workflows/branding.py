@@ -120,6 +120,11 @@ def _default_history(store: StateStore):
     return PublishingHistory(store)
 
 
+def _default_notifier(store: StateStore):
+    """The real notification binding: the Step 7 service over SMTP config."""
+    return NotificationService(store)
+
+
 @dataclass
 class BrandingConfig:
     """The branding workflow's seams. Defaults are the real layers; tests
@@ -127,7 +132,7 @@ class BrandingConfig:
     unless the default bindings are used."""
 
     store_factory: Callable[[], StateStore] = field(
-        default_factory=StateStore
+        default_factory=lambda: StateStore
     )
     assemble_fn: Callable[[StateStore], Any] = field(
         default_factory=lambda: _default_assemble
@@ -142,7 +147,7 @@ class BrandingConfig:
         default_factory=lambda: _default_history
     )
     notifier_factory: Callable[[StateStore], Any] = field(
-        default_factory=lambda store: NotificationService(store)
+        default_factory=lambda: _default_notifier
     )
 
 
