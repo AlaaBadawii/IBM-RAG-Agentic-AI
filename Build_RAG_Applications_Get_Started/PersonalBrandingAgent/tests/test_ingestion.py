@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 
 from app.errors import IngestionError
 from app.ingestion.chunker import chunk_document, chunk_id, clean_text, content_hash
@@ -226,6 +227,78 @@ def test_pipeline_removes_stale_vectors(tmp_path, fake_embeddings):
     assert stats["files_removed"] == 1
     assert stats["chunks_removed"] > 0
     assert store._collection.count() < before
+
+
+def _index_a_synchronized_source(store, name: str, path: str, text: str) -> list[str]:
+    """Put one file of a registered source into the store the way the
+    synchronization layer would: under its namespace, with a content address.
+
+    Built here rather than by calling the synchronizer, because this is a test
+    about what *corpus* mode does to keys it did not write — the source's
+    provenance must not depend on how it got there.
+    """
+    cleaned = clean_text(text)
+    doc_hash = content_hash(cleaned)
+    ids = [chunk_id(doc_hash, 0)]
+    store.add_documents(
+        [Document(page_content=cleaned,
+                  metadata={"source": f"@source/{name}/{path}",
+                            "content_hash": doc_hash})],
+        ids=ids,
+    )
+    return ids
+
+
+def test_corpus_ingestion_never_removes_a_synchronized_source(
+        tmp_path, fake_embeddings):
+    """Corpus mode's stale sweep is about ``data/`` files that vanished.
+
+    A synchronized source's files are not under ``data/`` and never will be —
+    their keys carry the ``@source/<name>/`` namespace — so the sweep must
+    leave every one of them alone. Corpus mode has no inventory of what a
+    source admits; the synchronization layer owns that sweep, per source,
+    under its own scope. A corpus re-ingestion that deletes them is deleting
+    the knowledge base of a different subsystem, and reporting success.
+    """
+    data = _make_kb(tmp_path)
+    store = _store_for(tmp_path, fake_embeddings)
+    run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    source_ids = _index_a_synchronized_source(
+        store, "demo-source", "src/thing.py", "# Thing\n\nprint('hello')\n"
+    )
+    before = store._collection.count()
+
+    stats = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    survivors = store.get(ids=source_ids, include=["metadatas"])
+    assert survivors["ids"] == source_ids, (
+        "corpus-mode ingestion removed a synchronized source's chunks; the "
+        "stale sweep is treating keys it does not own as stale"
+    )
+    assert store._collection.count() == before
+    assert stats["files_removed"] == 0
+
+
+def test_corpus_stale_sweep_still_removes_a_vanished_corpus_file(
+        tmp_path, fake_embeddings):
+    """The namespace guard narrows the sweep to corpus keys — it must not
+    disable it. A corpus file that no longer exists on disk is still removed,
+    and a synchronized source in the same collection is untouched while that
+    happens."""
+    data = _make_kb(tmp_path)
+    store = _store_for(tmp_path, fake_embeddings)
+    run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    source_ids = _index_a_synchronized_source(
+        store, "demo-source", "src/thing.py", "# Thing\n\nprint('hello')\n"
+    )
+    (data / "stories_lessons" / "quizey_idempotency.md").unlink()
+
+    stats = run_ingestion(data_dir=data, embeddings=fake_embeddings, store=store)
+
+    assert stats["files_removed"] == 1
+    assert store.get(ids=source_ids)["ids"] == source_ids
 
 
 def test_pipeline_metadata_reaches_chroma(tmp_path, fake_embeddings):

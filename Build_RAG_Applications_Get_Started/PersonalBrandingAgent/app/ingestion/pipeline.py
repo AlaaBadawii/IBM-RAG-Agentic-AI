@@ -336,8 +336,25 @@ def _ingest_corpus(data_dir, embeddings, store) -> dict:
 
     current_sources = _index_documents(store, loaded, stored, stats)
 
-    # Stale removal: sources in Chroma that no longer exist on disk.
+    # Stale removal: corpus files in Chroma that no longer exist on disk.
+    #
+    # Source-namespaced keys are not corpus files and are deliberately exempt.
+    # They are not under ``data/``, so ``current_sources`` can never contain
+    # them and every one of them would read as "no longer on disk" — a corpus
+    # re-ingestion would delete the entire synchronized knowledge base and
+    # report success. Corpus mode has no inventory of what a source admits;
+    # the synchronization layer sweeps a source's own scope, and it is the
+    # only thing that knows which of that source's files are still admitted.
+    #
+    # Imported here, not at module scope: ``app.sync.synchronizer`` imports
+    # ``run_ingestion`` from this module, so a top-level import from
+    # ``app.sync`` would be circular — and re-spelling the prefix here is
+    # exactly the drift ``app.sync.namespace`` exists to prevent.
+    from app.sync.namespace import is_source_key
+
     for source_path, ids in stored.items():
+        if is_source_key(source_path):
+            continue
         if source_path not in current_sources:
             _remove(store, source_path, ids, stats, "no longer on disk")
     return _finish(store, stats)
