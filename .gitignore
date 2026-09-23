@@ -7,3 +7,10 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Safety snapshots of PersonalBrandingAgent's two stores (state_db/, the
+# authoritative local publication history, and chroma_db/, the knowledge
+# base). A snapshot is large, machine-specific, and a copy of state that
+# only the machine that took it can interpret — so it is not repository
+# content. Kept on disk deliberately, as the restore path for a purge.
+Build_RAG_Applications_Get_Started/PersonalBrandingAgent-backups/
