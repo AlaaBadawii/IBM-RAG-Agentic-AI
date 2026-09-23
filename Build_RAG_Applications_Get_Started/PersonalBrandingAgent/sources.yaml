@@ -368,20 +368,6 @@ sources:
       a downloaded 129 MB minikube binary, which no include pattern reaches.
 
   # ===========================================================================
-  # ~/DataBases — found by inspection, not among the roots PLAN.md declares
-  # ===========================================================================
-  - name: databases-mongodb-crud
-    type: filesystem
-    local_path: /home/alaabadawii/DataBases/MongoDB
-    lifecycle: COMPLETED
-    include: *source_code
-    description: >
-      MongoDB/PyMongo practice — the basis of
-      completed_projects/mongodb_pymongo_crud_service.md. A plain directory,
-      not a repository. Included because the corpus's own audit notes that it
-      is the only content under ~/DataBases.
-
-  # ===========================================================================
   # ~/DSA-Python-LeetCode-130 — periodically changing; added to the sync scope
   # by the user (previously recorded under not_registered)
   # ===========================================================================
@@ -407,6 +393,12 @@ sources:
 # These are the entries most worth disagreeing with, so each carries the
 # evidence behind the decision.
 not_registered:
+  - path: /home/alaabadawii/DataBases/MongoDB
+    reason: >
+      MongoDB/PyMongo practice lab. Deliberately removed from the periodic
+      sync scope by the user: not useful for the Personal Branding Agent.
+      Its two indexed chunks were purged from the collection on removal.
+
   - path: /home/alaabadawii/LLMs/IBM/Build_Multimodal_Generative_AI_Applications/Style_Finder
     reason: >
       Third-party IBM course template, not the user's work. All four commits

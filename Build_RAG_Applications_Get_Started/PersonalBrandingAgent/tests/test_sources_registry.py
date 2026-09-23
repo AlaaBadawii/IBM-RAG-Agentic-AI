@@ -280,13 +280,13 @@ class TestCommittedRegistry:
         assert "sources.yaml" not in {s.local_path.name for s in committed_registry}
 
     def test_covers_exactly_the_periodic_sync_scope(self, committed_registry):
-        """Periodic sync covers the five roots the user named — no more.
+        """Periodic sync covers the user's sync scope — no more.
 
         ``sync_all`` iterates this registry and nothing else, so this exact
         set *is* the periodic sync scope: ~/LLMs (IBM, AI_Agents, AI_Hackthon
-        sources), ~/Quizey, ~/DevOps, ~/DataBases, and
-        ~/DSA-Python-LeetCode-130. ~/ALX, ~/FastAPI and ~/Portfolio are
-        deliberately outside it.
+        sources), ~/Quizey, ~/DevOps, and ~/DSA-Python-LeetCode-130. ~/ALX,
+        ~/FastAPI, ~/Portfolio and ~/DataBases/MongoDB are deliberately
+        outside it.
         """
         assert set(committed_registry.names) == {
             "ibm-genai-coursework",
@@ -299,7 +299,6 @@ class TestCommittedRegistry:
             "kodekloud-devops-specialization",
             "devops-lab",
             "kubernetes-lab",
-            "databases-mongodb-crud",
             "dsa-python-leetcode-130",
         }
 

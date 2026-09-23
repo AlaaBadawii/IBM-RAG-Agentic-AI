@@ -10,10 +10,11 @@ Two halves:
   discovered, read, and ingested. A full resync happens only with no
   trustworthy baseline (no checkpoint, non-git revision, or a checkpoint
   commit the repository no longer knows).
-* **Scoped registry**: periodic sync considers exactly the five roots the
-  user named — ``~/DevOps``, ``~/DSA-Python-LeetCode-130``, ``~/Quizey``,
-  ``~/DataBases``, ``~/LLMs`` — because the registry is the complete
-  statement of sync scope (``sync_all`` iterates it and nothing else).
+* **Scoped registry**: periodic sync considers exactly the user's sync scope
+  — ``~/DevOps``, ``~/DSA-Python-LeetCode-130``, ``~/Quizey``, ``~/LLMs``
+  (``~/DataBases/MongoDB`` was deliberately removed as not useful) —
+  because the registry is the complete statement of sync scope (``sync_all``
+  iterates it and nothing else).
 
 Single-changed-file, added/deleted-file, and failure-keeps-checkpoint cases
 are pinned in ``tests/test_sync_synchronizer.py`` and are not duplicated
@@ -34,7 +35,6 @@ PERIODIC_ROOTS = (
     Path("/home/alaabadawii/DevOps"),
     Path("/home/alaabadawii/DSA-Python-LeetCode-130"),
     Path("/home/alaabadawii/Quizey"),
-    Path("/home/alaabadawii/DataBases"),
     Path("/home/alaabadawii/LLMs"),
 )
 
@@ -49,7 +49,6 @@ EXPECTED_PERIODIC_SOURCES = {
     "kodekloud-devops-specialization",
     "devops-lab",
     "kubernetes-lab",
-    "databases-mongodb-crud",
     "dsa-python-leetcode-130",
 }
 
@@ -212,4 +211,18 @@ def test_dsa_practice_is_a_tracked_git_source(periodic_registry):
     assert not any(
         "DSA-Python-LeetCode-130" in str(entry.path)
         for entry in periodic_registry.not_registered
+    )
+
+
+def test_mongodb_practice_is_no_longer_an_eligible_sync_source(
+    periodic_registry,
+):
+    """Removed as not useful: unregistered, recorded, and uncollectable."""
+    assert periodic_registry.get("databases-mongodb-crud") is None
+    assert any(
+        "DataBases/MongoDB" in str(entry.path)
+        for entry in periodic_registry.not_registered
+    )
+    assert not any(
+        "databases-mongodb-crud" in name for name in periodic_registry.names
     )
