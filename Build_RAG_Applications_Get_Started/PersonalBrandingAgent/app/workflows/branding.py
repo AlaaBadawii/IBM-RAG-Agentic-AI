@@ -19,10 +19,25 @@ Owns and sequences the existing branding pipeline — nothing more:
 * This workflow **never ingests or syncs sources** — asserted structurally by
   the test suite, not just behaviourally.
 
-Outcomes:
+Outcomes — three independent axes, never conflated:
+
+* Agent decision (``AgentDecision``): ``PUBLISH`` or ``DO_NOT_PUBLISH``.
+  What the Agent concluded; a ``PUBLISH`` is unconstructible without a
+  passing verification.
+* Publication decision (``PublishDecision``): ``PUBLISHED``, ``REFUSED``,
+  ``FAILED``, or ``UNKNOWN_REQUIRES_REVIEW``. What Step 6 did, recorded on
+  the publication row with the LinkedIn post id as evidence.
+* Run outcome (``RunOutcome``): ``DO_NOT_PUBLISH`` (exit 0),
+  ``WORKFLOW_FAILED`` (exit 1), or ``REQUIRES_HUMAN_INTERVENTION``
+  (exit 2). Whether the workflow completed and whether a person is
+  needed — *not* whether a post went out. A successful publication
+  terminates ``DO_NOT_PUBLISH`` with ``{"published": True,
+  "linkedin_post_id": ...}`` in the result detail and exactly one linked
+  ``PUBLISHED`` publication row: the pair is the consistent record, and a
+  test pins that a published run always has it.
 
 * ``DO_NOT_PUBLISH`` (exit 0): no opportunity, the Agent declined, the gate
-  refused, or a post was published or refused as a duplicate. No *failure*
+  refused, a duplicate refused, or a post was published. No *failure*
   notification is sent; a published post is reported once as a publication.
 * ``WORKFLOW_FAILED`` (exit 1): a phase could not complete — persist the
   failed phase + exactly one failure notification.
@@ -300,7 +315,7 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
             logger.info(
                 "Branding run %s published post %s", run.run_id, post_id
             )
-            _report_publication(notifier, agent_result, post_id, run.run_id)
+            _report_publication(store, notifier, run.run_id, post_id)
             return finish(
                 store, run, RunOutcome.DO_NOT_PUBLISH,
                 notifier=notifier,
@@ -318,22 +333,26 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
         )
 
 
-def _report_publication(notifier: Any, agent_result: Any, post_id: str,
-                        run_id: str) -> None:
+def _report_publication(store: StateStore, notifier: Any, run_id: str,
+                        post_id: str) -> None:
     """Tell the user what went out under their name — exactly once.
 
-    A successful publish terminates ``DO_NOT_PUBLISH``, which the failure
-    path waives by design; without this call nothing would report the post.
-    A delivery failure here is logged, never raised: the post is already
-    durably published, and failing the run over the email would lie about
-    what happened.
+    The content comes from the persisted write-ahead intent, not from the
+    in-memory draft: the intent is what the publishing service actually
+    sent, so the email and LinkedIn cannot silently diverge. A successful
+    publish terminates ``DO_NOT_PUBLISH``, which the failure path waives by
+    design; without this call nothing would report the post. A delivery
+    failure here is logged, never raised: the post is already durably
+    published, and failing the run over the email would lie about what
+    happened.
     """
     from app.notify.models import PublishedPost
 
     try:
+        intent = store.get_intent_for_run(run_id)
         notifier.notify_publication(
             PublishedPost(
-                content=agent_result.draft.content if agent_result.draft else "",
+                content=intent.content if intent is not None else "",
                 post_id=post_id or None,
             ),
             run_id=run_id,

@@ -17,6 +17,7 @@ Three groups live here:
   :class:`RecoveryReport` for an interrupted run.
 """
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.integrations.linkedin.models import PublicationResult
 from app.state.enums import PublishState
@@ -34,6 +35,7 @@ __all__ = [
     "EvidenceUsage",
     "InterruptedAttempt",
     "PublicationSummary",
+    "PublishPreview",
     "PublishReport",
     "PublishRequest",
     "RecoveryReport",
@@ -93,6 +95,29 @@ class PublishRequest:
                     "every evidence reference must carry a source path and a "
                     f"content hash; got {ref!r}"
                 )
+
+
+@dataclass(frozen=True)
+class PublishPreview:
+    """Exactly what ``publish()`` would send, without sending it.
+
+    Same duplicate verdict, same content bytes, same evidence — computed
+    read-only so an operator (or a test) can inspect the final external
+    payload before the side effect exists. ``would_publish`` is False
+    exactly when ``publish()`` would refuse; nothing here creates intents,
+    touches the network, or records anything.
+    """
+
+    content: str
+    content_hash: str
+    topic: str | None = None
+    evidence: tuple = ()
+    duplicates: Any = None
+
+    @property
+    def would_publish(self) -> bool:
+        """True when the duplicate policy lets this through."""
+        return self.duplicates is not None and not self.duplicates.must_not_publish
 
 
 @dataclass(frozen=True)

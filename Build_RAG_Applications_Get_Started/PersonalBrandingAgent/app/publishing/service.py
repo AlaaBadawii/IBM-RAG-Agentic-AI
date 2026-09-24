@@ -42,7 +42,7 @@ from app.integrations.linkedin.enums import PublicationOutcome
 from app.integrations.linkedin.models import PublicationResult
 from app.state.enums import PublishState
 from app.state.models import Publication, PublishIntent
-from app.state.store import StateStore
+from app.state.store import StateStore, content_hash_of
 
 from app.publishing.duplicates import DuplicateDetector, DuplicatePolicy, Embedder
 from app.publishing.enums import InterruptionKind, PublishDecision
@@ -50,6 +50,7 @@ from app.publishing.history import PublishingHistory
 from app.publishing.models import (
     DuplicateReport,
     InterruptedAttempt,
+    PublishPreview,
     PublishReport,
     PublishRequest,
     RecoveryReport,
@@ -132,6 +133,27 @@ class PublishingService:
         return self._detector
 
     # -- publishing ---------------------------------------------------------
+
+    def preview_publish(self, request: PublishRequest, run_id: str, *,
+                        now: datetime | None = None) -> PublishPreview:
+        """Assemble exactly what ``publish()`` would send, without sending it.
+
+        Same duplicate verdict, same content bytes and hash, same evidence —
+        computed read-only, so the final external payload can be inspected
+        (target account aside, which is resolved live) before the side
+        effect exists. Creates no intents, touches no network, records
+        nothing. ``would_publish`` is False exactly when ``publish()``
+        would refuse at the duplicate gate; credential and transport
+        outcomes are inherently live and are therefore not previewed.
+        """
+        duplicate_report = self._detector.check(request, now=now)
+        return PublishPreview(
+            content=request.content,
+            content_hash=content_hash_of(request.content),
+            topic=request.topic,
+            evidence=request.evidence,
+            duplicates=duplicate_report,
+        )
 
     def publish(self, request: PublishRequest, run_id: str, *,
                 now: datetime | None = None) -> PublishReport:
