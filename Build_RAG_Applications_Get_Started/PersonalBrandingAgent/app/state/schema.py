@@ -379,6 +379,73 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ON missed_windows (workflow, expected_at)",
         ),
     ),
+    Migration(
+        version=7,
+        description="tracked work, branding review cursors, and development "
+                    "coverage ledger for opportunity-aware branding",
+        statements=(
+            # What the branding system tracks (a professional project or
+            # activity), where its material lives (registry source names —
+            # references, not copies; the registry stays authoritative), and
+            # whether it is currently active. A source is ingestion scope; a
+            # tracked work is branding scope. One work may name several
+            # sources; corpus-only work names none.
+            """
+            CREATE TABLE tracked_work (
+                work_id      TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                description  TEXT NOT NULL DEFAULT '',
+                sources      TEXT NOT NULL DEFAULT '[]',
+                enabled      INTEGER NOT NULL DEFAULT 1
+                               CHECK (enabled IN (0, 1)),
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
+            )
+            """,
+            # How far the branding system has evaluated each source of a
+            # tracked work. Deliberately separate from sync_checkpoints: a
+            # sync checkpoint says "this revision was ingested", a review
+            # cursor says "this revision was evaluated for opportunities".
+            # A NULL revision means never reviewed. Sync never writes here.
+            """
+            CREATE TABLE review_cursors (
+                work_id           TEXT NOT NULL
+                                    REFERENCES tracked_work (work_id),
+                source_name       TEXT NOT NULL,
+                reviewed_revision TEXT,
+                updated_at        TEXT NOT NULL,
+                PRIMARY KEY (work_id, source_name)
+            )
+            """,
+            # Which developments were communicated. The unit of coverage is
+            # the development, never the project: covering Phase 2.1 must
+            # not cover Phase 2.2. ``covered`` means "communicated or
+            # established as historical baseline" (``coverage_kind`` says
+            # which); a ``published`` row may reference its publication
+            # instead of duplicating publication state. A covered row always
+            # carries the time it became covered.
+            """
+            CREATE TABLE developments (
+                work_id         TEXT NOT NULL
+                                  REFERENCES tracked_work (work_id),
+                development_key TEXT NOT NULL,
+                display_name    TEXT NOT NULL,
+                covered         INTEGER NOT NULL DEFAULT 0
+                                  CHECK (covered IN (0, 1)),
+                coverage_kind   TEXT NOT NULL DEFAULT 'baseline'
+                                  CHECK (coverage_kind IN
+                                         ('baseline', 'published')),
+                covered_at      TEXT,
+                publication_id  TEXT
+                                  REFERENCES publications (publication_id),
+                PRIMARY KEY (work_id, development_key),
+                CHECK ((covered = 0) = (covered_at IS NULL))
+            )
+            """,
+            "CREATE INDEX ix_developments_coverage "
+            "ON developments (covered, work_id)",
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.
@@ -400,6 +467,9 @@ TABLES: tuple[str, ...] = (
     "workflow_phases",
     "schedule_policy",
     "missed_windows",
+    "tracked_work",
+    "review_cursors",
+    "developments",
 )
 
 

@@ -210,7 +210,7 @@ def test_generation_parameters_and_model_id_are_the_configured_ones():
     _, llm = generate(answer())
     result, _ = generate(answer())
 
-    assert result.metadata.model_id == config.MODEL_ID
+    assert result.metadata.model_id == config.GEMINI_MODEL_ID
     assert result.metadata.parameters == config.GENERATION_PARAMS
     assert result.metadata.prompt_version == PROMPT_VERSION
 
@@ -241,7 +241,7 @@ def test_the_result_carries_model_prompt_version_and_parameters():
     """``PLAN.md`` Step 8: the audit record has to be able to name them."""
     result, _ = generate(answer())
 
-    assert result.metadata.model_id == config.MODEL_ID
+    assert result.metadata.model_id == config.GEMINI_MODEL_ID
     assert result.metadata.prompt_version == PROMPT_VERSION
     assert result.metadata.parameters["max_tokens"] == (
         config.GENERATION_PARAMS["max_tokens"]
@@ -367,19 +367,19 @@ def test_an_unreachable_model_raises_rather_than_producing_a_post():
 
 def test_a_missing_credential_is_a_configuration_failure(monkeypatch):
     """Reported as what it is: a person has to fix it, a retry cannot."""
-    monkeypatch.setattr(config, "OPENROUTER_API_KEY", None)
+    monkeypatch.setattr(config, "GOOGLE_API_KEY", "")
 
     with pytest.raises(GenerationError) as raised:
         PostGenerator().generate(request())
 
     assert raised.value.category is GenerationFailureCategory.CONFIGURATION
     assert raised.value.requires_human_intervention is True
-    assert "OPENAI_API_KEY" in str(raised.value)
+    assert "GOOGLE_API_KEY" in str(raised.value)
 
 
 def test_an_injected_model_needs_no_credential_at_all(monkeypatch):
     """Proves the suite is offline by construction, not by luck."""
-    monkeypatch.setattr(config, "OPENROUTER_API_KEY", None)
+    monkeypatch.setattr(config, "GOOGLE_API_KEY", "")
 
     result, _ = generate(answer(evidence_used=["E1"]))
 
@@ -461,11 +461,11 @@ def test_a_failed_call_is_redacted_before_it_is_kept(monkeypatch):
 
 def test_the_credential_never_reaches_the_result(monkeypatch):
     """Metadata is audit data: model id, prompt version, parameters. No key."""
-    monkeypatch.setattr(config, "OPENROUTER_API_KEY", "sk-or-v1-not-a-real-key")
+    monkeypatch.setattr(config, "GOOGLE_API_KEY", "AIza-not-a-real-key")
 
     result, _ = generate(answer(evidence_used=["E1"]))
 
-    assert "sk-or-v1-not-a-real-key" not in repr(result)
+    assert "AIza-not-a-real-key" not in repr(result)
 
 
 # ------------------------------------------------- what this layer cannot do ---

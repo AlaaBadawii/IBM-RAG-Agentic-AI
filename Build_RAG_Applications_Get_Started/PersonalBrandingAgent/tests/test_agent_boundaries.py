@@ -94,6 +94,10 @@ def test_the_agent_can_only_reach_generation_verification_context_and_values(mod
     allowed = (
         "app.agent", "app.context", "app.generation", "app.verification",
         "app.publishing.models", "app.logging_config", "app.errors",
+        # Transport only: the Gemini JSON client carries prompts to the
+        # pinned model and returns text. It holds no store, no publisher,
+        # no corpus handle — the first test above already bars all of those.
+        "app.gemini",
     )
     offenders = [
         name for name in _imported(module)
@@ -173,4 +177,5 @@ def test_the_agent_holds_no_state_between_runs():
     assert set(vars(bare)) == {
         "_reasoner", "_generator", "_verifier", "_history", "_strategies",
         "_revision_limit", "_history_limit", "_prompt_version",
+        "_editorial_intent",
     }

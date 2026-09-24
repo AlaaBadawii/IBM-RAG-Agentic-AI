@@ -6,6 +6,9 @@ langchain>=1.3,<2
 langchain-core>=1.6,<2
 langchain-community>=0.4,<1
 langchain-openai>=1.5,<2        # OpenAI-compatible client -> OpenRouter
+                                # (multi-query retrieval only; the Agent,
+                                # generation and judge call Gemini directly)
+google-genai>=1.75,<2           # Gemini API client (native structured output)
 langchain-chroma>=1.1,<2        # Chroma integration (used via raw collection API)
 langchain-huggingface>=1.2,<2   # local MiniLM embeddings
 langchain-text-splitters>=1.1,<2

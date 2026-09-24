@@ -43,6 +43,7 @@ Failure policy
     raises and no usable object exists; if it is closed or breaks later,
     every operation raises :class:`StateStoreError`.
 """
+import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -64,6 +65,7 @@ from app.state.enums import (
 )
 from app.state.models import (
     CredentialExpiry,
+    Development,
     EvidenceRef,
     Lock,
     LockAcquisition,
@@ -73,9 +75,11 @@ from app.state.models import (
     Publication,
     PublicationRecord,
     PublishIntent,
+    ReviewCursor,
     SchedulePolicy,
     SourceLifecycleState,
     SyncCheckpoint,
+    TrackedWork,
     WorkflowPhase,
     WorkflowRun,
     iso_in,
@@ -545,6 +549,153 @@ class StateStore:
             f"setting the lifecycle of {source_name}",
         )
         return self.get_source_lifecycle(source_name)  # type: ignore[return-value]
+
+    # -- tracked work, review cursors, developments ---------------------------
+
+    def ensure_tracked_work(self, work_id: str, display_name: str,
+                            description: str = "",
+                            sources: Sequence[str] = (),
+                            enabled: bool = True) -> TrackedWork:
+        """Register one tracked work, once. Idempotent: the first call wins,
+        so seeding a baseline twice cannot duplicate or overwrite it."""
+        if not work_id.strip():
+            raise ValueError("work_id must be non-empty")
+        now = utc_now_iso()
+        self._write(
+            "INSERT OR IGNORE INTO tracked_work (work_id, display_name, "
+            "description, sources, enabled, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (work_id, display_name, description, json.dumps(list(sources)),
+             int(bool(enabled)), now, now),
+            f"ensuring tracked work {work_id}",
+        )
+        tracked = self.get_tracked_work(work_id)
+        assert tracked is not None
+        return tracked
+
+    def get_tracked_work(self, work_id: str) -> TrackedWork | None:
+        rows = self._read(
+            "SELECT * FROM tracked_work WHERE work_id = ?", (work_id,)
+        )
+        return TrackedWork.from_row(rows[0]) if rows else None
+
+    def list_tracked_work(self, *, enabled_only: bool = False
+                          ) -> list[TrackedWork]:
+        """Tracked works in stable key order."""
+        sql = "SELECT * FROM tracked_work"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        rows = self._read(sql + " ORDER BY work_id")
+        return [TrackedWork.from_row(row) for row in rows]
+
+    def set_review_cursor(self, work_id: str, source_name: str,
+                          reviewed_revision: str | None) -> ReviewCursor:
+        """Record how far one source was evaluated for opportunities.
+
+        Upsert: re-reviewing advances the same row. A NULL revision means
+        never reviewed. Unknown work is refused by the foreign key — a
+        cursor must belong to tracked work.
+        """
+        now = utc_now_iso()
+        self._write(
+            "INSERT INTO review_cursors (work_id, source_name, "
+            "reviewed_revision, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (work_id, source_name) DO UPDATE SET "
+            "reviewed_revision = excluded.reviewed_revision, "
+            "updated_at = excluded.updated_at",
+            (work_id, source_name, reviewed_revision, now),
+            f"setting the review cursor of {source_name} for {work_id}",
+        )
+        cursor = self.get_review_cursor(work_id, source_name)
+        assert cursor is not None
+        return cursor
+
+    def get_review_cursor(self, work_id: str,
+                          source_name: str) -> ReviewCursor | None:
+        rows = self._read(
+            "SELECT * FROM review_cursors WHERE work_id = ? AND source_name = ?",
+            (work_id, source_name),
+        )
+        return ReviewCursor.from_row(rows[0]) if rows else None
+
+    def list_review_cursors(self, work_id: str) -> list[ReviewCursor]:
+        rows = self._read(
+            "SELECT * FROM review_cursors WHERE work_id = ? ORDER BY source_name",
+            (work_id,),
+        )
+        return [ReviewCursor.from_row(row) for row in rows]
+
+    def ensure_development(self, work_id: str, development_key: str,
+                           display_name: str, *,
+                           covered: bool = False,
+                           coverage_kind: str = "baseline",
+                           publication_id: str | None = None) -> Development:
+        """Register one development, once. Idempotent like tracked work:
+        covering Phase 2.1 never covers Phase 2.2, and reseeding never
+        overwrites an existing row's coverage state."""
+        if not development_key.strip():
+            raise ValueError("development_key must be non-empty")
+        if coverage_kind not in ("baseline", "published"):
+            raise ValueError(
+                "coverage_kind must be 'baseline' or 'published' "
+                f"(got {coverage_kind!r})"
+            )
+        now = utc_now_iso()
+        self._write(
+            "INSERT OR IGNORE INTO developments (work_id, development_key, "
+            "display_name, covered, coverage_kind, covered_at, "
+            "publication_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (work_id, development_key, display_name, int(bool(covered)),
+             coverage_kind, now if covered else None, publication_id),
+            f"ensuring development {development_key} of {work_id}",
+        )
+        development = self.get_development(work_id, development_key)
+        assert development is not None
+        return development
+
+    def set_development_covered(self, work_id: str, development_key: str, *,
+                                covered: bool,
+                                coverage_kind: str = "baseline",
+                                publication_id: str | None = None,
+                                ) -> Development:
+        """Flip one development's coverage without touching its siblings."""
+        if coverage_kind not in ("baseline", "published"):
+            raise ValueError(
+                "coverage_kind must be 'baseline' or 'published' "
+                f"(got {coverage_kind!r})"
+            )
+        cursor = self._write(
+            "UPDATE developments SET covered = ?, coverage_kind = ?, "
+            "covered_at = CASE WHEN ? THEN COALESCE(covered_at, ?) ELSE NULL END, "
+            "publication_id = ? "
+            "WHERE work_id = ? AND development_key = ?",
+            (int(bool(covered)), coverage_kind, int(bool(covered)),
+             utc_now_iso(), publication_id, work_id, development_key),
+            f"setting coverage of {development_key} of {work_id}",
+        )
+        if cursor.rowcount == 0:
+            raise StateStoreError(
+                f"unknown development {development_key} of {work_id}"
+            )
+        return self.get_development(work_id, development_key)  # type: ignore[return-value]
+
+    def get_development(self, work_id: str,
+                        development_key: str) -> Development | None:
+        rows = self._read(
+            "SELECT * FROM developments WHERE work_id = ? AND development_key = ?",
+            (work_id, development_key),
+        )
+        return Development.from_row(rows[0]) if rows else None
+
+    def list_developments(self, work_id: str, *,
+                          uncovered_only: bool = False) -> list[Development]:
+        """One project's developments in stable key order — the candidate
+        pool a future opportunity-selection milestone reads."""
+        sql = "SELECT * FROM developments WHERE work_id = ?"
+        if uncovered_only:
+            sql += " AND covered = 0"
+        rows = self._read(sql + " ORDER BY development_key", (work_id,))
+        return [Development.from_row(row) for row in rows]
 
     # -- publish intents ----------------------------------------------------
 

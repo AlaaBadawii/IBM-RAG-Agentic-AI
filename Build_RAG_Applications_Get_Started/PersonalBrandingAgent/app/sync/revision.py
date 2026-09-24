@@ -394,3 +394,40 @@ def read_revision(source: SourceDefinition) -> SourceRevision:
             detail="the repository has no commits, so it is synchronized by content",
         )
     return SourceRevision(kind=RevisionKind.GIT, revision=commit)
+
+
+def diff_numstat(repo: Path, previous: str,
+                 current: str) -> dict[str, tuple[int, int]]:
+    """Added/deleted line counts per path between two commits.
+
+    Same diff family as :func:`changed_paths` (same two revisions, same
+    rename detection is unnecessary here — counts are per path either way),
+    exposed because "one modified file" says nothing about magnitude: a typo
+    and a rewrite look identical in ``--name-status``. Binary files report
+    ``-`` counts and are left out of the mapping rather than guessed at.
+    """
+    output = _git(repo, ["diff", "--numstat", previous, current, "--"])
+    counts: dict[str, tuple[int, int]] = {}
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        added, deleted, path = parts
+        if added == "-" or deleted == "-":
+            continue
+        try:
+            counts[path] = (int(added), int(deleted))
+        except ValueError:
+            continue
+    return counts
+
+
+def list_tree(repo: Path, revision: str) -> tuple[str, ...]:
+    """Every path in one revision's tree, sorted.
+
+    The complement a bare diff cannot give: whether a top-level directory
+    the diff adds files under existed before, i.e. whether a project was
+    started versus extended.
+    """
+    output = _git(repo, ["ls-tree", "-r", "--name-only", "-z", revision, "--"])
+    return tuple(sorted(part for part in output.split("\0") if part))

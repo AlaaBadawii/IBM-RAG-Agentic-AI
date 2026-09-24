@@ -9,6 +9,9 @@ Secrets note:
     OPENROUTER_API_KEY. It is *the OpenRouter key* — the name is historical,
     the client is OpenAI-compatible talking to OpenRouter
     (https://openrouter.ai/api/v1). Never log it (see logging_config).
+    The Gemini key is read from GOOGLE_API_KEY and goes to Google's Gemini
+    API directly via the native SDK; it is the key the Agent, generation
+    and judging paths actually use.
 """
 import os
 import re
@@ -51,6 +54,8 @@ def _env_bool(name: str, default: bool) -> bool:
 # --- LLM (OpenRouter, OpenAI-compatible client) ---------------------------
 # The key name OPENAI_API_KEY is kept for compatibility; it holds an
 # OpenRouter key (sk-or-v1-...). OPENROUTER_API_KEY is also accepted.
+# Only multi-query retrieval still uses this path; the Agent reasoner, the
+# generator and the support judge call Gemini directly (see below).
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
 OPENROUTER_BASE_URL = _env_str("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 MODEL_ID = _env_str("MODEL_ID", "deepseek/deepseek-v4-flash")
@@ -59,6 +64,23 @@ GENERATION_PARAMS = {
     "max_tokens": _env_int("MAX_TOKENS", 800),
     "temperature": float(_env_str("TEMPERATURE", "0.7")),
 }
+
+# --- LLM (Google Gemini API, native client) --------------------------------
+# The Agent reasoner, the post generator and the support judge all call one
+# pinned Gemini model through the native google-genai SDK with enforced
+# structured output, instead of routing through OpenRouter. The pin is a
+# default like any other: override GEMINI_MODEL_ID in .env to move it, but
+# never to a "-preview"/"-exp" model on an unattended path.
+#
+# gemini-3.6-flash: stable, production-ready Flash for general agentic tasks.
+# Pinned here because on 2026-09-24 the structured-output serving path
+# demand-shed every schema-bearing call on both newer pins — gemini-3.8-flash
+# (all calls, plain included) and gemini-3.7-flash (schema calls; plain text
+# served fine on the same key seconds apart) — while gemini-3.6-flash served
+# schema-bearing calls cleanly. Revisit 3.7/3.8-flash when their capacity
+# settles; the override below is the lever, not a code change.
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or ""
+GEMINI_MODEL_ID = _env_str("GEMINI_MODEL_ID", "gemini-3.6-flash")
 
 # --- Embeddings / reranking (local, no API cost) --------------------------
 EMBEDDING_MODEL = _env_str(
@@ -166,6 +188,21 @@ SMTP_TIMEOUT_SECONDS = _env_float("SMTP_TIMEOUT_SECONDS", 30.0)
 # produce an email every run. The *first* occurrence always notifies; repeats
 # of the same failure inside this window do not.
 SMTP_REPEAT_AFTER_HOURS = _env_float("SMTP_REPEAT_AFTER_HOURS", 24.0)
+
+
+def require_google_key() -> str:
+    """Return the Google Gemini API key or raise ConfigError.
+
+    Validated lazily like require_openrouter_key(): importing the
+    application never needs a credential, only a real model call does.
+    """
+    if not GOOGLE_API_KEY:
+        raise ConfigError(
+            "Google Gemini API key missing: set GOOGLE_API_KEY in .env. "
+            "Needed for Agent reasoning, generation, and verification "
+            "judging; all other strategies run fully local."
+        )
+    return GOOGLE_API_KEY
 
 
 def require_openrouter_key() -> str:

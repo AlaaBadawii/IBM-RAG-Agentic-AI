@@ -586,7 +586,7 @@ def test_the_real_judge_reports_itself_unavailable_without_a_credential(
         SuppliedEvidence,
     )
 
-    monkeypatch.setattr(config, "OPENROUTER_API_KEY", None)
+    monkeypatch.setattr(config, "GOOGLE_API_KEY", "")
     judge = LlmSupportJudge()
     request = JudgementRequest(claims=(JudgedClaim(
         index=1, text="I built an API.",
@@ -604,7 +604,7 @@ def test_the_real_judge_reports_itself_unavailable_without_a_credential(
 
 def test_the_gate_runs_end_to_end_with_no_credential_and_no_network(
         monkeypatch):
-    monkeypatch.setattr(config, "OPENROUTER_API_KEY", None)
+    monkeypatch.setattr(config, "GOOGLE_API_KEY", "")
     result = run("I built a shipment API with FastAPI and SQLAlchemy models.",
                  judge=LlmSupportJudge())
 

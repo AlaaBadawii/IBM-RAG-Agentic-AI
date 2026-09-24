@@ -35,9 +35,9 @@ nicely, but because there is no code path from an invented label to a citation.
 **The model is injected, and only the real path touches configuration.** A
 test drives this class with a plain object that has ``.invoke()``, which is why
 the whole suite runs offline with no key and no network. The real client is
-built lazily, at the moment of the call, following
-``app/retrieval/multi_query.py``: the repository's existing OpenRouter client,
-with the repository's existing generation parameters.
+built lazily, at the moment of the call: the pinned Gemini model with an
+enforced response schema (see :mod:`app.gemini`), with the repository's
+existing generation parameters mapped onto it.
 """
 import json
 import time
@@ -65,7 +65,29 @@ from app.logging_config import get_logger, redact
 
 logger = get_logger(__name__)
 
-__all__ = ["ModelOutput", "PostGenerator", "parse_generation_output"]
+__all__ = [
+    "GENERATION_RESPONSE_SCHEMA",
+    "ModelOutput",
+    "PostGenerator",
+    "parse_generation_output",
+]
+
+#: The post-or-decline shape the generator must produce, enforced by the API
+#: rather than extracted from free text afterwards. Every field the strict
+#: parser (:func:`parse_generation_output`) reads is required here.
+GENERATION_RESPONSE_SCHEMA: Mapping[str, Any] = {
+    "type": "object",
+    "properties": {
+        "declined": {"type": "boolean"},
+        "post": {"type": "string"},
+        "evidence_used": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "reason": {"type": "string"},
+    },
+    "required": ["declined", "post", "evidence_used", "reason"],
+}
 
 
 @dataclass(frozen=True)
@@ -165,20 +187,20 @@ def parse_generation_output(text: str) -> ModelOutput:
 
 
 def _make_llm(model_id: str, parameters: Mapping[str, Any]):
-    """The real client: the repository's OpenRouter setup, built on demand.
+    """The real client: the pinned Gemini model with enforced JSON output.
 
     Imported here rather than at module scope so that importing the generation
     layer — which the test suite does constantly — costs nothing and needs no
-    credential. This mirrors ``app/retrieval/multi_query.py``, which is the
-    working OpenRouter pattern ``PLAN.md`` Step 8 points at.
+    credential. The key is validated eagerly (no network involved).
     """
-    from langchain_openai import ChatOpenAI
+    from app.gemini import GeminiJsonClient
 
-    return ChatOpenAI(
-        api_key=config.require_openrouter_key(),
-        base_url=config.OPENROUTER_BASE_URL,
-        model=model_id,
-        **dict(parameters),
+    params = dict(parameters)
+    config.require_google_key()
+    return GeminiJsonClient(
+        model_id=model_id,
+        max_output_tokens=params["max_tokens"],
+        response_schema=GENERATION_RESPONSE_SCHEMA,
     )
 
 
@@ -213,7 +235,7 @@ class PostGenerator:
         Args:
             llm: anything with ``invoke(messages) -> response`` where the
                 response has ``content``. Injected by tests; when absent, the
-                real OpenRouter client is built at call time, which is the only
+                real Gemini client is built at call time, which is the only
                 moment a credential is needed.
             model_id: recorded in the metadata and passed to the client.
             parameters: generation parameters, recorded verbatim. Defaults to
@@ -222,7 +244,7 @@ class PostGenerator:
                 to the prompt that produced it.
         """
         self._llm = llm
-        self._model_id = model_id or config.MODEL_ID
+        self._model_id = model_id or config.GEMINI_MODEL_ID
         self._parameters = dict(
             config.GENERATION_PARAMS if parameters is None else parameters
         )

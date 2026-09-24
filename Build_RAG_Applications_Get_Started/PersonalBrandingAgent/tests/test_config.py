@@ -29,7 +29,8 @@ def _reload_with(monkeypatch, **env):
     # os.environ by the time any test runs, so patching load_dotenv to a no-op
     # is not enough on its own.
     for key in (list(env.keys())
-                + ["OPENAI_API_KEY", "OPENROUTER_API_KEY"]
+                + ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "GOOGLE_API_KEY",
+                   "GEMINI_MODEL_ID"]
                 + list(SMTP_ENV_VARS)):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
@@ -52,6 +53,7 @@ def test_defaults():
     assert config.EXCLUDE_READMES is True
     assert config.EMBEDDING_MODEL == "sentence-transformers/all-MiniLM-L6-v2"
     assert config.OPENROUTER_BASE_URL == "https://openrouter.ai/api/v1"
+    assert config.GEMINI_MODEL_ID == "gemini-3.6-flash"
 
 
 def test_env_overrides(monkeypatch):
@@ -141,11 +143,15 @@ def test_an_unknown_tls_mode_is_a_configuration_error(monkeypatch):
         _reload_with(monkeypatch, SMTP_TLS="STARTLS")
 
 
-# --- OpenRouter provider configuration ---------------------------------------
+# --- Gemini provider configuration -------------------------------------------
+# The Agent reasoner, the generator and the support judge call one pinned
+# Gemini model through the native SDK with enforced structured output.
+# Only multi-query retrieval still uses the OpenRouter path below it.
 
-#: Obviously fake, in the OpenRouter family. Never a real secret: the clients
-#: below are constructed but never invoked, so no packet leaves the machine.
-FAKE_OPENROUTER_KEY = "sk-or-v1-test-key-0000"
+#: Obviously fake, in the Google AI Studio family. Never a real secret: the
+#: clients below are constructed but never invoked, so no packet leaves the
+#: machine.
+FAKE_GOOGLE_KEY = "AIza-test-key-0000"
 
 
 def _client_defaults():
@@ -154,25 +160,81 @@ def _client_defaults():
     from app.verification.judge import _make_llm as judge_make_llm
 
     return {
-        "agent reasoner": agent_make_llm,
-        "generation": generation_make_llm,
-        "support judge": judge_make_llm,
+        "agent reasoner": (agent_make_llm, "publish"),
+        "generation": (generation_make_llm, "post"),
+        "support judge": (judge_make_llm, "verdicts"),
     }
+
+
+def test_configured_key_builds_the_gemini_client(monkeypatch):
+    """Correctly configured: each LLM boundary builds a pinned-model client.
+
+    Every LLM boundary (Agent reasoner, generator, advisory judge) builds a
+    Gemini client for the exact model id it was given, carrying the call's
+    token budget and the boundary's own enforced response schema. Building
+    the client opens nothing — this test pins the wiring, offline.
+    """
+    _reload_with(monkeypatch, GOOGLE_API_KEY=FAKE_GOOGLE_KEY)
+    for name, (make_llm, schema_key) in _client_defaults().items():
+        client = make_llm("gemini-test-model", {"max_tokens": 7})
+        assert client.model_id == "gemini-test-model", name
+        assert schema_key in client.response_schema["properties"], name
+
+
+def test_model_pin_is_honored_not_rewritten(monkeypatch):
+    """An explicit model id — or a GEMINI_MODEL_ID override — is passed
+    through untouched.
+
+    The code does not validate or rewrite the model: a wrong id fails at call
+    time as an API error, classified downstream, never silently fixed up
+    here.
+    """
+    _reload_with(monkeypatch, GOOGLE_API_KEY=FAKE_GOOGLE_KEY,
+                 GEMINI_MODEL_ID="gemini-custom-flash")
+    assert config.GEMINI_MODEL_ID == "gemini-custom-flash"
+    for name, (make_llm, _schema_key) in _client_defaults().items():
+        client = make_llm("gemini-custom-flash", {"max_tokens": 7})
+        assert client.model_id == "gemini-custom-flash", name
+
+
+def test_missing_google_key_names_the_variable(monkeypatch):
+    """Missing: the error names the expected variable."""
+    _reload_with(monkeypatch)
+    assert config.GOOGLE_API_KEY == ""
+    with pytest.raises(ConfigError, match="GOOGLE_API_KEY"):
+        config.require_google_key()
+
+
+def test_require_google_key_returns_key_when_present(monkeypatch):
+    _reload_with(monkeypatch, GOOGLE_API_KEY=FAKE_GOOGLE_KEY)
+    assert config.require_google_key() == FAKE_GOOGLE_KEY
+
+
+# --- OpenRouter provider configuration (multi-query retrieval only) ----------
+
+#: Obviously fake, in the OpenRouter family. Never a real secret: the clients
+#: below are constructed but never invoked, so no packet leaves the machine.
+FAKE_OPENROUTER_KEY = "sk-or-v1-test-key-0000"
+
+
+def _openrouter_client_default():
+    from app.retrieval.multi_query import _make_llm as multi_query_make_llm
+
+    return {"multi-query retrieval": multi_query_make_llm}
 
 
 def test_configured_key_reaches_the_openrouter_endpoint(monkeypatch):
     """Correctly configured: the key is sent to the OpenRouter provider.
 
-    Every LLM boundary (Agent reasoner, generator, advisory judge) builds
-    the same OpenAI-compatible client against OPENROUTER_BASE_URL. Building
-    the client object opens nothing — this test pins the wiring, offline.
+    Multi-query retrieval is the last boundary on the OpenAI-compatible
+    client against OPENROUTER_BASE_URL. Building the client object opens
+    nothing — this test pins the wiring, offline.
     """
     _reload_with(monkeypatch, OPENROUTER_API_KEY=FAKE_OPENROUTER_KEY)
-    for name, make_llm in _client_defaults().items():
-        client = make_llm("deepseek/deepseek-test", {"temperature": 0.0})
+    for name, make_llm in _openrouter_client_default().items():
+        client = make_llm()
         assert client.openai_api_key.get_secret_value() == FAKE_OPENROUTER_KEY, name
         assert client.openai_api_base == "https://openrouter.ai/api/v1", name
-        assert client.model_name == "deepseek/deepseek-test", name
 
 
 def test_provider_mismatch_is_not_masked_in_code(monkeypatch):
@@ -185,8 +247,8 @@ def test_provider_mismatch_is_not_masked_in_code(monkeypatch):
     """
     _reload_with(monkeypatch, OPENROUTER_API_KEY=FAKE_OPENROUTER_KEY,
                  OPENROUTER_BASE_URL="https://api.openai.com/v1")
-    for name, make_llm in _client_defaults().items():
-        client = make_llm("deepseek/deepseek-test", {"temperature": 0.0})
+    for name, make_llm in _openrouter_client_default().items():
+        client = make_llm()
         assert client.openai_api_base == "https://api.openai.com/v1", name
         assert client.openai_api_key.get_secret_value() == FAKE_OPENROUTER_KEY
 
@@ -212,3 +274,18 @@ def test_env_example_names_the_openrouter_key():
     assert "OPENROUTER_API_KEY" in values
     assert "YOUR" in values["OPENROUTER_API_KEY"]
     assert "sk-or-v1" in "\n".join(lines)
+
+
+def test_env_example_names_the_google_key():
+    """The template must expect a Google AI Studio key for the main path."""
+    from pathlib import Path
+
+    lines = (Path(config.__file__).resolve().parents[1] / ".env.example"
+             ).read_text(encoding="utf-8").splitlines()
+    values = {
+        line.split("=", 1)[0].strip(): line.split("=", 1)[1].strip()
+        for line in lines
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+    }
+    assert "GOOGLE_API_KEY" in values
+    assert "YOUR" in values["GOOGLE_API_KEY"]

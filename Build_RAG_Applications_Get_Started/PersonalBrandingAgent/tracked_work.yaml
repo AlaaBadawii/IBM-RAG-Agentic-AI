@@ -1,0 +1,135 @@
+# Tracked work for opportunity-aware branding (M1).
+#
+# Each entry is one professional project/activity the branding system tracks.
+# `sources` names registry sources (sources.yaml) whose material belongs to
+# the work — references, not copies. Empty means corpus-only work: no
+# synchronized source feeds it, and that is legitimate (the Personal
+# Branding Agent's own record lives in data/, not in a registered mirror).
+#
+# `developments` seed the coverage ledger. `covered: true` with
+# `coverage_kind: baseline` means "historical material, not a new
+# opportunity" — it is NOT a publication record and never affects
+# publication history or overuse counts. `covered: false` means the
+# development is still owed attention from a future milestone.
+#
+# Adding future work is another entry here. No code changes.
+tracked_work:
+  - id: quizey
+    display_name: Quizey
+    description: Quiz platform (FastAPI); Phase 1 completed, Phase 2 in progress.
+    sources: [quizey-v2, quizey-platform]
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical Quizey work through Phase 1
+        covered: true
+        coverage_kind: baseline
+      - key: phase-2
+        display_name: Quizey Phase 2 work
+        covered: false
+        corpus_categories: [in_progress_projects]
+
+  - id: personal-branding-agent
+    display_name: Personal Branding Agent (Abu Prompt)
+    description: Autonomous personal-branding system; record lives in data/.
+    sources: []
+    enabled: true
+    branding_priority: high
+    developments:
+      - key: historical-baseline
+        display_name: Historical agent work before the introduction
+        covered: true
+        coverage_kind: baseline
+      - key: abu-prompt-introduction
+        display_name: Abu Prompt introduction
+        covered: false
+        corpus_categories: [in_progress_projects]
+        evidence_sources: [
+          public_positioning/abu_prompt.md,
+          in_progress_projects/personal_branding_agent.md,
+        ]
+        editorial_intent: >-
+          Write a first-person LinkedIn introduction of the Abu Prompt
+          persona (@AbuPrompt): say who Abu Prompt is, the useful role it
+          serves, one meaningful current capability, and where it is heading
+          next. Mark anything planned as planned. Do not report
+          implementation steps, file paths, or component lists; do not claim
+          comment-response or mention-triggered interaction exists today.
+          About 80-140 words.
+
+  - id: ai-hackathon
+    display_name: AI Hackathon
+    description: Hackathon lectures and practice lab.
+    sources: [hackathon-lectures, hackathon-practice-lab]
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical hackathon work
+        covered: true
+        coverage_kind: baseline
+
+  - id: ai-agents
+    display_name: AI Agents work
+    description: Agent experiments and coursework.
+    sources: [ai-agents]
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical agents work
+        covered: true
+        coverage_kind: baseline
+
+  - id: ibm-genai-coursework
+    display_name: IBM RAG and agentic AI coursework
+    description: Course projects under LLMs/IBM.
+    sources: [ibm-genai-coursework]
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical coursework
+        covered: true
+        coverage_kind: baseline
+
+  - id: fastapi
+    display_name: FastAPI work
+    description: FastAPI projects; record lives in data/.
+    sources: []
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical FastAPI work
+        covered: true
+        coverage_kind: baseline
+
+  - id: kodekloud-devops
+    display_name: KodeKloud DevOps specialization
+    description: DevOps specialization track.
+    sources: [kodekloud-devops-specialization]
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical DevOps track work
+        covered: true
+        coverage_kind: baseline
+
+  - id: dsa-python
+    display_name: DSA Python LeetCode 130
+    description: Data-structures practice series.
+    sources: [dsa-python-leetcode-130]
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical practice work
+        covered: true
+        coverage_kind: baseline
+
+  - id: style-finder
+    display_name: Style Finder
+    description: In-progress styling project; record lives in data/.
+    sources: []
+    enabled: true
+    developments:
+      - key: historical-baseline
+        display_name: Historical Style Finder work
+        covered: true
+        coverage_kind: baseline

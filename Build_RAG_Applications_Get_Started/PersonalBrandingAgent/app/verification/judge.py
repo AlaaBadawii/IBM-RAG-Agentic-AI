@@ -34,6 +34,7 @@ from app.verification.support import JudgeVerdict, JudgementRequest
 __all__ = [
     "JUDGE_PROMPT_VERSION",
     "SUPPORT_JUDGE_PARAMETERS",
+    "JUDGEMENT_RESPONSE_SCHEMA",
     "LlmSupportJudge",
     "build_judgement_messages",
     "parse_judgement",
@@ -65,34 +66,42 @@ SUPPORT_JUDGE_PARAMETERS: Mapping[str, Any] = {
     # A judge is asked for a boolean and a sentence per claim; a long answer
     # is a sign it is doing something else.
     #
-    # Same arithmetic as ``app.agent.llm.AGENT_PARAMETERS``: the cap covers the
-    # model's hidden reasoning as well as the JSON it finally emits. At 600 the
-    # judge was truncated on every run, which surfaced only as
-    # ``degraded: True`` with "the support judge did not answer with JSON" —
-    # because the advisory layer is *allowed* to degrade, that failure was
-    # silent by design while the deterministic gates still owned the outcome.
+    # ``max_tokens`` is translated to the Gemini ``max_output_tokens`` budget
+    # at the client boundary (:mod:`app.gemini`). 4000, not the Agent's 3000,
+    # is kept from the OpenRouter era, where the routed provider needed the
+    # headroom (``nvidia/nemotron-3.5-lightning:free`` once spent 3,452
+    # reasoning tokens against a 3000 cap). Under the pinned model the same
+    # number is generous rather than marginal; lower it only with a measured
+    # reason, never to chase a smaller bill on an unattended path.
     #
-    # 4000, not the Agent's 3000: measured against the live provider, 3000 was
-    # still truncated. The router served ``nvidia/nemotron-3.5-lightning:free``
-    # for that call, which spent 3452 reasoning tokens against the 3000 cap and
-    # emitted no JSON at all (``finish_reason: "length"``). At 4000 the same
-    # request parsed on 7 of 8 consecutive calls.
-    #
-    # That 7-of-8 is the honest number, and it is why this value is a
-    # mitigation rather than a fix. The eighth call did **not** truncate — it
-    # answered within budget and the answer contained no verdicts, because the
-    # router had served ``liquid/lfm-2.5-2.6b:free``, a model too small to
-    # follow the schema. Eight consecutive calls were served by eight
-    # *different* models. No fixed cap bounds a requirement that moves with an
-    # unknown model, and no cap fixes a model that cannot follow the
-    # instruction; both need the model pinned. Until then a degraded judgement
-    # is possible on any run, and the deterministic gates remain the only ones
-    # allowed to decide the outcome.
-    #
-    # Zero temperature because the same draft and the same evidence should not
-    # produce two different gates.
+    # No temperature, for the same reason as
+    # ``app.agent.llm.AGENT_PARAMETERS``: the pinned model family does not
+    # accept sampling parameters. Until the model is repinned, a degraded
+    # judgement remains possible on any run for transport reasons, and the
+    # deterministic gates remain the only ones allowed to decide the outcome.
     "max_tokens": 4000,
-    "temperature": 0.0,
+}
+
+#: The verdict shape the judge must produce, enforced by the API rather than
+#: extracted from free text afterwards. Every field the strict parser
+#: (:func:`parse_judgement`) reads is required here.
+JUDGEMENT_RESPONSE_SCHEMA: Mapping[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdicts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim_index": {"type": "integer"},
+                    "supported": {"type": "boolean"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["claim_index", "supported", "reason"],
+            },
+        },
+    },
+    "required": ["verdicts"],
 }
 
 _JUDGE_SYSTEM = (
@@ -218,19 +227,21 @@ def parse_judgement(text: str) -> tuple[JudgeVerdict, ...]:
 
 
 def _make_llm(model_id: str, parameters: Mapping[str, Any]):
-    """The real client, built on demand — the same boundary as
-    :func:`app.generation.generator._make_llm`.
+    """The real client: the pinned Gemini model with enforced JSON output.
 
     Imported here rather than at module scope so that importing the
-    verification layer costs nothing and needs no credential.
+    verification layer costs nothing and needs no credential. The key is
+    validated eagerly (no network involved), so a missing key is a
+    configuration error at build time.
     """
-    from langchain_openai import ChatOpenAI
+    from app.gemini import GeminiJsonClient
 
-    return ChatOpenAI(
-        api_key=config.require_openrouter_key(),
-        base_url=config.OPENROUTER_BASE_URL,
-        model=model_id,
-        **dict(parameters),
+    params = dict(parameters)
+    config.require_google_key()
+    return GeminiJsonClient(
+        model_id=model_id,
+        max_output_tokens=params["max_tokens"],
+        response_schema=JUDGEMENT_RESPONSE_SCHEMA,
     )
 
 
@@ -250,7 +261,7 @@ def _response_text(response: Any) -> str:
 
 
 class LlmSupportJudge:
-    """The advisory judge, backed by the repository's OpenRouter client.
+    """The advisory judge, backed by the pinned Gemini model.
 
     The class that decides what *unavailable* means. Everything that stops it
     from producing a usable answer — no credential, a client that will not
@@ -282,7 +293,7 @@ class LlmSupportJudge:
                 the prompt that produced it.
         """
         self._llm = llm
-        self._model_id = model_id or config.MODEL_ID
+        self._model_id = model_id or config.GEMINI_MODEL_ID
         self._parameters = dict(
             SUPPORT_JUDGE_PARAMETERS if parameters is None else parameters
         )

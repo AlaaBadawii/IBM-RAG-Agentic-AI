@@ -11,6 +11,7 @@ Timestamps
     order, which the stale-lock check relies on. SQLite's own ``datetime()``
     is never used — it emits a different format and would break comparison.
 """
+import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -127,6 +128,88 @@ class SourceLifecycleState:
             lifecycle=LifecycleState(row["lifecycle"]),
             updated_at=row["updated_at"],
             note=row["note"],
+        )
+
+
+@dataclass(frozen=True)
+class TrackedWork:
+    """One professional project or activity tracked for branding.
+
+    ``sources`` names registry sources whose material belongs to this work
+    — references, not copies. Empty means corpus-only work (no synchronized
+    source feeds it). Adding future work is a configuration row, not code.
+    """
+
+    work_id: str
+    display_name: str
+    description: str
+    sources: tuple[str, ...]
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "TrackedWork":
+        return cls(
+            work_id=row["work_id"],
+            display_name=row["display_name"],
+            description=row["description"],
+            sources=tuple(json.loads(row["sources"])),
+            enabled=bool(row["enabled"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass(frozen=True)
+class ReviewCursor:
+    """How far one source of one tracked work has been evaluated for
+    opportunities. A NULL revision means never reviewed. Written only by
+    the branding path — sync checkpoints advance independently."""
+
+    work_id: str
+    source_name: str
+    reviewed_revision: str | None
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "ReviewCursor":
+        return cls(
+            work_id=row["work_id"],
+            source_name=row["source_name"],
+            reviewed_revision=row["reviewed_revision"],
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass(frozen=True)
+class Development:
+    """One development's coverage state within a tracked work.
+
+    ``covered`` is True exactly when the development was communicated (a
+    publication, referenced by id) or intentionally baselined as historical
+    (``coverage_kind == 'baseline'``). It is never True merely because the
+    project appeared in some other publication.
+    """
+
+    work_id: str
+    development_key: str
+    display_name: str
+    covered: bool
+    coverage_kind: str
+    covered_at: str | None = None
+    publication_id: str | None = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "Development":
+        return cls(
+            work_id=row["work_id"],
+            development_key=row["development_key"],
+            display_name=row["display_name"],
+            covered=bool(row["covered"]),
+            coverage_kind=row["coverage_kind"],
+            covered_at=row["covered_at"],
+            publication_id=row["publication_id"],
         )
 
 

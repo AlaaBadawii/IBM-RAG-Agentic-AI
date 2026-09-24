@@ -178,11 +178,13 @@ def test_tokenize():
 
 # ----------------------------------------------------------------- engine ---
 
-def test_engine_facade_dispatches_all_strategies(ingested_store):
+def test_engine_facade_dispatches_all_strategies(ingested_store,
+                                                 fake_cross_encoder):
     from app.retrieval.engine import RetrievalEngine
     from app.retrieval.models import STRATEGIES
 
-    engine = RetrievalEngine(store=ingested_store)
+    engine = RetrievalEngine(store=ingested_store,
+                             reranker=fake_cross_encoder)
     for strategy in STRATEGIES:
         result = engine.retrieve("FastAPI", strategy=strategy, top_k=3)
         assert result.strategy == strategy, f"strategy {strategy} mislabeled"
@@ -212,10 +214,12 @@ def test_engine_metadata_strategy_passes_filters(ingested_store):
     assert result.documents
 
 
-def test_engine_retrieve_all_runs_every_strategy(ingested_store):
+def test_engine_retrieve_all_runs_every_strategy(ingested_store,
+                                                 fake_cross_encoder):
     from app.retrieval.engine import RetrievalEngine
 
-    engine = RetrievalEngine(store=ingested_store)
+    engine = RetrievalEngine(store=ingested_store,
+                             reranker=fake_cross_encoder)
     # multi_query without an injected LLM falls back gracefully.
     results = engine.retrieve_all("databases", top_k=2)
     assert set(results.keys()) == {
@@ -239,7 +243,7 @@ def test_compare_derive_filter_deterministic():
 def test_compare_cli_runs_all_strategies(ingested_store, capsys):
     from app.retrieval.compare import main
 
-    code = main(["FastAPI databases", "--top-k", "2"])
+    code = main(["FastAPI databases", "--top-k", "2"], store=ingested_store)
     assert code == 0
     out = capsys.readouterr().out
     assert "STRATEGY: VECTOR" in out

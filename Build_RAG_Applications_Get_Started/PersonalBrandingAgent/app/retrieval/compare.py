@@ -206,7 +206,7 @@ def print_explanations(results: dict[str, RetrievalResult], query: str) -> None:
             )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, store=None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m app.retrieval.compare",
         description="Run one question through all retrieval strategies, side by side.",
@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Unknown strategies: {sorted(unknown)}. Valid: {list(STRATEGIES)}")
         return 2
 
-    engine = RetrievalEngine()
+    engine = RetrievalEngine(store=store)
     filters = derive_filter(args.query)
     print(f"QUESTION: {args.query!r}")
     print(f"top_k={args.top_k}")

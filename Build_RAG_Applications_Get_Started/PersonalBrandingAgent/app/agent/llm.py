@@ -1,4 +1,4 @@
-"""The reasoner, backed by the repository's OpenRouter client.
+"""The reasoner, backed by the pinned Gemini model with enforced JSON output.
 
 The mirror of :class:`app.verification.judge.LlmSupportJudge`, with one
 difference that follows from where each sits.
@@ -29,7 +29,7 @@ from app.agent.prompt import (
 )
 from app.logging_config import get_logger, redact
 
-__all__ = ["AGENT_PARAMETERS", "LlmContentReasoner"]
+__all__ = ["AGENT_PARAMETERS", "REASONING_RESPONSE_SCHEMA", "LlmContentReasoner"]
 
 logger = get_logger(__name__)
 
@@ -37,46 +37,68 @@ AGENT_PARAMETERS: Mapping[str, Any] = {
     # A decision, a short angle and a list of labels. A long answer is a sign
     # the model is writing the post instead of choosing what to write about.
     #
-    # The cap is not a length limit on the answer, though. A reasoning model
-    # spends output tokens on hidden reasoning *before* it emits the JSON, and
-    # this budget covers both. At 500 the configured model was cut off inside
-    # the object — ``finish_reason: "length"``, 605 reasoning tokens against a
-    # 500 cap, the reply ending mid-string — so ``parse_reasoning_answer``
-    # found no JSON and every run ended ``REASONING_FAILED`` with no draft and
-    # no decision. 3000 leaves room for the reasoning plus the ~120-token
-    # answer. A truncation presents as ``finish_reason: "length"`` and "did
-    # not answer with JSON", never as a short answer, so raise this whenever
-    # the configured model changes.
+    # ``max_tokens`` is translated to the Gemini ``max_output_tokens`` budget
+    # at the client boundary (:mod:`app.gemini`). The budget covers the
+    # emitted JSON; 3000 is kept from the OpenRouter era, where the same
+    # number had to cover hidden reasoning *plus* the answer (at 500 the
+    # routed model truncated mid-object and every run ended
+    # ``REASONING_FAILED``). If the pinned model ever truncates, raise this —
+    # a truncation still presents as ``finish_reason: "length"`` and "did
+    # not answer with JSON", never as a short answer.
     #
-    # Zero temperature because the same context should not produce two
-    # different decisions, and ``PLAN.md`` Step 10 requires the decision to be
-    # reproducible under a fake LLM and traceable to a prompt version under a
-    # real one. Temperature is not sufficient for that on its own: a routing
-    # provider such as ``openrouter/free`` can return opposite decisions for
-    # byte-identical requests at 0.0, and it serves a *different model* to
-    # each call — eight consecutive judge calls were served by eight distinct
-    # models. Both the reproducibility gap and the token budget are therefore
-    # properties of the routing provider rather than of this constant, and
-    # neither is closed until the model is pinned.
+    # No temperature: the pinned model family does not accept sampling
+    # parameters (Google's API conventions deprecate them in favour of
+    # thinking effort, and setting them is a validation error on some
+    # paths). Determinism rests on the pinned model plus the enforced
+    # response schema below; ``PLAN.md`` Step 10's reproducibility
+    # requirement still holds under a fake LLM exactly as before.
     "max_tokens": 3000,
-    "temperature": 0.0,
+}
+
+#: The answer shape the reasoner must produce, enforced by the API rather
+#: than extracted from free text afterwards. Every field the strict parser
+#: (:func:`~app.agent.prompt.parse_reasoning_answer`) reads is required
+#: here, so "the model did not answer with JSON" is unreachable short of a
+#: transport-level failure instead of the modal failure as it was under the
+#: routed provider.
+REASONING_RESPONSE_SCHEMA: Mapping[str, Any] = {
+    "type": "object",
+    "properties": {
+        "publish": {"type": "boolean"},
+        "topic": {"type": "string"},
+        "angle": {"type": "string"},
+        "project": {"type": "string"},
+        "evidence": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "strategy": {"type": "string"},
+        "rationale": {"type": "string"},
+        "decline_reason": {"type": "string"},
+    },
+    "required": [
+        "publish", "topic", "angle", "project", "evidence", "strategy",
+        "rationale", "decline_reason",
+    ],
 }
 
 
 def _make_llm(model_id: str, parameters: Mapping[str, Any]):
-    """The real client, built on demand — the same boundary as
-    :func:`app.verification.judge._make_llm`.
+    """The real client: the pinned Gemini model with enforced JSON output.
 
     Imported here rather than at module scope so that importing the agent costs
     nothing and needs no credential: every test in the suite runs without one.
+    The key is still validated eagerly (no network involved), so a missing key
+    is a configuration error at build time, not a mystery at call time.
     """
-    from langchain_openai import ChatOpenAI
+    from app.gemini import GeminiJsonClient
 
-    return ChatOpenAI(
-        api_key=config.require_openrouter_key(),
-        base_url=config.OPENROUTER_BASE_URL,
-        model=model_id,
-        **dict(parameters),
+    params = dict(parameters)
+    config.require_google_key()
+    return GeminiJsonClient(
+        model_id=model_id,
+        max_output_tokens=params["max_tokens"],
+        response_schema=REASONING_RESPONSE_SCHEMA,
     )
 
 
@@ -96,7 +118,7 @@ def _response_text(response: Any) -> str:
 
 
 class LlmContentReasoner:
-    """The Agent's reasoner, backed by the repository's OpenRouter client.
+    """The Agent's reasoner, backed by the pinned Gemini model.
 
     The class that decides what *unavailable* means. Everything that stops it
     from producing a usable answer — no credential, a client that will not
@@ -125,7 +147,7 @@ class LlmContentReasoner:
             prompt_version: recorded on the proposal alongside the model id.
         """
         self._llm = llm
-        self._model_id = model_id or config.MODEL_ID
+        self._model_id = model_id or config.GEMINI_MODEL_ID
         self._parameters = dict(
             AGENT_PARAMETERS if parameters is None else parameters
         )

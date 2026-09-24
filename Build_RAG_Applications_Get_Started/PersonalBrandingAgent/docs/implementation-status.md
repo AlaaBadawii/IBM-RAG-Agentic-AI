@@ -2609,6 +2609,45 @@ judge 4000) are mitigations that reduce how often an unlucky route is hit,
 and are documented as such at `app/agent/llm.py::AGENT_PARAMETERS` and
 `app/verification/judge.py::SUPPORT_JUDGE_PARAMETERS`.
 
+#### Update 2026-09-24: router replaced by a pinned Gemini model — issue narrowed, not closed
+
+The Agent reasoner, the generator and the support judge now call one pinned
+model (`config.GEMINI_MODEL_ID`) through Google's Gemini API directly, with
+the answer shape enforced by the API (`response_mime_type` + `response_schema`)
+instead of extracted from free text. The strict `parse_*` functions stay as
+the checking half — enforcement describes what is allowed, parsing verifies
+it — but "the model did not answer with JSON" should now be unreachable
+short of a transport failure, which eliminates the truncation and
+wrong-model failure classes above by construction rather than by budget.
+
+What this changes about the two consequences:
+
+* **Token budgets are now sizable.** One model, one requirement. The 3000 /
+  4000 ceilings are kept as generous starting points; tune them against
+  measured usage of the pinned model, not against a router's worst case.
+* **Reproducibility is closer but not restored.** The pinned model family
+  does not accept `temperature` (Google deprecates sampling parameters in
+  favour of thinking effort), so it is deliberately not sent; determinism
+  rests on the pin plus the enforced schema. Step 10 still holds fully under
+  a fake LLM; production sameness is now "same model, same schema" rather
+  than "same decision, provably".
+
+Why this is narrowed and not closed: the first live runs on the new path
+all failed provider-side before any JSON was involved. On 2026-09-24 the
+structured-output serving path demand-shed schema-bearing calls with `503
+UNAVAILABLE` ("high demand … try again later") on `gemini-3.8-flash` (every
+call, plain included) and `gemini-3.7-flash` (schema calls only — plain text
+served fine on the same key seconds apart, proven by interleaved
+plain/schema/plain probes), while `gemini-3.6-flash` served 20-token schema
+probes with 200s yet shed the full 20KB reasoning request the same hour.
+The pin therefore moved 3.8 → 3.7 → 3.6-flash on measured evidence (each move
+recorded at `config.GEMINI_MODEL_ID`; `GEMINI_MODEL_ID` in `.env` moves it
+without a code change), and `gemini-2.5-flash` was observed 404-retired for
+new users, which rules it out as a fallback. No draft has yet been produced
+on the new path: the pipeline is fail-closed and correct, but still
+unproven live. The remaining risk is capacity, not correctness — and
+capacity is a property of the provider's hour, not of this code.
+
 ---
 
 ### 16. A recycled pid can make a stale lock look live

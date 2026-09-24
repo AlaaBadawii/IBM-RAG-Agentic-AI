@@ -125,6 +125,7 @@ class BrandingAgent:
         revision_limit: int = MAX_REVISION_ATTEMPTS,
         history_limit: int = DEFAULT_DIGEST_LIMIT,
         prompt_version: str = AGENT_PROMPT_VERSION,
+        editorial_intent: str = "",
     ):
         """
         Args:
@@ -167,6 +168,12 @@ class BrandingAgent:
                 which owns the rule.
             history_limit: how many rows of each kind one digest carries.
             prompt_version: recorded on every proposal.
+            editorial_intent: an objective for the writer, verbatim — e.g.
+                the voice and shape a launch introduction should take. Carried
+                on every generation request as a writing constraint (the
+                documented purpose of ``PublishingConstraints.notes``), never
+                interpreted here. Empty means no objective, which is exactly
+                how every existing caller behaves.
 
         Raises:
             ValueError: ``revision_limit`` is negative. A negative budget is a
@@ -185,6 +192,7 @@ class BrandingAgent:
         self._revision_limit = revision_limit
         self._history_limit = history_limit
         self._prompt_version = prompt_version
+        self._editorial_intent = editorial_intent.strip()
 
     # -- what a caller uses -------------------------------------------------
 
@@ -337,6 +345,9 @@ class BrandingAgent:
             return proposal
 
         base = publishing_constraints(history)
+        if self._editorial_intent:
+            base = replace(
+                base, notes=(*base.notes, self._editorial_intent))
 
         attempts_made = 0
         iterations = 0
@@ -354,7 +365,7 @@ class BrandingAgent:
 
             generated = self._generator.generate(
                 proposal.generation_request(
-                    constraints=replace(base, notes=notes)
+                    constraints=replace(base, notes=(*base.notes, *notes))
                 )
             )
             if generated.declined or generated.post is None:
