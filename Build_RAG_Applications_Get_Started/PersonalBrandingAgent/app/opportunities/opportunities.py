@@ -163,10 +163,18 @@ def mark_development_published(store: Any, work_id: str, development_key: str,
     only when someone says so. Verifies the publication exists rather than
     duplicating publication state.
     """
-    if store.get_publication(publication_id) is None:
+    publication = store.get_publication(publication_id)
+    if publication is None:
         raise ValueError(
             f"unknown publication {publication_id!r}: refusing to cover "
             f"{development_key!r} of {work_id!r} against nothing"
+        )
+    from app.state import PublishState
+
+    if publication.outcome is not PublishState.PUBLISHED:
+        raise ValueError(
+            f"publication {publication_id!r} is {publication.outcome.value}, "
+            f"not published: a failed or ambiguous attempt covers nothing"
         )
     store.set_development_covered(
         work_id, development_key, covered=True,

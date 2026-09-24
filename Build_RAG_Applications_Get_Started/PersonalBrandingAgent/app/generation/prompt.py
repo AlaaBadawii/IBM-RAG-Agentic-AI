@@ -39,6 +39,7 @@ from app.generation.models import (
     GenerationRequest,
     PublishingConstraints,
 )
+from app.generation.voice import LINKEDIN_CONTRACT
 
 __all__ = [
     "PROHIBITED_CLAIMS",
@@ -52,7 +53,7 @@ __all__ = [
 #: draft (``GenerationMetadata.prompt_version``), so a post that reads oddly six
 #: months from now can be traced to the prompt that produced it instead of
 #: being explained by whatever the prompt says today.
-PROMPT_VERSION = "grounded-post-v1"
+PROMPT_VERSION = "grounded-post-v2"
 
 #: The claims a post must never contain unless the supplied evidence supports
 #: them. Named here as a tuple so the rule can be *generated* into the
@@ -109,6 +110,8 @@ INSTRUCTIONS = (
     '"declined": false, "reason": "<short explanation>"}\n'
     'Set "declined" to true, leave "post" empty, and explain why in "reason" '
     "when the evidence does not support a post."
+    "\n"
+    + LINKEDIN_CONTRACT
 )
 """The system message. Constant, and carrying the rules above it in this
 module's docstring as well as here — the enumerated prohibition is generated
