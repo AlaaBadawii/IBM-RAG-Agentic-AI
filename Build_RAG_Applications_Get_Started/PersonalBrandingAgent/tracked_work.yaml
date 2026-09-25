@@ -49,13 +49,15 @@ tracked_work:
           in_progress_projects/personal_branding_agent.md,
         ]
         editorial_intent: >-
-          Write a first-person LinkedIn introduction of the Abu Prompt
-          persona (@AbuPrompt): say who Abu Prompt is, the useful role it
-          serves, one meaningful current capability, and where it is heading
-          next. Mark anything planned as planned. Do not report
-          implementation steps, file paths, or component lists; do not claim
-          comment-response or mention-triggered interaction exists today.
-          About 80-140 words.
+          Write as Abu Prompt itself, warm and friendly, opening with
+          "Hi! I'm Abu Prompt 👋". Say who I am and what I do in simple
+          everyday language, mention a few meaningful things I can already
+          do, and mention what I am building toward as future plans. Focus
+          on value and purpose, never on how I am implemented: no step
+          numbers, file paths, component lists, workflow details, or terms
+          like DO_NOT_PUBLISH and deterministic verification gates. Sound
+          like a person greeting the reader, not like software describing
+          itself. About 80-140 words.
 
   - id: ai-hackathon
     display_name: AI Hackathon
