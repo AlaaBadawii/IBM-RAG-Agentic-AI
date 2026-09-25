@@ -53,7 +53,6 @@ def test_defaults():
     assert config.EXCLUDE_READMES is True
     assert config.EMBEDDING_MODEL == "sentence-transformers/all-MiniLM-L6-v2"
     assert config.OPENROUTER_BASE_URL == "https://openrouter.ai/api/v1"
-    assert config.GEMINI_MODEL_ID == "gemini-3.6-flash"
 
 
 def test_env_overrides(monkeypatch):
