@@ -2,7 +2,7 @@
 
 A production-oriented agent that generates, evaluates, and publishes authentic LinkedIn posts grounded in a personal knowledge base. Built as an extension of the IBM course **"Build RAG Applications: Get Started"**, applying RAG concepts to a real-world project.
 
-The project is currently in progress: the **knowledge base** (a structured `data/` corpus) and the **LinkedIn OAuth integration** are complete; the ingest → retrieve → generate → evaluate → publish pipeline is defined in `PLAN.md` (10 phases) and being built incrementally.
+The system is implemented and operating (v1): a persistent SQLite state store, incremental knowledge synchronization, stratified retrieval over a clean Chroma corpus, a bounded reasoning agent over a pinned Gemini model, deterministic verification gates, duplicate-safe publishing through the existing LinkedIn integration, notification on failure, and scheduled execution. The first Abu Prompt introduction post has been published through the Agent's normal publishing workflow.
 
 ---
 
@@ -12,7 +12,7 @@ The Personal Branding Agent bridges RAG and real-world application:
 
 - **Knowledge base** — a structured `data/` corpus containing completed/in-progress projects, courses, certificates, evidence (with evidence states), stories/lessons, vision/goals, writing style, and public positioning.
 - **LinkedIn OAuth** — full OAuth 2.0 flow with token refresh, and the ability to publish posts via the LinkedIn REST API (`/rest/posts`, `w_member_social` scope).
-- **RAG pipeline** (planned) — ingest the knowledge base into ChromaDB, retrieve relevant context, generate a LinkedIn post via an LLM, evaluate it against quality gates (PASS / REVISE / REJECT), and optionally publish it.
+- **RAG pipeline** (implemented, v1) — ingest the knowledge base into ChromaDB, detect meaningful changes in tracked work, select publishing opportunities, retrieve development-specific evidence, generate a LinkedIn post via a pinned Gemini model with a reusable writing contract, evaluate it against deterministic quality gates, and publish it through duplicate-safe publishing with coverage tracking.
 
 The architecture separates concerns to keep each component evolvable:
 
@@ -57,12 +57,12 @@ PersonalBrandingAgent/
 
 | Variable | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | OpenRouter API key (via OpenAI-compatible endpoint) |
+| `GOOGLE_API_KEY` | Google AI Studio key (Agent reasoning, generation, verification) |
+| `GEMINI_MODEL_ID` | Pinned Gemini model (default: `gemini-3.6-flash`; never a `-preview` model unattended) |
+| `OPENROUTER_API_KEY` | OpenRouter key, multi-query retrieval fallback only |
 | `LINKEDIN_CLIENT_ID` | LinkedIn OAuth application client ID |
 | `LINKEDIN_CLIENT_SECRET` | LinkedIn OAuth application client secret |
-| `MODEL_ID` | LLM model slug (default: `deepseek/deepseek-v4-flash`) |
-| `GEN_PARAMS` | Generation parameters (`max_new_tokens`, `temperature`) |
-| `OPENROUTE_BASE_URL` | OpenRouter API base URL |
+| `MODEL_ID` | OpenRouter model slug for the retrieval fallback path |
 | `EMBEDDING_MODEL` | SentenceTransformer model (`all-MiniLM-L6-v2`) |
 | `CHROMA_DIR` | Persistent ChromaDB directory |
 | `CHUNK_SIZE` | Chunk size for document splitting |
@@ -124,7 +124,7 @@ This notebook is retained as a reference and does not require IBM credentials to
 
 ## 7. Setup
 
-**Requirements:** Python 3.10+, an OpenRouter account and API key, a LinkedIn Developer application.
+**Requirements:** Python 3.10+, a Google AI Studio API key, a LinkedIn Developer application.
 
 ```bash
 cd PersonalBrandingAgent
@@ -137,22 +137,31 @@ cp .env.example .env
 Edit `.env` with your keys:
 
 ```
-OPENAI_API_KEY=sk-or-v1-...
+GOOGLE_API_KEY=AIza-...
 LINKEDIN_CLIENT_ID=your-linkedin-client-id
 LINKEDIN_CLIENT_SECRET=your-linkedin-client-secret
 ```
 
 ---
 
-## 8. Current status
+## 8. Current status (v1)
 
 | Component | Status |
 |---|---|
 | Knowledge base (`data/`) | Complete — structured corpus with evidence states |
 | LinkedIn OAuth (`Auth_handling/`) | Complete — full OAuth flow + publish capability |
-| RAG pipeline (ingest → retrieve → generate → evaluate → publish) | In progress — defined in `PLAN.md` (10 phases) |
-| Evaluation and quality gates | Planned |
-| Publishing pipeline | Partially built (OAuth + publish scripts exist) |
+| Persistent tracked work / coverage ledger | Complete — developments, review cursors, baselines |
+| Change detection | Complete — Git/content diffs with classification |
+| Opportunity selection + targeted retrieval | Complete — ranked, development-scoped evidence |
+| RAG pipeline (ingest → retrieve → generate → evaluate → publish) | Complete — first Abu Prompt introduction published through it |
+| Evaluation and quality gates | Complete — deterministic verifier + advisory judge |
+| Publishing pipeline | Complete — duplicate-safe, idempotent, coverage-linked |
+
+### Future work (explicitly not implemented)
+
+* **LinkedIn interaction** — reading posts/comments/interactions, detecting explicit `@abu_prompt` mentions, reasoning over those requests, and responding through the controlled publishing path (will introduce a dedicated LinkedIn reading/interaction boundary/class when this work begins). LinkedIn WRITE is current capability; LinkedIn READ is future work.
+* **GitHub** — updating project `README.md` content from verified knowledge.
+* **Portfolio** — updating portfolio content from verified knowledge.
 
 See `PLAN.md` for the full 10-phase roadmap.
 
