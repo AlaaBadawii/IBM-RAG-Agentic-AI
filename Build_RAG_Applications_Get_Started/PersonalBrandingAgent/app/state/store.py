@@ -679,6 +679,51 @@ class StateStore:
             )
         return self.get_development(work_id, development_key)  # type: ignore[return-value]
 
+    def mark_development_externally_deleted(
+            self, work_id: str, development_key: str) -> Development:
+        """Reopen a development whose covering publication the owner deleted
+        outside the system. Explicit operator recovery only.
+
+        Preconditions: the development is currently covered by a real
+        publication. Postconditions: uncovered with
+        ``external_status='deleted_by_owner'``; the old publication row,
+        ``coverage_kind``, ``covered_at`` and ``publication_id`` are kept as
+        the audit trail (covered_at stays non-NULL while covered=0, which
+        the table CHECK would refuse — so covered_at is cleared and the
+        publication row itself remains the timestamped record).
+        Refuses anything already uncovered: recovery of a non-covered
+        development is meaningless and almost certainly a caller bug.
+        """
+        development = self.get_development(work_id, development_key)
+        if development is None:
+            raise StateStoreError(
+                f"unknown development {development_key} of {work_id}"
+            )
+        if not development.covered:
+            raise StateStoreError(
+                f"development {development_key} of {work_id} is not covered; "
+                f"only a covered development can be recovered as "
+                f"externally deleted"
+            )
+        if development.coverage_kind != "published":
+            raise StateStoreError(
+                f"development {development_key} of {work_id} is covered as "
+                f"{development.coverage_kind}, not by a publication; only "
+                f"published coverage has an external post that could be deleted"
+            )
+        cursor = self._write(
+            "UPDATE developments SET covered = 0, covered_at = NULL, "
+            "external_status = 'deleted_by_owner' "
+            "WHERE work_id = ? AND development_key = ?",
+            (work_id, development_key),
+            f"marking {development_key} of {work_id} externally deleted",
+        )
+        if cursor.rowcount == 0:  # pragma: no cover - checked above
+            raise StateStoreError(
+                f"unknown development {development_key} of {work_id}"
+            )
+        return self.get_development(work_id, development_key)  # type: ignore[return-value]
+
     def get_development(self, work_id: str,
                         development_key: str) -> Development | None:
         rows = self._read(

@@ -126,6 +126,7 @@ class BrandingAgent:
         history_limit: int = DEFAULT_DIGEST_LIMIT,
         prompt_version: str = AGENT_PROMPT_VERSION,
         editorial_intent: str = "",
+        withdrawn_publications: tuple[str, ...] = (),
     ):
         """
         Args:
@@ -168,6 +169,12 @@ class BrandingAgent:
                 which owns the rule.
             history_limit: how many rows of each kind one digest carries.
             prompt_version: recorded on every proposal.
+            withdrawn_publications: confirmed publication ids the owner
+                later removed outside the system. Recorded on the digest as
+                withdrawn (counts stay truthful) so the reasoner can see
+                republishing those topics is legitimate. Empty means nothing
+                was withdrawn, which is exactly how every existing caller
+                behaves.
             editorial_intent: an objective for the writer, verbatim — e.g.
                 the voice and shape a launch introduction should take. Carried
                 on every generation request as a writing constraint (the
@@ -192,6 +199,7 @@ class BrandingAgent:
         self._revision_limit = revision_limit
         self._history_limit = history_limit
         self._prompt_version = prompt_version
+        self._withdrawn_publications = tuple(withdrawn_publications)
         self._editorial_intent = editorial_intent.strip()
 
     # -- what a caller uses -------------------------------------------------
@@ -235,7 +243,8 @@ class BrandingAgent:
         """
         return self._propose(
             context, read_publication_history(
-                self._history, limit=self._history_limit
+                self._history, limit=self._history_limit,
+                withdrawn_publication_ids=self._withdrawn_publications,
             )
         )
 
@@ -338,7 +347,8 @@ class BrandingAgent:
                 "the gate could not decide" is not a decision.
         """
         history = read_publication_history(
-            self._history, limit=self._history_limit
+            self._history, limit=self._history_limit,
+            withdrawn_publication_ids=self._withdrawn_publications,
         )
         proposal = self._propose(context, history)
         if isinstance(proposal, AgentResult):

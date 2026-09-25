@@ -31,7 +31,7 @@ the system did, not knowledge about the user (``PLAN.md`` §6.1).
 """
 from typing import Protocol, runtime_checkable
 
-from app.agent.models import HistoryDigest
+from app.agent.models import HistoryDigest, WithdrawnPublication
 from app.publishing.models import (
     EvidenceUsage,
     PublicationSummary,
@@ -89,7 +89,8 @@ class PublicationHistoryReader(Protocol):
 
 def read_publication_history(
         reader: PublicationHistoryReader | None, *,
-        limit: int = DEFAULT_DIGEST_LIMIT) -> HistoryDigest:
+        limit: int = DEFAULT_DIGEST_LIMIT,
+        withdrawn_publication_ids: tuple[str, ...] = ()) -> HistoryDigest:
     """One digest of the stored history, read through the Step 6 service.
 
     Called once per run, before the reasoner is asked anything, so the
@@ -101,14 +102,30 @@ def read_publication_history(
     rather than an error: an empty history is a normal answer (the read
     service's own contract), and a system that refused to publish its first
     post because there was no history would never publish one.
+
+    ``withdrawn_publication_ids`` names confirmed publications the owner
+    later removed outside the system. They stay in every count above (they
+    were published — the digest does not rewrite history) and are additionally
+    recorded as withdrawn, with their topics, so the reasoner can see that
+    republishing those topics is legitimate. Unknown ids are ignored: only
+    stored publications can be withdrawn.
     """
     if reader is None:
         return HistoryDigest.empty()
 
+    publications = tuple(reader.recent_publications(limit=limit))
+    by_id = {summary.publication_id: summary for summary in publications}
+    withdrawn = tuple(
+        WithdrawnPublication(publication_id=publication_id,
+                             topic=by_id[publication_id].topic)
+        for publication_id in withdrawn_publication_ids
+        if publication_id in by_id
+    )
     return HistoryDigest(
-        publications=tuple(reader.recent_publications(limit=limit)),
+        publications=publications,
         requires_review=tuple(reader.requires_review(limit=limit)),
         topics=tuple(reader.recent_topics(limit=limit)),
         projects=tuple(reader.recent_projects(limit=limit)),
         evidence=tuple(reader.recent_evidence(limit=limit)),
+        withdrawn=withdrawn,
     )

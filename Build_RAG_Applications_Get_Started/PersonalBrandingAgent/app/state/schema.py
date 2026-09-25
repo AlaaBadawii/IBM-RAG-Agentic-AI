@@ -446,6 +446,21 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ON developments (covered, work_id)",
         ),
     ),
+    Migration(
+        version=8,
+        description="externally-deleted marker for development coverage recovery",
+        statements=(
+            # A development covered by a publication the owner later deleted
+            # externally (LinkedIn has no read-back and no unpublish API
+            # usable here) must be reopenable without rewriting history:
+            # the old publication row stays, the ledger row says covered=0
+            # with this marker, and only an explicit recovery operation may
+            # set it. NULL is the normal state.
+            "ALTER TABLE developments ADD COLUMN external_status TEXT "
+            "CHECK (external_status IS NULL OR external_status = "
+            "'deleted_by_owner')",
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.

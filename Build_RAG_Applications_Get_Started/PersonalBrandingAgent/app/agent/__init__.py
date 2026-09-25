@@ -103,6 +103,7 @@ from app.agent.models import (
     ReasoningAnswer,
     ReasoningRequest,
     TopicCandidate,
+    WithdrawnPublication,
     publishing_constraints,
 )
 from app.agent.prompt import (
@@ -140,6 +141,7 @@ __all__ = [
     "ReasoningUnavailable",
     "TopicCandidate",
     "UnusableReasoningAnswer",
+    "WithdrawnPublication",
     "build_reasoning_prompt",
     "evidence_options",
     "parse_reasoning_answer",

@@ -831,6 +831,91 @@ def test_a_real_publication_is_visible_to_the_next_run(state_store):
     assert digest.publications[0].publication_id
 
 
+def test_withdrawn_publication_is_annotated_not_erased(state_store):
+    """A removed post stays in the counts (it happened) and additionally
+    appears as withdrawn (it is no longer visible)."""
+    from app.agent.history import read_publication_history
+    from app.integrations.linkedin.enums import PublicationOutcome
+    from app.integrations.linkedin.models import PublicationResult
+    from app.publishing import PublishingService, PublishRequest
+
+    run = state_store.start_run("branding")
+    service = PublishingService(state_store, transport=lambda _: (
+        PublicationResult(
+            outcome=PublicationOutcome.PUBLISHED, message="ok",
+            api_version="202601", attempted_at=to_iso(utc_now()),
+            post_id="urn:li:share:9")))
+    report = service.publish(
+        PublishRequest(content="an earlier post", topic="evidence",
+                       evidence=(evidence_ref("evidence/backend/fastapi.md",
+                                              "a1b2c3:0"),)),
+        run.run_id)
+    assert report.published
+    publication = report.publication
+    assert publication is not None
+
+    digest = read_publication_history(
+        PublishingHistory(state_store),
+        withdrawn_publication_ids=(publication.publication_id,))
+
+    assert [row.value for row in digest.topics] == ["evidence"]
+    assert [(w.publication_id, w.topic) for w in digest.withdrawn] == [
+        (publication.publication_id, "evidence")]
+
+
+def test_withdrawn_topic_is_rendered_as_republishable(state_store):
+    """The reasoner reads that republishing a withdrawn topic is legitimate."""
+    from app.agent.history import read_publication_history
+    from app.agent.prompt import build_reasoning_prompt
+    from app.integrations.linkedin.enums import PublicationOutcome
+    from app.integrations.linkedin.models import PublicationResult
+    from app.publishing import PublishingService, PublishRequest
+
+    run = state_store.start_run("branding")
+    service = PublishingService(state_store, transport=lambda _: (
+        PublicationResult(
+            outcome=PublicationOutcome.PUBLISHED, message="ok",
+            api_version="202601", attempted_at=to_iso(utc_now()),
+            post_id="urn:li:share:9")))
+    report = service.publish(
+        PublishRequest(content="an earlier post", topic="evidence",
+                       evidence=(evidence_ref("evidence/backend/fastapi.md",
+                                              "a1b2c3:0"),)),
+        run.run_id)
+    assert report.published
+    publication = report.publication
+    assert publication is not None
+    digest = read_publication_history(
+        PublishingHistory(state_store),
+        withdrawn_publication_ids=(publication.publication_id,))
+    body = build_reasoning_prompt(ReasoningRequest(
+        context=evidence_context(), topics=topic_candidates(evidence_context()),
+        evidence=evidence_options(evidence_context()),
+        history=digest)).body()
+
+    assert "Withdrawn after publishing" in body
+    assert "Republishing those topics is legitimate" in body
+
+
+def test_unknown_withdrawn_id_is_ignored_not_recorded(state_store):
+    """Only stored publications can be withdrawn; unknown ids vanish."""
+    from app.agent.history import read_publication_history
+
+    digest = read_publication_history(
+        PublishingHistory(state_store),
+        withdrawn_publication_ids=("pub_missing",))
+
+    assert digest.withdrawn == ()
+
+
+def test_agent_defaults_to_no_withdrawals():
+    """Existing callers behave exactly as before: nothing withdrawn."""
+    reasoner = FakeReasoner(proposal_answer())
+    agent(reasoner).propose(evidence_context())
+
+    assert reasoner.requests[0].history.withdrawn == ()
+
+
 def test_no_history_is_a_normal_answer_and_not_an_error():
     result = agent(FakeReasoner(proposal_answer()), history=None
                    ).run(evidence_context())

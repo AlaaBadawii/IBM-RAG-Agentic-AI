@@ -168,7 +168,7 @@ def test_the_protocol_declares_only_the_read_methods_the_agent_uses():
 
 def test_the_agent_holds_no_state_between_runs():
     """A second run with the same inputs is the same run — nothing the first
-    one did is remembered anywhere in the object. Eight collaborators and
+    one did is remembered anywhere in the object. Nine collaborators and
     settings, and no accumulator of any kind."""
     from app.agent import BrandingAgent
 
@@ -177,5 +177,5 @@ def test_the_agent_holds_no_state_between_runs():
     assert set(vars(bare)) == {
         "_reasoner", "_generator", "_verifier", "_history", "_strategies",
         "_revision_limit", "_history_limit", "_prompt_version",
-        "_editorial_intent",
+        "_editorial_intent", "_withdrawn_publications",
     }

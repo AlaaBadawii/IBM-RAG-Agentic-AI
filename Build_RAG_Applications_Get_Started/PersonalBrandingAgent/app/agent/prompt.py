@@ -350,6 +350,16 @@ def _history_block(history: HistoryDigest) -> str:
             f"Attempts whose outcome is still unknown: "
             f"{len(history.requires_review)}"
         )
+    if history.withdrawn:
+        lines.append(
+            "Withdrawn after publishing (removed by the owner; the audience "
+            "cannot see " + ("it" if len(history.withdrawn) == 1 else "them")
+            + "): " + ", ".join(
+                entry.topic or entry.publication_id
+                for entry in history.withdrawn
+            ) + ". Republishing those topics is legitimate; treat them as "
+            "uncovered."
+        )
     if not lines:
         return "Nothing has been published yet."
     return (

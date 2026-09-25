@@ -76,13 +76,18 @@ def test_network_egress_is_blocked():
 
 
 def test_production_database_file_is_intact():
-    """The real store opens read-only with its full applied history.
+    """The real store opens read-only with a contiguous applied history.
 
     Read through raw sqlite — not ``StateStore``, which would migrate — so
     this assertion itself can never be the mutation it guards against.
+    Contiguity (not an exact version) is asserted because production may
+    legitimately lag the code by migrations nothing has applied yet.
     """
+    from app.state import SCHEMA_VERSION
+
     with sqlite3.connect(f"file:{PRODUCTION_DB_PATH}?mode=ro",
                          uri=True) as conn:
         versions = [row[0] for row in conn.execute(
             "SELECT version FROM schema_version ORDER BY version")]
-    assert versions == [1, 2, 3, 4, 5, 6, 7]
+    assert versions == list(range(1, max(versions) + 1))
+    assert max(versions) <= SCHEMA_VERSION

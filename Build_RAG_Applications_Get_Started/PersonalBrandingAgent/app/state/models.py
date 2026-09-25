@@ -199,6 +199,10 @@ class Development:
     coverage_kind: str
     covered_at: str | None = None
     publication_id: str | None = None
+    external_status: str | None = None
+    """'deleted_by_owner' when a covering publication was deleted outside
+    the system and an explicit recovery reopened the development.
+    Otherwise None. Never set implicitly."""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Development":
@@ -210,6 +214,7 @@ class Development:
             coverage_kind=row["coverage_kind"],
             covered_at=row["covered_at"],
             publication_id=row["publication_id"],
+            external_status=row["external_status"],
         )
 
 

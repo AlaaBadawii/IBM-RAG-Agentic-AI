@@ -140,6 +140,19 @@ class EvidenceOption:
 
 
 @dataclass(frozen=True)
+class WithdrawnPublication:
+    """A confirmed publication the owner later removed outside the system.
+
+    The publication row stays (it happened); this records that its content
+    is no longer visible, so the reasoner can treat the topic as republishable
+    without the history having to pretend the first post never existed.
+    """
+
+    publication_id: str
+    topic: str | None = None
+
+
+@dataclass(frozen=True)
 class HistoryDigest:
     """What the Agent is told about its own past.
 
@@ -162,6 +175,14 @@ class HistoryDigest:
     projects: tuple[UsageCount, ...] = ()
     evidence: tuple[EvidenceUsage, ...] = ()
     requires_review: tuple[PublicationSummary, ...] = ()
+    withdrawn: tuple[WithdrawnPublication, ...] = ()
+    """Publications removed by the owner after going out.
+
+    Kept separate from every count above — those stay truthful about what
+    was published — and rendered as its own history line: a withdrawn post
+    is a fact the reasoner must have (republishing its topic is legitimate)
+    that no usage count can express.
+    """
 
     @classmethod
     def empty(cls) -> "HistoryDigest":
