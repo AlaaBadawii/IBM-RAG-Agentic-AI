@@ -873,6 +873,32 @@ def test_no_publish_refusal_renders_without_inventing_a_reason(store):
     assert "duplicate" in body.lower()
 
 
+def test_no_publish_message_renders_backlog_snapshot(store):
+    """A notice with a backlog snapshot reports tried, deferred and queued."""
+    message = build_no_publish_message(
+        NoPublishNotice(reason="no_value", considered=5, selected=2,
+                        queued_remaining=3,
+                        deferred=("stories_lessons: deferred — thin",
+                                 "audit: deferred — no_value")),
+        run_id="run_1", secrets=())
+
+    assert message.kind is NotificationKind.NO_PUBLISH
+    assert "Opportunities considered" in message.body
+    assert "Opportunities tried" in message.body
+    assert "Still queued" in message.body
+    assert "stories_lessons: deferred" in message.body
+    assert "audit: deferred" in message.body
+
+
+def test_no_publish_message_without_snapshot_has_no_backlog_block(store):
+    """The historical notice shape is unchanged when no snapshot is set."""
+    message = build_no_publish_message(
+        NoPublishNotice(), run_id="run_1", secrets=())
+
+    assert "Backlog" not in message.body
+    assert "Still queued" not in message.body
+
+
 def test_no_publish_message_without_a_reason_still_composes(store):
     message = build_no_publish_message(
         NoPublishNotice(), run_id="run_1", secrets=())

@@ -67,6 +67,13 @@ class NoPublishNotice:
     reconstructed here. A duplicate refusal carries no ``NoPublishReason``
     (the column stays NULL by design); it travels as ``refused`` plus the
     existing refusal message instead.
+
+    The backlog snapshot (``considered``, ``selected``, ``queued_remaining``,
+    ``deferred``) is the same idea one level up: counts and one-liners the
+    workflow already holds, so a quiet run reports what it tried and what
+    remains — not just that the mailbox stayed empty. All optional: a caller
+    that never selected from a backlog (the historical single-shot path)
+    leaves them unset and the message renders exactly as before.
     """
 
     #: The persisted no-publish reason, exactly as recorded on the run.
@@ -75,6 +82,16 @@ class NoPublishNotice:
     refused: bool = False
     #: The refusal message, verbatim. Meaningful only when ``refused``.
     refusal: str | None = None
+    #: Opportunities in this run's actionable pool (backlog path only).
+    considered: int | None = None
+    #: Claimed opportunities this run actually tried (backlog path only).
+    selected: int | None = None
+    #: Backlog rows still queued after this run, if the caller counted them.
+    queued_remaining: int | None = None
+    #: One line per tried-but-unpublished opportunity, e.g.
+    #: ``"stories_lessons: deferred — <rationale>"``. Verbatim caller text,
+    #: never composed here.
+    deferred: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

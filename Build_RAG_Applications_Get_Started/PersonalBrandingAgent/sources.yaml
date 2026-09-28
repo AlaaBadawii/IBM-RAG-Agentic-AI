@@ -252,6 +252,11 @@ sources:
           files match the include profile.
       - pattern: "Build_Multimodal_Generative_AI_Applications/Personal_Storyteller/.venv/"
         reason: "401 MB virtual environment"
+      - pattern: "Build_Multimodal_Generative_AI_Applications/cal_coach_app/my_env/"
+        reason: >
+          virtual environment named my_env. Unconventional name, so the
+          defaults' .venv/ and venv/ patterns do not reach it, and its .py
+          files match the include profile.
       - pattern: "Vector_Databases_for_RAG_An_Introduction/Books_Advanced_Search/storage/"
         reason: >
           a generated Chroma store under a directory not named chroma_db/, so

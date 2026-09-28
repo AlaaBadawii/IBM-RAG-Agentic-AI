@@ -61,6 +61,21 @@ The budget counts documents, not chunks
     each document (:attr:`Stratum.chunks_per_document`), not a second budget to
     spend — charging for them would make a two-chunk document cost twice a
     one-chunk document and let a tier be truncated by its own formatting.
+
+Coverage before similarity, within a stratum
+    Every ordering above is by similarity rank — which means a document that
+    keeps winning its category keeps its slot forever, and newly added
+    material can never displace it no matter how substantive it is. The
+    ``known_sources`` preference exists for exactly that case: documents whose
+    source the system has never persisted as opportunity evidence sort ahead
+    of documents it already has, *within* each stratum and *stably* (relative
+    order otherwise preserved). Tiers still draw three documents per category,
+    the fill still merges the same candidates, the budget still binds — the
+    only change is *which* documents of a category fill its share, preferring
+    uncovered ones. When every document is known (or none is), the preference
+    is vacuous and the result is byte-identical to similarity order. Guidance
+    strata never take the preference: positioning and style are always wanted
+    at their best match, not their newest.
 """
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -197,6 +212,7 @@ def stratified_retrieve(
     vector_store: Any = None,
     budget: int = CONTEXT_BUDGET,
     strategy: str = "hybrid",
+    known_sources: frozenset[str] = frozenset(),
 ) -> RetrievalResult:
     """Compose one branding retrieval from the corpus's stated priority order.
 
@@ -209,6 +225,14 @@ def stratified_retrieve(
         budget: how many evidence *documents* the result may hold.
         strategy: the strategy each stratum is ranked with. ``hybrid`` in
             production; tests use cheaper ones.
+        known_sources: document sources the system has already persisted as
+            opportunity evidence (see
+            :meth:`app.state.store.StateStore.covered_evidence_sources`).
+            Within each evidence stratum, documents from other sources sort
+            ahead, stably — so newly added material displaces incumbents that
+            would otherwise keep their slots forever. Empty means pure
+            similarity order, which is exactly how every existing caller
+            behaves.
 
     Returns:
         A :class:`~app.retrieval.models.RetrievalResult` shaped exactly like any
@@ -223,18 +247,20 @@ def stratified_retrieve(
     """
     selection = _Selection()
     for stratum in TIER_STRATA:
-        selection.admit(_documents_of(vector_store, query, stratum, strategy),
-                        stratum.role, budget)
+        selection.admit(_documents_of(vector_store, query, stratum, strategy,
+                                      known_sources), stratum.role, budget)
 
     if len(selection.sources) < budget:
         selection.admit(
-            _fill_candidates(vector_store, query, FILL_STRATA, strategy),
+            _fill_candidates(vector_store, query, FILL_STRATA, strategy,
+                             known_sources),
             FILL, budget,
         )
 
     if len(selection.sources) < budget:
         selection.admit(
-            _fill_candidates(vector_store, query, LAST_RESORT_STRATA, strategy),
+            _fill_candidates(vector_store, query, LAST_RESORT_STRATA, strategy,
+                             known_sources),
             LAST_RESORT, budget,
         )
 
@@ -268,6 +294,7 @@ def stratified_retrieve(
                 "each stratum's own hybrid RRF rank; scores are comparable "
                 "within a stratum only"
             ),
+            "known_sources": sorted(known_sources),
             "ordering_basis": (
                 "portfolio.md §5 priority order — a deliberate policy override "
                 "of the similarity signal, not a retrieval-quality measure"
@@ -360,34 +387,62 @@ def _by_document(documents: Iterable[RetrievedDocument],
     return grouped
 
 
+def _prefer_uncovered(grouped: dict[str, list[RetrievedDocument]],
+                      known_sources: frozenset[str]
+                      ) -> list[tuple[str, list[RetrievedDocument]]]:
+    """Order document groups so uncovered sources come first, stably.
+
+    Both halves keep their similarity-rank order (``_by_document`` preserves
+    first-seen order, which is best-chunk-first) — coverage only decides which
+    half is drawn from first. With no known sources this is the identity, so
+    pure similarity order is exactly what an empty preference produces.
+    """
+    items = list(grouped.items())
+    if not known_sources:
+        return items
+    return ([(source, chunks) for source, chunks in items
+             if source not in known_sources]
+            + [(source, chunks) for source, chunks in items
+               if source in known_sources])
+
+
 def _documents_of(vector_store, query: str, stratum: Stratum,
-                  strategy: str) -> list[RetrievedDocument]:
+                  strategy: str,
+                  known_sources: frozenset[str] = frozenset()
+                  ) -> list[RetrievedDocument]:
     """A stratum's documents, each with its own strongest chunks."""
     grouped = _by_document(_category_pool(vector_store, query, stratum.category,
                                           strategy))
     drawn: list[RetrievedDocument] = []
-    for _source, chunks in list(grouped.items())[:stratum.documents]:
+    for _source, chunks in _prefer_uncovered(grouped, known_sources
+                                             )[:stratum.documents]:
         drawn.extend(chunks[:stratum.chunks_per_document])
     return drawn
 
 
 def _fill_candidates(vector_store, query: str, strata: tuple[Stratum, ...],
-                     strategy: str) -> list[RetrievedDocument]:
+                     strategy: str,
+                     known_sources: frozenset[str] = frozenset()
+                     ) -> list[RetrievedDocument]:
     """Best chunk per document across the fill categories, best first.
 
     Ranked "by current ranking": each candidate carries the score its own
     stratum's fusion gave it, and the merged list is ordered by that score.
-    Ties break on the stratum's position and then the source path, so the same
-    corpus always composes the same context.
+    Uncovered sources sort ahead of covered ones before the score is
+    consulted, so new material wins ties of attention rather than losing
+    every comparison to incumbents. Ties break on the stratum's position
+    and then the source path, so the same corpus always composes the same
+    context.
     """
-    ranked: list[tuple[float, int, str, RetrievedDocument]] = []
+    ranked: list[tuple[int, float, int, str, RetrievedDocument]] = []
     for position, stratum in enumerate(strata):
         grouped = _by_document(_category_pool(vector_store, query,
                                               stratum.category, strategy))
         for source, chunks in grouped.items():
-            ranked.append((chunks[0].score, position, source, chunks[0]))
-    ranked.sort(key=lambda entry: (-entry[0], entry[1], entry[2]))
-    return [entry[3] for entry in ranked]
+            ranked.append((0 if source not in known_sources else 1,
+                           chunks[0].score, position, source, chunks[0]))
+    ranked.sort(key=lambda entry: (entry[0], -entry[1], entry[2], entry[3]))
+    return [entry[4] for entry in ranked]
 
 
 def _guidance_documents(vector_store, query: str, strategy: str,

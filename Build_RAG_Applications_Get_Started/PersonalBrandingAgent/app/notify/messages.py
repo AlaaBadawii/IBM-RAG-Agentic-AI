@@ -234,6 +234,11 @@ def build_no_publish_message(notice: NoPublishNotice, *,
     asked to hear about. The reason is rendered verbatim as supplied — this
     composer never maps, paraphrases, or invents one. A duplicate refusal has
     no reason by design, so it renders the refusal flag and message instead.
+
+    When the caller supplies a backlog snapshot (counts and deferred lines),
+    it is rendered as its own block — what the run considered, what it tried,
+    why each attempt stayed unpublished, and what remains queued. A notice
+    without one renders exactly as before.
     """
     if notice.refused:
         lead = [
@@ -251,10 +256,12 @@ def build_no_publish_message(notice: NoPublishNotice, *,
                   if notice.reason else "(not recorded)"),
             "",
         ]
+    backlog = _backlog_lines(notice, secrets=secrets)
     body = "\n".join([
         "PersonalBrandingAgent — no post published",
         "",
         *lead,
+        *backlog,
         _line("Outcome", RunOutcome.DO_NOT_PUBLISH.value),
         _line("Run", run_id or "(not recorded)"),
         _line("Notified", utc_now_iso()),
@@ -265,3 +272,25 @@ def build_no_publish_message(notice: NoPublishNotice, *,
     return NotificationMessage(kind=NotificationKind.NO_PUBLISH,
                                subject=redact(SUBJECT, *secrets),
                                body=redact(body, *secrets))
+
+
+def _backlog_lines(notice: NoPublishNotice, *,
+                   secrets: Sequence[str]) -> list[str]:
+    """The backlog snapshot block, or nothing when the notice has none."""
+    if (notice.considered is None and notice.selected is None
+            and notice.queued_remaining is None and not notice.deferred):
+        return []
+    lines = ["--- Backlog ---", ""]
+    if notice.considered is not None:
+        lines.append(_line("Opportunities considered", notice.considered))
+    if notice.selected is not None:
+        lines.append(_line("Opportunities tried", notice.selected))
+    if notice.queued_remaining is not None:
+        lines.append(_line("Still queued", notice.queued_remaining))
+    if notice.deferred:
+        lines.append("")
+        lines.append("Tried but unpublished:")
+        lines += [f"- {redact(entry, *secrets)}"
+                  for entry in notice.deferred]
+    lines.append("")
+    return lines

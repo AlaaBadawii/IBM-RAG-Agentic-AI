@@ -274,6 +274,26 @@ def test_all_discoveries_are_persisted_before_selection(tmp_path):
     assert result.detail["queued_remaining"] == 3
 
 
+def test_quiet_backlog_notice_carries_backlog_snapshot(tmp_path):
+    """The quiet-run notice says what was tried and what remains queued."""
+    cfg, holder, _ = backlog_config(
+        tmp_path, contexts=[make_context(["aaa", "bbb", "ccc"])],
+        agent=TopicAgent(decline={"aaa", "bbb", "ccc"}))
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
+    calls = holder["notifier"].no_publish_calls
+    assert len(calls) == 1
+    notice, run_id = calls[0]
+    assert run_id == result.run_id
+    assert notice.considered == 3
+    assert notice.selected == 0
+    assert notice.queued_remaining == 3
+    assert len(notice.deferred) == 2
+    assert any("aaa" in entry for entry in notice.deferred)
+    assert any("bbb" in entry for entry in notice.deferred)
+
+
 def test_quiet_backlog_run_records_its_reason_on_the_run(tmp_path):
     cfg, holder, _ = backlog_config(
         tmp_path, contexts=[make_context(["aaa"])],

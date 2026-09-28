@@ -37,7 +37,10 @@ IBM (platform: Coursera)
   - URL: https://www.coursera.org/learn/advanced-rag-with-vector-databases-and-retrievers/home/welcome
 
 - **Course 5: Build Multimodal Generative AI Applications**
-  - Status: NOT_STARTED
+  - Status: COMPLETE
+  - Progress %: 100
+  - Completed: Sep 2026 (user-reported 2026-09-28; credential record pending)
+  - Certificate: `../certificates/ibm_build-multimodal-generative-ai-applications.md`
   - URL: https://www.coursera.org/learn/build-multimodal-generative-ai-applications/home/welcome
 
 - **Course 6: Fundamentals of Building AI Agents**
@@ -82,7 +85,9 @@ Status distinctions:
 The course is learning; it does not prove professional expertise.
 
 Related completed learning: Course 1 has a certificate
-(`../certificates/ibm_develop-genai-applications-get-started.md`).
+(`../certificates/ibm_develop-genai-applications-get-started.md`); Course 5
+has a certificate record pending credential details
+(`../certificates/ibm_build-multimodal-generative-ai-applications.md`).
 
 ## Knowledge-Building Role
 

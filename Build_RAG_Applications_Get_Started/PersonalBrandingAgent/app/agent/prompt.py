@@ -58,7 +58,7 @@ __all__ = [
 #: to the prompt that produced it instead of being explained by whatever the
 #: prompt says today. The same convention as ``PROMPT_VERSION`` (Step 8) and
 #: ``JUDGE_PROMPT_VERSION`` (Step 9).
-AGENT_PROMPT_VERSION = "branding-agent-v2"
+AGENT_PROMPT_VERSION = "branding-agent-v3"
 
 #: How many already-published rows of each kind the prompt lists. Bounded so a
 #: long history cannot make a prompt grow without limit; the digest itself is
@@ -99,6 +99,23 @@ INSTRUCTIONS = (
     "repeating yourself.\n"
     "5. Say less rather than more. Declining is a normal, correct answer, and "
     "publishing something thin is worse than publishing nothing.\n"
+    "6. \"Not professional experience\" does not mean \"not publishable\". "
+    "Honesty restrictions constrain how a post may be framed, not whether "
+    "the topic may be published at all. A learning milestone, a certificate, "
+    "hands-on labs, a project built while learning, or a concrete technical "
+    "lesson can be worth publishing when described honestly as learning or "
+    "achievement — for example completing a course, working through labs and "
+    "building applications, or sharing one thing learned. Never frame such "
+    "material as professional experience, professional expertise, mastery, "
+    "employment, client work, or production experience unless the supplied "
+    "evidence independently supports that framing.\n"
+    "7. Prefer substance over announcements. A bare certificate-only "
+    "announcement with no meaningful detail may still be worth declining. "
+    "Hands-on labs, multiple projects built, specific technical concepts, "
+    "concrete implementation details, supported measurable results, and "
+    "meaningful technical lessons weigh toward publishing. Do not decline a "
+    "substantive learning achievement merely because the evidence states it "
+    "does not prove professional expertise.\n"
     "\n"
     "Answer with a single JSON object and nothing else — no prose around it, "
     "no code fence:\n"

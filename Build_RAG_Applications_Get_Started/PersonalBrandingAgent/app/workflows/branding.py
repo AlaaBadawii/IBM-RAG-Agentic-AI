@@ -112,8 +112,16 @@ def _default_assemble(store: StateStore):
     from app.context import build_context
     from app.retrieval.strata import stratified_retrieve
 
+    # Coverage before similarity, within each stratum: sources the system has
+    # already persisted as opportunity evidence sort behind material it has
+    # never turned into an opportunity, so newly added documents displace
+    # incumbents that would otherwise keep their slots forever. The preference
+    # is purely ordinal inside a stratum — same query, strata, budget, and
+    # exclusions — and vacuous when nothing is covered yet.
+    known_sources = store.covered_evidence_sources()
     result = stratified_retrieve(
         "recent professional work, projects, and achievements worth sharing",
+        known_sources=known_sources,
     )
     return build_context(result, store)
 
@@ -566,7 +574,7 @@ def _run_backlog_pool(cfg: BrandingConfig, store: StateStore, run: Any,
 
     return _finish_backlog_run(
         store, run, notifier, persisted, pool, selections,
-        published, events, tally, quiet_reason)
+        published, events, tally, quiet_reason, claimed)
 
 
 def _backlog_store_dead(store: StateStore, run: Any, notifier: Any,
@@ -874,7 +882,8 @@ def _backlog_summary(store: StateStore, persisted: list, pool: list,
 def _finish_backlog_run(store: StateStore, run: Any, notifier: Any,
                         persisted: list, pool: list, selections: list,
                         published: list, events: list, tally: dict,
-                        quiet_reason: str | None) -> WorkflowResult:
+                        quiet_reason: str | None,
+                        claimed: list | None = None) -> WorkflowResult:
     """Aggregate per-opportunity outcomes into one run outcome.
 
     Priority: a human-review event outranks a failure, which outranks
@@ -943,8 +952,38 @@ def _finish_backlog_run(store: StateStore, run: Any, notifier: Any,
         reason=reason,
         refused=bool(tally.get("refused")),
         refusal=tally.get("refusal"),
+        considered=len(pool),
+        selected=len(selections),
+        deferred=_deferred_lines(store, claimed or []),
     )
     return result
+
+
+def _deferred_lines(store: StateStore, claimed: list) -> tuple[str, ...]:
+    """One notice line per claimed opportunity that stayed unpublished.
+
+    Read from the stored rows — not from in-memory results — so the lines say
+    what the run actually recorded (decision + rationale), whatever path each
+    claim took. A row that cannot be read is skipped rather than guessed: a
+    shorter list is honest, a fabricated line is not.
+    """
+    lines: list[str] = []
+    for opportunity in claimed or []:
+        try:
+            row = store.get_opportunity(opportunity.opportunity_id)
+        except Exception:  # noqa: BLE001 — informational only
+            continue
+        if row is None:
+            continue
+        decision = getattr(row, "last_decision", None) or "unpublished"
+        rationale = (getattr(row, "last_error", None) or "").strip()
+        if len(rationale) > 200:
+            rationale = rationale[:197] + "..."
+        entry = f"{row.topic}: {decision}"
+        if rationale:
+            entry += f" — {rationale}"
+        lines.append(entry)
+    return tuple(lines)
 
 
 def _report_publication(store: StateStore, notifier: Any, run_id: str,
@@ -981,7 +1020,10 @@ def _report_publication(store: StateStore, notifier: Any, run_id: str,
 def _report_no_publish(store: StateStore, notifier: Any, run_id: str, *,
                        reason: str | None = None,
                        refused: bool = False,
-                       refusal: str | None = None) -> None:
+                       refusal: str | None = None,
+                       considered: int | None = None,
+                       selected: int | None = None,
+                       deferred: tuple[str, ...] = ()) -> None:
     """Tell the user nothing went out — exactly once.
 
     The quiet-run counterpart of :func:`_report_publication`: ``finish()``
@@ -989,16 +1031,27 @@ def _report_no_publish(store: StateStore, notifier: Any, run_id: str, *,
     without this call a scheduled run that came back empty-handed would stay
     silent. ``reason`` is the run's persisted ``no_publish_reason`` verbatim;
     a duplicate refusal travels as ``refused`` plus its message instead,
-    because it has no ``NoPublishReason`` by design. A delivery failure here
-    is logged, never raised: the run already finished ``DO_NOT_PUBLISH``
-    successfully, and failing it over the email would lie about what
-    happened.
+    because it has no ``NoPublishReason`` by design. ``considered``,
+    ``selected`` and ``deferred`` are the backlog snapshot the caller already
+    holds (backlog path only); ``queued_remaining`` is counted here so every
+    quiet notice says what is still waiting, whatever path produced it. A
+    delivery failure here is logged, never raised: the run already finished
+    ``DO_NOT_PUBLISH`` successfully, and failing it over the email would lie
+    about what happened.
     """
     from app.notify.models import NoPublishNotice
 
     try:
+        queued_remaining = store.count_backlog()
+    except Exception:  # noqa: BLE001 — the count is informational only
+        queued_remaining = None
+
+    try:
         notifier.notify_no_publish(
-            NoPublishNotice(reason=reason, refused=refused, refusal=refusal),
+            NoPublishNotice(reason=reason, refused=refused, refusal=refusal,
+                            considered=considered, selected=selected,
+                            queued_remaining=queued_remaining,
+                            deferred=tuple(deferred)),
             run_id=run_id,
         )
     except Exception as exc:  # noqa: BLE001 — the run already finished

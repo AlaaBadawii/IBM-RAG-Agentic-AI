@@ -823,6 +823,37 @@ class StateStore:
         )
         return int(rows[0]["n"])
 
+    def covered_evidence_sources(self) -> frozenset[str]:
+        """Every source already persisted as opportunity evidence.
+
+        Read across *all* opportunity rows — queued, published, rejected, or
+        otherwise resolved — because each row's evidence snapshot records what
+        one assembled context already carried. Retrieval uses this to prefer
+        material the system has never turned into an opportunity, so newly
+        added documents can displace incumbents that keep winning similarity
+        rank. A row that cannot be parsed contributes nothing rather than
+        failing the read: coverage is an optimization hint, and a shorter
+        set only weakens a preference, never a guarantee.
+        """
+        rows = self._read(
+            "SELECT evidence FROM content_opportunities", (),
+        )
+        covered: set[str] = set()
+        for row in rows:
+            try:
+                snapshots = json.loads(row["evidence"] or "[]")
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(snapshots, list):
+                continue
+            for snapshot in snapshots:
+                if not isinstance(snapshot, dict):
+                    continue
+                source = (snapshot.get("source") or "").strip()
+                if source:
+                    covered.add(source)
+        return frozenset(covered)
+
     def claim_opportunities(self, run_id: str,
                             limit: int) -> list[ContentOpportunity]:
         """Claim up to ``limit`` backlog opportunities for one run.

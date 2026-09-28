@@ -2,7 +2,7 @@
 
 Completed-learning credentials. One Markdown file per certificate.
 
-> **Status (2026):** All 15 certificates in the authoritative list now have an
+> **Status (2026):** All 16 certificates in the authoritative list now have an
 > entry below / a file of their own. Each file follows a standard structure:
 > Identity, What It Represents, Skills/Topics, Related Practical Work, Evidence,
 > Branding Relevance, Status. Certificates demonstrate **completed learning**,
@@ -28,6 +28,7 @@ Completed-learning credentials. One Markdown file per certificate.
 | 13 | System Design & Architecture Certificate | Manara | Mar 2026 | `manara_system-design-and-architecture.md` |
 | 14 | AiCE - AI Career Essentials | ALX Africa | Apr 2026 | `alx-aice-ai-career-essentials.md` |
 | 15 | Certified Backend Software Engineer | ALX Africa | Oct 2024 | `alx_backend-software-engineer.md` |
+| 16 | Build Multimodal Generative AI Applications | IBM | Sep 2026 | `ibm_build-multimodal-generative-ai-applications.md` |
 
 ## Notes
 
@@ -35,6 +36,7 @@ Completed-learning credentials. One Markdown file per certificate.
   files (e.g., the two Vanderbilt AI Agents courses, the two DevOps credentials,
   the three ALX credentials).
 - **Missing information** (tracked per file and summarized in the report):
+  - `ibm_build-multimodal-generative-ai-applications.md` — no credential ID, no verification URL (user-reported completion 2026-09-28).
   - `iti_build-with-ai-masr-edition.md` — no issued date, no credential ID.
   - `mckinseyorg-forward-program.md` — no standalone credential ID (Credly badge).
   - `alx_backend-software-engineer.md` — no credential ID, no verification URL.
