@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.errors import StateStoreError
-from app.logging_config import get_logger
+from app.logging_config import get_logger, setup_logging
 from app.notify.service import NotificationService
 from app.sources.models import Registry
 from app.state.enums import RunOutcome, Workflow
@@ -174,6 +174,7 @@ def run_sync(config: SyncConfig | None = None) -> WorkflowResult:
 def main(argv: list[str] | None = None) -> int:
     """Module entry point: ``python -m app.workflows.sync``."""
     del argv  # no flags: the registry is the configuration.
+    setup_logging()
     try:
         result = run_sync()
     except WorkflowLocked as locked:

@@ -9,6 +9,7 @@ Sources in ``PLAN.md``:
 
     RunOutcome       §2          the three workflow outcomes
     PublishState     Step 1/6    the publish state machine
+    OpportunityStatus backlog    the content-opportunity lifecycle
     LifecycleState   Step 2       project lifecycle (decision 5 in §12.1)
     SyncOutcome      Step 3       per-source checkpoint outcome
     DeliveryState    Step 7       notification delivery records
@@ -55,6 +56,50 @@ TERMINAL_PUBLISH_STATES = (
     PublishState.PUBLISHED,
     PublishState.FAILED,
     PublishState.UNKNOWN_REQUIRES_REVIEW,
+)
+
+
+class OpportunityStatus(str, Enum):
+    """The lifecycle of one persisted content opportunity.
+
+    A content opportunity is a durable unit of "something worth posting
+    about", distinct from the development/change it was discovered from, the
+    generated post, and the publication record. One development may yield
+    several opportunities over time; one opportunity yields at most one
+    published post.
+
+    ``queued`` and ``failed`` are the actionable backlog: ``failed`` here
+    means "a publish was definitively refused by LinkedIn", which — like a
+    failed publish intent — releases the opportunity for a later run rather
+    than consuming it. ``requires_review`` is the ambiguous case and is
+    deliberately *not* actionable: a post may exist, so only a person may
+    release it. ``claimed`` is transient within a run (see
+    ``StateStore.claim_opportunities``).
+    """
+
+    QUEUED = "queued"
+    CLAIMED = "claimed"
+    PUBLISHED = "published"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    REQUIRES_REVIEW = "requires_review"
+
+
+#: Opportunity states a run may select from. ``failed`` is included on
+#: purpose: a definitive LinkedIn refusal did not publish, so the
+#: opportunity stays owed attention — exactly like the failed intent that
+#: drops out of the unresolved-content index.
+BACKLOG_OPPORTUNITY_STATES = (
+    OpportunityStatus.QUEUED,
+    OpportunityStatus.FAILED,
+)
+
+#: Opportunity states that leave the active backlog. ``rejected`` is an
+#: explicit, recorded decision (with its reason on the row) — never the same
+#: thing as "not selected", which leaves the row ``queued`` and untouched.
+TERMINAL_OPPORTUNITY_STATES = (
+    OpportunityStatus.PUBLISHED,
+    OpportunityStatus.REJECTED,
 )
 
 

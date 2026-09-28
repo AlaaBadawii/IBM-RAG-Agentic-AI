@@ -54,16 +54,20 @@ from typing import Iterable, Iterator, Sequence, TypeVar
 from app.errors import StateConstraintError, StateStoreError
 from app.paths import STATE_DB_PATH
 from app.state.enums import (
+    BACKLOG_OPPORTUNITY_STATES,
+    TERMINAL_OPPORTUNITY_STATES,
     TERMINAL_PUBLISH_STATES,
     CredentialDerivation,
     DeliveryState,
     LifecycleState,
+    OpportunityStatus,
     PublishState,
     RunOutcome,
     SyncOutcome,
     Workflow,
 )
 from app.state.models import (
+    ContentOpportunity,
     CredentialExpiry,
     Development,
     EvidenceRef,
@@ -733,7 +737,7 @@ class StateStore:
         return Development.from_row(rows[0]) if rows else None
 
     def list_developments(self, work_id: str, *,
-                          uncovered_only: bool = False) -> list[Development]:
+                           uncovered_only: bool = False) -> list[Development]:
         """One project's developments in stable key order — the candidate
         pool a future opportunity-selection milestone reads."""
         sql = "SELECT * FROM developments WHERE work_id = ?"
@@ -742,35 +746,391 @@ class StateStore:
         rows = self._read(sql + " ORDER BY development_key", (work_id,))
         return [Development.from_row(row) for row in rows]
 
+    # -- content opportunities (persistent backlog) --------------------------
+
+    def enqueue_opportunity(self, fingerprint: str, topic: str,
+                            evidence: Sequence[dict],
+                            project: str | None = None,
+                            evidence_strength: int = 0) -> ContentOpportunity:
+        """Persist one discovered opportunity, idempotently.
+
+        ``INSERT OR IGNORE`` on the fingerprint: re-discovering the same
+        opportunity is a no-op returning the existing row — never a second
+        row, and never an overwrite of the row's lifecycle state. A repeat
+        discovery must not reset attempts, clear a claim, or revive a
+        terminal row.
+        """
+        if not fingerprint.strip():
+            raise ValueError("fingerprint must be non-empty")
+        if not topic.strip():
+            raise ValueError("topic must be non-empty")
+        now = utc_now_iso()
+        self._write(
+            "INSERT OR IGNORE INTO content_opportunities (opportunity_id, "
+            "fingerprint, topic, project, status, evidence, "
+            "evidence_strength, attempts, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?)",
+            (_new_id("opp"), fingerprint, topic, project,
+             json.dumps(list(evidence)), int(evidence_strength), now, now),
+            f"enqueueing opportunity {fingerprint}",
+        )
+        stored = self.get_opportunity_by_fingerprint(fingerprint)
+        assert stored is not None
+        return stored
+
+    def get_opportunity(self, opportunity_id: str) -> ContentOpportunity | None:
+        rows = self._read(
+            "SELECT * FROM content_opportunities WHERE opportunity_id = ?",
+            (opportunity_id,),
+        )
+        return ContentOpportunity.from_row(rows[0]) if rows else None
+
+    def get_opportunity_by_fingerprint(
+            self, fingerprint: str) -> ContentOpportunity | None:
+        rows = self._read(
+            "SELECT * FROM content_opportunities WHERE fingerprint = ?",
+            (fingerprint,),
+        )
+        return ContentOpportunity.from_row(rows[0]) if rows else None
+
+    def list_backlog(self, limit: int = 50) -> list[ContentOpportunity]:
+        """The actionable backlog: queued or retryably-failed opportunities.
+
+        Deterministic anti-starvation order — fewest attempts, then oldest,
+        then strongest evidence, then stable identity — so a newly
+        discovered opportunity cannot permanently outrank an older queued
+        one merely by winning retrieval again.
+        """
+        states = tuple(state.value for state in BACKLOG_OPPORTUNITY_STATES)
+        placeholders = ", ".join("?" * len(states))
+        rows = self._read(
+            "SELECT * FROM content_opportunities "
+            f"WHERE status IN ({placeholders}) "
+            "ORDER BY attempts ASC, created_at ASC, evidence_strength ASC, "
+            "fingerprint ASC LIMIT ?",
+            (*states, limit),
+        )
+        return [ContentOpportunity.from_row(row) for row in rows]
+
+    def count_backlog(self) -> int:
+        """How many opportunities are actionable right now."""
+        states = tuple(state.value for state in BACKLOG_OPPORTUNITY_STATES)
+        placeholders = ", ".join("?" * len(states))
+        rows = self._read(
+            "SELECT COUNT(*) AS n FROM content_opportunities "
+            f"WHERE status IN ({placeholders})",
+            states,
+        )
+        return int(rows[0]["n"])
+
+    def claim_opportunities(self, run_id: str,
+                            limit: int) -> list[ContentOpportunity]:
+        """Claim up to ``limit`` backlog opportunities for one run.
+
+        The selection and the claim are one atomic transaction, and the
+        update re-checks ``queued``/``failed`` status: two overlapping runs
+        cannot claim the same row, because the second one's update matches
+        zero rows. The workflow lock serializes runs in production; this is
+        the backstop that makes the invariant hold even if it did not.
+        """
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        states = tuple(state.value for state in BACKLOG_OPPORTUNITY_STATES)
+        placeholders = ", ".join("?" * len(states))
+        with self._transaction(f"claiming up to {limit} opportunities"):
+            rows = self._read(
+                "SELECT opportunity_id FROM content_opportunities "
+                f"WHERE status IN ({placeholders}) "
+                "ORDER BY attempts ASC, created_at ASC, "
+                "evidence_strength ASC, fingerprint ASC LIMIT ?",
+                (*states, limit),
+            )
+            claimed: list[ContentOpportunity] = []
+            now = utc_now_iso()
+            for row in rows:
+                cursor = self._write(
+                    "UPDATE content_opportunities SET status = 'claimed', "
+                    "claimed_by_run = ?, claimed_at = ?, updated_at = ? "
+                    "WHERE opportunity_id = ? AND status IN "
+                    f"({placeholders})",
+                    (run_id, now, now, row["opportunity_id"], *states),
+                    f"claiming opportunity {row['opportunity_id']}",
+                )
+                if cursor.rowcount == 0:
+                    continue  # lost a race another run won; skip it
+                stored = self.get_opportunity(row["opportunity_id"])
+                assert stored is not None
+                claimed.append(stored)
+            return claimed
+
+    def record_opportunity_decision(
+            self, opportunity_id: str, decision: str, *,
+            release_claim: bool = False, attempts_increment: int = 0,
+            error: str | None = None,
+            run_id: str | None = None) -> ContentOpportunity:
+        """Record why an opportunity did not publish (yet).
+
+        With ``release_claim`` the row returns to ``queued`` (the claim is
+        dropped and the run must own it — a lost race raises instead of
+        silently editing another run's claim); without it the row keeps its
+        status and only the audit fields move. ``attempts_increment`` feeds
+        the anti-starvation ordering without ever hiding the row.
+        """
+        now = utc_now_iso()
+        with self._transaction(f"recording a decision for {opportunity_id}"):
+            current = self.get_opportunity(opportunity_id)
+            if current is None:
+                raise StateStoreError(
+                    f"unknown opportunity {opportunity_id}")
+            if release_claim:
+                if (current.status is not OpportunityStatus.CLAIMED
+                        or current.claimed_by_run != run_id):
+                    raise StateConstraintError(
+                        f"opportunity {opportunity_id} is not claimed by "
+                        f"{run_id!r}; refusing to release another run's claim"
+                    )
+                self._write(
+                    "UPDATE content_opportunities SET status = 'queued', "
+                    "claimed_by_run = NULL, claimed_at = NULL, "
+                    "attempts = attempts + ?, last_decision = ?, "
+                    "last_decision_at = ?, last_error = ?, updated_at = ? "
+                    "WHERE opportunity_id = ?",
+                    (int(attempts_increment), decision, now, error, now,
+                     opportunity_id),
+                    f"releasing the claim on {opportunity_id}",
+                )
+            else:
+                self._write(
+                    "UPDATE content_opportunities SET "
+                    "attempts = attempts + ?, last_decision = ?, "
+                    "last_decision_at = ?, last_error = ?, updated_at = ? "
+                    "WHERE opportunity_id = ?",
+                    (int(attempts_increment), decision, now, error, now,
+                     opportunity_id),
+                    f"recording a decision for {opportunity_id}",
+                )
+        stored = self.get_opportunity(opportunity_id)
+        assert stored is not None
+        return stored
+
+    def finalize_opportunity(
+            self, opportunity_id: str, status: OpportunityStatus | str, *,
+            run_id: str | None = None,
+            publication_id: str | None = None,
+            decision: str | None = None,
+            error: str | None = None) -> ContentOpportunity:
+        """Resolve a claimed opportunity to its end state.
+
+        Terminal resolutions (``published``, ``rejected``) and the blocked
+        ``requires_review`` leave the active backlog; anything else is a
+        caller defect. When ``run_id`` is given the row must be claimed by
+        that run — finalizing another run's claim raises rather than
+        stealing it. A ``published`` resolution should name its publication;
+        a ``failed`` resolution is expressed by releasing the claim (see
+        :meth:`record_opportunity_decision`), not by parking the row here.
+        """
+        resolved = _coerce_enum(status, OpportunityStatus, "status")
+        if resolved not in (*TERMINAL_OPPORTUNITY_STATES,
+                            OpportunityStatus.REQUIRES_REVIEW):
+            allowed = ", ".join(s.value for s in (
+                *TERMINAL_OPPORTUNITY_STATES,
+                OpportunityStatus.REQUIRES_REVIEW))
+            raise ValueError(
+                f"finalize_opportunity resolves to ({allowed}); "
+                f"got {resolved.value!r}"
+            )
+        now = utc_now_iso()
+        with self._transaction(f"finalizing opportunity {opportunity_id}"):
+            current = self.get_opportunity(opportunity_id)
+            if current is None:
+                raise StateStoreError(
+                    f"unknown opportunity {opportunity_id}")
+            if run_id is not None and (
+                    current.status is not OpportunityStatus.CLAIMED
+                    or current.claimed_by_run != run_id):
+                raise StateConstraintError(
+                    f"opportunity {opportunity_id} is not claimed by "
+                    f"{run_id!r}; refusing to finalize another run's claim"
+                )
+            if (current.status is OpportunityStatus.PUBLISHED
+                    or current.status is OpportunityStatus.REJECTED):
+                raise StateConstraintError(
+                    f"opportunity {opportunity_id} is already resolved as "
+                    f"{current.status.value}; refusing to resolve it twice"
+                )
+            self._write(
+                "UPDATE content_opportunities SET status = ?, "
+                "claimed_by_run = NULL, claimed_at = NULL, "
+                "publication_id = COALESCE(?, publication_id), "
+                "last_decision = ?, last_decision_at = ?, last_error = ?, "
+                "updated_at = ? WHERE opportunity_id = ?",
+                (resolved.value, publication_id,
+                 decision or resolved.value, now, error, now, opportunity_id),
+                f"finalizing opportunity {opportunity_id} as {resolved.value}",
+            )
+        stored = self.get_opportunity(opportunity_id)
+        assert stored is not None
+        return stored
+
+    def recover_stale_claims(
+            self, current_run_id: str) -> list[ContentOpportunity]:
+        """Release claims left by runs that already finished.
+
+        A crash between claiming and finalizing leaves a ``claimed`` row
+        whose run will never come back. Claims owned by the current run or
+        by still-unfinished runs are left untouched — only a finished run's
+        leftovers are safe to requeue. When the stale run left a terminal
+        publication for the opportunity's intent, the opportunity is
+        finalized from that recorded outcome instead of blindly requeued, so
+        a crash after a successful publish cannot republish it.
+        """
+        recovered: list[ContentOpportunity] = []
+        stale = self._read(
+            "SELECT * FROM content_opportunities WHERE status = 'claimed' "
+            "AND (claimed_by_run IS NULL OR claimed_by_run <> ?) "
+            "ORDER BY claimed_at",
+            (current_run_id,),
+        )
+        for row in stale:
+            opportunity = ContentOpportunity.from_row(row)
+            owner = opportunity.claimed_by_run
+            if owner is None:
+                continue  # CHECK constraint forbids this; never act on it
+            owner_run = self.get_run(owner)
+            if owner_run is None or not owner_run.finished:
+                continue
+            outcome = self._stale_claim_outcome(opportunity)
+            if outcome is None:
+                self.record_opportunity_decision(
+                    opportunity.opportunity_id, "recovered",
+                    release_claim=True, run_id=owner,
+                    error=(f"claim left by finished run {owner}; "
+                           f"released for a later run"),
+                )
+            elif outcome == "published":
+                publication = self._publication_for_stale_claim(opportunity)
+                self.finalize_opportunity(
+                    opportunity.opportunity_id,
+                    OpportunityStatus.PUBLISHED,
+                    decision="published",
+                    publication_id=(publication.publication_id
+                                    if publication is not None else None),
+                    error=(f"run {owner} published before it was "
+                           f"interrupted; finalized on recovery"),
+                )
+            elif outcome == "requires_review":
+                self.finalize_opportunity(
+                    opportunity.opportunity_id,
+                    OpportunityStatus.REQUIRES_REVIEW,
+                    decision="requires_review",
+                    error=(f"run {owner} left an ambiguous publication; "
+                           f"a person must resolve it before republishing"),
+                )
+            else:
+                self.record_opportunity_decision(
+                    opportunity.opportunity_id, "publish_failed",
+                    release_claim=True, run_id=owner,
+                    attempts_increment=1,
+                    error=(f"run {owner} failed before finalizing; "
+                           f"released as retryable"),
+                )
+            stored = self.get_opportunity(opportunity.opportunity_id)
+            assert stored is not None
+            recovered.append(stored)
+        return recovered
+
+    def _stale_claim_outcome(self, opportunity: ContentOpportunity) -> str | None:
+        """The terminal intent outcome behind a stale claim, if any.
+
+        Reads the intents the finished run recorded for this opportunity
+        (linked by ``opportunity_id``): a ``published`` intent means the
+        post went out; anything unresolved-but-terminal is classified the
+        same way the publishing service classifies it. ``None`` means the
+        run left no intent at all — nothing may have happened.
+        """
+        if opportunity.claimed_by_run is None:
+            return None
+        intents = self._read(
+            "SELECT intent_id FROM publish_intents "
+            "WHERE run_id = ? AND opportunity_id = ? "
+            "ORDER BY created_at",
+            (opportunity.claimed_by_run, opportunity.opportunity_id),
+        )
+        for intent_row in intents:
+            publication = self.get_publication_for_intent(
+                intent_row["intent_id"])
+            if publication is None:
+                continue
+            if publication.outcome is PublishState.PUBLISHED:
+                return "published"
+            if (publication.outcome
+                    is PublishState.UNKNOWN_REQUIRES_REVIEW):
+                return "requires_review"
+            return "failed"
+        return None
+
+    def _publication_for_stale_claim(
+            self, opportunity: ContentOpportunity):
+        """The published publication behind a stale claim, if recorded."""
+        if opportunity.claimed_by_run is None:
+            return None
+        intents = self._read(
+            "SELECT intent_id FROM publish_intents "
+            "WHERE run_id = ? AND opportunity_id = ? "
+            "ORDER BY created_at",
+            (opportunity.claimed_by_run, opportunity.opportunity_id),
+        )
+        for intent_row in intents:
+            publication = self.get_publication_for_intent(
+                intent_row["intent_id"])
+            if (publication is not None
+                    and publication.outcome is PublishState.PUBLISHED):
+                return publication
+        return None
+
     # -- publish intents ----------------------------------------------------
 
     def create_publish_intent(self, run_id: str, content: str,
-                              topic: str | None = None,
-                              angle: str | None = None,
-                              content_hash: str | None = None,
-                              project: str | None = None,
-                              ) -> PublishIntent:
+                               topic: str | None = None,
+                               angle: str | None = None,
+                               content_hash: str | None = None,
+                               project: str | None = None,
+                               opportunity_id: str | None = None,
+                               max_per_run: int | None = None,
+                               ) -> PublishIntent:
         """Record the intent to publish, **before** the LinkedIn call.
 
         With no read-back from LinkedIn, this row is the only duplicate
         protection that exists and the only evidence that an attempt may have
-        happened. Two database constraints apply, and both are deliberate:
+        happened. Three database constraints apply, and all are deliberate:
 
-        * one intent per run — ``MAX_PUBLISHES_PER_RUN = 1``;
+        * at most ``max_per_run`` intents per run (the trigger
+          ``trg_publish_intents_run_limit`` is the backstop; the explicit
+          check here fails fast with a clearer error);
         * one *unresolved* intent per content hash, across runs, so the same
           post cannot be sent twice.
 
-        Failing either of them raises :class:`StateConstraintError`. That is
+        Failing any of them raises :class:`StateConstraintError`. That is
         the intended behavior: the caller must not publish.
         """
         if not content.strip():
             raise ValueError("refusing to record a publish intent for empty content")
+        if max_per_run is not None:
+            if max_per_run < 1:
+                raise ValueError("max_per_run must be at least 1")
+            if self.count_intents_for_run(run_id) >= max_per_run:
+                raise StateConstraintError(
+                    f"run {run_id} already holds "
+                    f"{self.count_intents_for_run(run_id)} publish intent(s); "
+                    f"at most {max_per_run} per run"
+                )
         intent_id = _new_id("intent")
         now = utc_now_iso()
         self._write(
             "INSERT INTO publish_intents (intent_id, run_id, state, content, "
-            "content_hash, topic, angle, project, created_at, updated_at) "
-            "VALUES (?, ?, 'intent_created', ?, ?, ?, ?, ?, ?, ?)",
+            "content_hash, topic, angle, project, opportunity_id, created_at, "
+            "updated_at) "
+            "VALUES (?, ?, 'intent_created', ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 intent_id,
                 run_id,
@@ -779,12 +1139,35 @@ class StateStore:
                 topic,
                 angle,
                 project,
+                opportunity_id,
                 now,
                 now,
             ),
             f"creating a publish intent for run {run_id}",
         )
         return self.get_publish_intent(intent_id)  # type: ignore[return-value]
+
+    def count_intents_for_run(self, run_id: str) -> int:
+        """How many publish intents one run already holds (any state)."""
+        rows = self._read(
+            "SELECT COUNT(*) AS n FROM publish_intents WHERE run_id = ?",
+            (run_id,),
+        )
+        return int(rows[0]["n"])
+
+    def list_intents_for_run(self, run_id: str) -> list[PublishIntent]:
+        """Every publish intent of one run, oldest first.
+
+        Unlike :meth:`list_unresolved_intents`, this includes terminal
+        intents — which is what crash recovery needs to finalize a stale
+        opportunity claim from the run's recorded outcomes.
+        """
+        rows = self._read(
+            "SELECT * FROM publish_intents WHERE run_id = ? "
+            "ORDER BY created_at",
+            (run_id,),
+        )
+        return [PublishIntent.from_row(row) for row in rows]
 
     def get_publish_intent(self, intent_id: str) -> PublishIntent | None:
         rows = self._read(

@@ -225,7 +225,8 @@ def finish(store: StateStore, run: WorkflowRun, outcome: RunOutcome, *,
            failed_phase: str | None = None, error: str | None = None,
            error_category: str | None = None,
            notifier: Any | None = None,
-           detail: dict[str, Any] | None = None) -> WorkflowResult:
+           detail: dict[str, Any] | None = None,
+           no_publish_reason: str | None = None) -> WorkflowResult:
     """Record the final outcome on the run and apply the notification policy.
 
     * ``DO_NOT_PUBLISH`` is a success: the run is recorded and **no
@@ -236,8 +237,11 @@ def finish(store: StateStore, run: WorkflowRun, outcome: RunOutcome, *,
       ``notifier.notify_run(run_id)``.
 
     The outcome is recorded on the workflow run, never inferred from the exit
-    code at read time. A notification delivery failure is logged and reported
-    via ``notified=False`` — it never masks the workflow outcome.
+    code at read time. ``no_publish_reason`` — when given — is recorded on
+    the run itself, so "why did this run publish nothing?" stays answerable
+    by a query after the process exits. A notification delivery failure is
+    logged and reported via ``notified=False`` — it never masks the workflow
+    outcome.
     """
     phases = tuple(p.phase for p in store.list_phases(run.run_id))
     if outcome is not RunOutcome.DO_NOT_PUBLISH and failed_phase:
@@ -253,7 +257,8 @@ def finish(store: StateStore, run: WorkflowRun, outcome: RunOutcome, *,
                 run_id=run.run_id,
                 workflow=run.workflow,
             )
-    store.finish_run(run.run_id, outcome, failed_phase=failed_phase)
+    store.finish_run(run.run_id, outcome, failed_phase=failed_phase,
+                     no_publish_reason=no_publish_reason)
 
     notified = False
     if outcome is not RunOutcome.DO_NOT_PUBLISH and notifier is not None:

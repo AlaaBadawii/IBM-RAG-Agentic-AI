@@ -461,6 +461,82 @@ MIGRATIONS: tuple[Migration, ...] = (
             "'deleted_by_owner')",
         ),
     ),
+    Migration(
+        version=9,
+        description="persistent content-opportunity backlog and multi-publish "
+                    "run limit",
+        statements=(
+            # A content opportunity is durable state about "something worth
+            # posting about": distinct from the development/change it was
+            # discovered from (one development may yield several
+            # opportunities), from the generated post, and from the
+            # publication record. The fingerprint is the stable identity —
+            # re-discovering the same opportunity is an idempotent no-op,
+            # never a second row — and the evidence snapshot keeps a queued
+            # opportunity actionable even when later retrieval omits it.
+            """
+            CREATE TABLE content_opportunities (
+                opportunity_id   TEXT PRIMARY KEY,
+                fingerprint      TEXT NOT NULL UNIQUE,
+                topic            TEXT NOT NULL,
+                project          TEXT,
+                status           TEXT NOT NULL CHECK (status IN (
+                                     'queued',
+                                     'claimed',
+                                     'published',
+                                     'rejected',
+                                     'failed',
+                                     'requires_review')),
+                evidence         TEXT NOT NULL DEFAULT '[]',
+                evidence_strength INTEGER NOT NULL DEFAULT 0,
+                attempts         INTEGER NOT NULL DEFAULT 0
+                                     CHECK (attempts >= 0),
+                last_decision    TEXT,
+                last_decision_at TEXT,
+                last_error       TEXT,
+                claimed_by_run   TEXT,
+                claimed_at       TEXT,
+                publication_id   TEXT
+                                     REFERENCES publications (publication_id),
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                -- A claim always names its owning run; a non-claimed row
+                -- never does. The workflow lock serializes runs, and the
+                -- guarded claim update below makes overlap safe anyway.
+                CHECK ((status = 'claimed') = (claimed_by_run IS NOT NULL))
+            )
+            """,
+            # The actionable backlog, oldest and least-attempted first: the
+            # order ``list_backlog`` reads, so a new discovery cannot starve
+            # an older queued opportunity by winning retrieval again.
+            "CREATE INDEX ix_content_opportunities_backlog "
+            "ON content_opportunities (status, attempts, created_at)",
+            # Link each publish intent to the backlog opportunity it serves,
+            # when there is one. Legacy intents predate the backlog and keep
+            # NULL — they remain queryable exactly as before.
+            "ALTER TABLE publish_intents ADD COLUMN opportunity_id TEXT "
+            "REFERENCES content_opportunities (opportunity_id)",
+            # Multi-publish replaces the one-intent-per-run unique index.
+            # SQLite cannot express "at most N rows per group" as a unique
+            # index, so the limit moves to a trigger: the third intent for a
+            # run is refused by the database before any request can exist —
+            # the same fail-closed position the unique index held. The
+            # application layer checks first for a clearer error; this is
+            # the backstop a forgotten check cannot bypass.
+            "DROP INDEX ux_publish_intents_run",
+            """
+            CREATE TRIGGER trg_publish_intents_run_limit
+            BEFORE INSERT ON publish_intents
+            FOR EACH ROW
+            WHEN (SELECT COUNT(*) FROM publish_intents
+                  WHERE run_id = NEW.run_id) >= 2
+            BEGIN
+                SELECT RAISE(ABORT,
+                    'at most 2 publish intents per run');
+            END
+            """,
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.
@@ -485,6 +561,7 @@ TABLES: tuple[str, ...] = (
     "tracked_work",
     "review_cursors",
     "developments",
+    "content_opportunities",
 )
 
 

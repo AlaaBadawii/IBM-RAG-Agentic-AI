@@ -17,16 +17,20 @@ publication history is authoritative, because LinkedIn does not grant the
 read access that would allow reconciliation (§5.1).
 """
 from app.state.enums import (
+    BACKLOG_OPPORTUNITY_STATES,
+    TERMINAL_OPPORTUNITY_STATES,
     TERMINAL_PUBLISH_STATES,
     CredentialDerivation,
     DeliveryState,
     LifecycleState,
+    OpportunityStatus,
     PublishState,
     RunOutcome,
     SyncOutcome,
     Workflow,
 )
 from app.state.models import (
+    ContentOpportunity,
     CredentialExpiry,
     Development,
     EvidenceRef,
@@ -51,7 +55,10 @@ from app.state.schema import MIGRATIONS, SCHEMA_VERSION, TABLES
 from app.state.store import StateStore, content_hash_of
 
 __all__ = [
+    "BACKLOG_OPPORTUNITY_STATES",
+    "TERMINAL_OPPORTUNITY_STATES",
     "TERMINAL_PUBLISH_STATES",
+    "ContentOpportunity",
     "CredentialDerivation",
     "CredentialExpiry",
     "DeliveryState",
@@ -64,6 +71,7 @@ __all__ = [
     "MissedWindow",
     "Notification",
     "OperationalFailure",
+    "OpportunityStatus",
     "Publication",
     "PublicationRecord",
     "PublishIntent",

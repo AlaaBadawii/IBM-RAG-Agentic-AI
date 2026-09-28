@@ -28,10 +28,11 @@ What it guarantees, in the order it enforces them:
 
 What it does **not** claim: exactly-once delivery to LinkedIn. That guarantee is
 not achievable without read-back and must not be promised. What the system
-actually has is *at most one publication attempt per run reaching the final
-publish gate* — enforced by ``ux_publish_intents_run`` in SQLite, not by this
-module remembering to check — plus a durable intent, an explicit ambiguous
-state, and a recovery path that fails closed.
+actually has is *at most ``MAX_PUBLISHES_PER_RUN`` publication attempts per
+run reaching the final publish gate* — enforced by the application check in
+:meth:`publish` and, behind it, the ``trg_publish_intents_run_limit``
+trigger in SQLite — plus a durable intent, an explicit ambiguous state, and
+a recovery path that fails closed.
 """
 from datetime import datetime
 from functools import partial
@@ -62,12 +63,13 @@ __all__ = [
     "state_for_result",
 ]
 
-#: The hard invariant of the roadmap (``PLAN.md`` §2). Named here so the code
-#: that depends on it says so, but **enforced by the database**:
-#: ``ux_publish_intents_run`` allows exactly one ``publish_intents`` row per
-#: run, so a second attempt in the same run is rejected by SQLite before any
-#: request is built. This constant is documentation, not a check.
-MAX_PUBLISHES_PER_RUN = 1
+#: How many posts one branding run may publish. Named here so the code that
+#: depends on it says so, and **enforced in two places**: the publishing
+#: service refuses to create a further intent once the run holds this many
+#: (failing fast, before any request is built), and the database trigger
+#: ``trg_publish_intents_run_limit`` rejects any insert beyond it — the
+#: backstop a forgotten application check cannot bypass.
+MAX_PUBLISHES_PER_RUN = 2
 
 #: Signature of the one thing this service calls to publish. The real
 #: implementation is :func:`~app.integrations.linkedin.publish_to_linkedin`;
@@ -103,7 +105,9 @@ def state_for_result(result: PublicationResult) -> PublishState:
 
 
 class PublishingService:
-    """Publishes at most one post per run, and remembers everything it did."""
+    """Publishes up to ``MAX_PUBLISHES_PER_RUN`` posts per run, and remembers
+    everything it did. Each call is one independent attempt with its own
+    intent lifecycle; the per-run bound is enforced on intent creation."""
 
     def __init__(self, store: StateStore, *,
                  transport: Transport | None = None,
@@ -177,16 +181,18 @@ class PublishingService:
             )
 
         # Write-ahead: the intent exists before a request can exist. The
-        # database refuses a second intent for this run
-        # (MAX_PUBLISHES_PER_RUN) and a second unresolved one for this content
-        # — both before the call, which is the only moment at which a
-        # duplicate can still be prevented rather than recorded.
+        # run limit (MAX_PUBLISHES_PER_RUN, enforced here and by the
+        # database trigger) and a second unresolved intent for this content
+        # are both refused before the call, which is the only moment at
+        # which a duplicate can still be prevented rather than recorded.
         intent = self._store.create_publish_intent(
             run_id,
             request.content,
             topic=request.topic,
             angle=request.angle,
             project=request.project,
+            opportunity_id=request.opportunity_id,
+            max_per_run=MAX_PUBLISHES_PER_RUN,
         )
         intent = self._store.mark_attempt_started(intent.intent_id)
 

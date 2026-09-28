@@ -85,6 +85,13 @@ class PublishRequest:
     angle: str | None = None
     project: str | None = None
     evidence: tuple[EvidenceRef, ...] = ()
+    opportunity_id: str | None = None
+    """The backlog opportunity this request serves, when there is one.
+
+    Carried through to the write-ahead intent so crash recovery can
+    finalize the opportunity from the intent's recorded outcome. ``None``
+    for legacy single-shot publishes that bypass the backlog.
+    """
 
     def __post_init__(self) -> None:
         if not isinstance(self.content, str) or not self.content.strip():

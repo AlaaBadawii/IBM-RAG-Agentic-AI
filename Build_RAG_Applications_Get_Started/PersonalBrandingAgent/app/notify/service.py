@@ -16,15 +16,19 @@ wrapper asks this service to report the run.
     service.notify_run(run.run_id)          # the workflow wrapper
     service.notify_failure(failure)         # a phase, with no store needed
     service.notify_publication(post)        # a post that went out
+    service.notify_no_publish(notice)       # a run that published nothing
 
 Four rules the design rests on:
 
 1. **A success is not a failure.** ``DO_NOT_PUBLISH`` — and a run that has not
-   finished — is waived, not emailed. An alerting path that cries wolf on a
-   normal no-op is one a person will filter into a folder and stop reading.
-   A publication is the exception that proves the rule: it is a success, and it
-   is still reported, because "what went out under my name" is the one thing a
-   successful run owes the user and the only channel that can carry it.
+   finished — is waived by :meth:`notify_run`, not emailed as an issue. An
+   alerting path that cries wolf on a normal no-op is one a person will
+   filter into a folder and stop reading. A publication is the exception
+   that proves the rule: it is a success, and it is still reported, because
+   "what went out under my name" is the one thing a successful run owes the
+   user and the only channel that can carry it. A quiet run is reported the
+   same way, through :meth:`notify_no_publish` — as information, never as
+   an issue.
 2. **A delivery failure is its own outcome.** It is recorded as a
    ``notifications`` row with ``delivery_state='failed'`` and a categorized
    reason, and returned as a report. It never raises past the caller, never
@@ -60,10 +64,12 @@ from app.notify.enums import (
 from app.notify.errors import NotificationDeliveryError
 from app.notify.messages import (
     build_failure_message,
+    build_no_publish_message,
     build_post_message,
     build_run_message,
 )
 from app.notify.models import (
+    NoPublishNotice,
     NotificationMessage,
     NotificationReport,
     PublishedPost,
@@ -169,6 +175,28 @@ class NotificationService:
         message = build_post_message(post, secrets=self._secrets)
         return self._deliver(message, key=None, run_id=run_id, failure_id=None,
                              subject_of=post)
+
+    def notify_no_publish(self, notice: NoPublishNotice, *,
+                          run_id: str | None = None) -> NotificationReport:
+        """Report a run that published nothing.
+
+        The quiet-run counterpart of :meth:`notify_publication`: a
+        ``DO_NOT_PUBLISH`` outcome is waived by :meth:`notify_run` (a success
+        is not a failure), so without this call nothing would ever tell the
+        user a scheduled run came back empty-handed — or why.
+
+        The notice arrives as values the caller already holds (the persisted
+        reason, or the refusal flag and message), for the same reason a post
+        does: the notification layer reads nothing it does not own.
+
+        Like a publication, a quiet run has **no noise control**: each run is
+        a distinct event, so repeats are never suppressed and nothing is
+        deduplicated by reason, content, or previous quiet runs.
+        """
+        message = build_no_publish_message(
+            notice, run_id=run_id, secrets=self._secrets)
+        return self._deliver(message, key=None, run_id=run_id, failure_id=None,
+                             subject_of=notice)
 
     # -- the delivery itself ------------------------------------------------
 
@@ -323,6 +351,8 @@ class NotificationService:
         if isinstance(subject_of, PublishedPost):
             return (f"the published post {subject_of.post_id}"
                     if subject_of.post_id else "the published post")
+        if isinstance(subject_of, NoPublishNotice):
+            return "the run that published nothing"
         return "the failure"
 
     @staticmethod

@@ -75,11 +75,13 @@ from app.notify.errors import (
 from app.notify.messages import (
     SUBJECT,
     build_failure_message,
+    build_no_publish_message,
     build_post_message,
     build_run_message,
     outcome_label,
 )
 from app.notify.models import (
+    NoPublishNotice,
     NotificationMessage,
     NotificationReport,
     PublishedPost,
@@ -97,6 +99,7 @@ __all__ = [
     "NotificationMessage",
     "NotificationReport",
     "NotificationService",
+    "NoPublishNotice",
     "PublishedPost",
     "REQUIRED_SETTINGS",
     "SMTPConfig",
@@ -104,6 +107,7 @@ __all__ = [
     "SUBJECT",
     "WaiverReason",
     "build_failure_message",
+    "build_no_publish_message",
     "build_post_message",
     "build_run_message",
     "missing_settings",

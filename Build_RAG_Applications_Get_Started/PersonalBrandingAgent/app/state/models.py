@@ -21,6 +21,7 @@ from app.state.enums import (
     CredentialDerivation,
     DeliveryState,
     LifecycleState,
+    OpportunityStatus,
     PublishState,
     RunOutcome,
     SyncOutcome,
@@ -219,6 +220,84 @@ class Development:
 
 
 @dataclass(frozen=True)
+class ContentOpportunity:
+    """One durable content opportunity: something worth posting about.
+
+    Distinct from the development/change it was discovered from (which may
+    yield several opportunities over time), from the generated post (which
+    may not exist yet), and from the publication record (which exists only
+    after a successful publish).
+
+    ``fingerprint`` is the stable identity: the same underlying opportunity
+    rediscovered on a later run computes the same fingerprint, so
+    re-discovery is idempotent rather than a duplicate row. ``evidence`` is
+    the snapshot the reasoning input can be reconstructed from — source,
+    chunk id, content hash, and the chunk content itself — so a queued
+    opportunity stays actionable even when a later retrieval no longer
+    surfaces it.
+
+    ``last_decision`` is unconstrained prose-adjacent vocabulary owned by the
+    backlog layer (``queued``, ``selected``, ``deferred``, ``rejected``,
+    ``verification_failed``, ``duplicate``, ``publish_failed``,
+    ``requires_review``, ``published``, ``recovered``) recording why the
+    opportunity did not publish yet — the per-opportunity counterpart of the
+    run-level ``no_publish_reason``.
+    """
+
+    opportunity_id: str
+    fingerprint: str
+    topic: str
+    status: OpportunityStatus
+    evidence: tuple[dict, ...]
+    attempts: int
+    created_at: str
+    updated_at: str
+    project: str | None = None
+    evidence_strength: int = 0
+    last_decision: str | None = None
+    last_decision_at: str | None = None
+    last_error: str | None = None
+    claimed_by_run: str | None = None
+    claimed_at: str | None = None
+    publication_id: str | None = None
+
+    @property
+    def actionable(self) -> bool:
+        """True when a run may select this opportunity."""
+        return self.status in (
+            OpportunityStatus.QUEUED, OpportunityStatus.FAILED,
+        )
+
+    @property
+    def terminal(self) -> bool:
+        """True when the opportunity has left the active backlog."""
+        return self.status in (
+            OpportunityStatus.PUBLISHED, OpportunityStatus.REJECTED,
+        )
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "ContentOpportunity":
+        return cls(
+            opportunity_id=row["opportunity_id"],
+            fingerprint=row["fingerprint"],
+            topic=row["topic"],
+            status=OpportunityStatus(row["status"]),
+            evidence=tuple(json.loads(row["evidence"])),
+            attempts=int(row["attempts"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            project=row["project"],
+            evidence_strength=int(row["evidence_strength"]),
+            last_decision=row["last_decision"],
+            last_decision_at=row["last_decision_at"],
+            last_error=row["last_error"],
+            claimed_by_run=row["claimed_by_run"],
+            claimed_at=row["claimed_at"],
+            publication_id=row["publication_id"],
+        )
+
+
+@dataclass(frozen=True)
 class SchedulePolicy:
     """One workflow's persisted schedule expectation.
 
@@ -305,9 +384,24 @@ class PublishIntent:
     answers it without guessing which directory a path "belongs" to
     (``PLAN.md`` Step 6, duplicate checks).
     """
+    opportunity_id: str | None = None
+    """The backlog opportunity this intent serves, when there is one.
+
+    NULL for legacy intents that predate the backlog, and for publishes that
+    bypassed it. Lets crash recovery finalize the opportunity from the
+    intent's recorded outcome instead of guessing which row an attempt
+    belonged to.
+    """
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "PublishIntent":
+        # ``opportunity_id`` postdates some readers: ``SELECT *`` always
+        # carries it on a migrated store, but a hand-built row in a test may
+        # not — read it defensively so old constructions keep working.
+        try:
+            opportunity_id = row["opportunity_id"]
+        except (IndexError, KeyError):
+            opportunity_id = None
         return cls(
             intent_id=row["intent_id"],
             run_id=row["run_id"],
@@ -319,6 +413,7 @@ class PublishIntent:
             topic=row["topic"],
             angle=row["angle"],
             project=row["project"],
+            opportunity_id=opportunity_id,
         )
 
 

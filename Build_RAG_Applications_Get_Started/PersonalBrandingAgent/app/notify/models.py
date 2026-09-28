@@ -58,6 +58,26 @@ class PublishedPost:
 
 
 @dataclass(frozen=True)
+class NoPublishNotice:
+    """A run that published nothing, as content for a notification.
+
+    The same handover shape as :class:`PublishedPost`: plain values the caller
+    already holds, so the notification layer reads nothing it does not own.
+    ``reason`` is the run's persisted ``no_publish_reason`` verbatim — never
+    reconstructed here. A duplicate refusal carries no ``NoPublishReason``
+    (the column stays NULL by design); it travels as ``refused`` plus the
+    existing refusal message instead.
+    """
+
+    #: The persisted no-publish reason, exactly as recorded on the run.
+    reason: str | None = None
+    #: True when the duplicate gate refused a verified draft.
+    refused: bool = False
+    #: The refusal message, verbatim. Meaningful only when ``refused``.
+    refusal: str | None = None
+
+
+@dataclass(frozen=True)
 class NotificationReport:
     """What the notification layer did about one failure, or one run.
 

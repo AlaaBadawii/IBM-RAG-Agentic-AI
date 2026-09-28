@@ -30,7 +30,7 @@ from typing import Iterable, Sequence
 
 from app.logging_config import redact
 from app.notify.enums import NotificationKind
-from app.notify.models import NotificationMessage, PublishedPost
+from app.notify.models import NoPublishNotice, NotificationMessage, PublishedPost
 from app.state.enums import RunOutcome
 from app.state.models import OperationalFailure, WorkflowRun, utc_now_iso
 
@@ -221,5 +221,47 @@ def build_post_message(post: PublishedPost, *,
         _line("Notified", utc_now_iso()),
     ])
     return NotificationMessage(kind=NotificationKind.PUBLICATION,
+                               subject=redact(SUBJECT, *secrets),
+                               body=redact(body, *secrets))
+
+
+def build_no_publish_message(notice: NoPublishNotice, *,
+                             run_id: str | None = None,
+                             secrets: Sequence[str] = ()) -> NotificationMessage:
+    """A run that published nothing, as an email.
+
+    The third thing the mailbox carries: a quiet run is still a run the user
+    asked to hear about. The reason is rendered verbatim as supplied — this
+    composer never maps, paraphrases, or invents one. A duplicate refusal has
+    no reason by design, so it renders the refusal flag and message instead.
+    """
+    if notice.refused:
+        lead = [
+            "The duplicate gate refused a verified draft, "
+            "so nothing was published.",
+            "",
+        ]
+        if notice.refusal:
+            lead += [redact(notice.refusal, *secrets), ""]
+    else:
+        lead = [
+            "No post was published for this run.",
+            "",
+            _line("Reason", notice.reason
+                  if notice.reason else "(not recorded)"),
+            "",
+        ]
+    body = "\n".join([
+        "PersonalBrandingAgent — no post published",
+        "",
+        *lead,
+        _line("Outcome", RunOutcome.DO_NOT_PUBLISH.value),
+        _line("Run", run_id or "(not recorded)"),
+        _line("Notified", utc_now_iso()),
+        "",
+        "No action is required from you. This is a normal outcome, and the "
+        "next scheduled run will evaluate new opportunities.",
+    ])
+    return NotificationMessage(kind=NotificationKind.NO_PUBLISH,
                                subject=redact(SUBJECT, *secrets),
                                body=redact(body, *secrets))
