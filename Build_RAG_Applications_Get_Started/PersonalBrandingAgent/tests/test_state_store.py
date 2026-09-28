@@ -61,6 +61,22 @@ def test_finishing_a_run_records_the_outcome_and_the_failed_phase(store):
     assert finished.finished_at is not None
 
 
+def test_no_publish_reason_round_trips_on_the_run(store):
+    """The DO_NOT_PUBLISH reason survives a write/read cycle verbatim."""
+    run = store.start_run(Workflow.BRANDING)
+    finished = store.finish_run(run.run_id, RunOutcome.DO_NOT_PUBLISH,
+                                no_publish_reason="generation_declined")
+    assert finished.no_publish_reason == "generation_declined"
+    assert store.get_run(run.run_id).no_publish_reason == "generation_declined"
+
+
+def test_no_publish_reason_defaults_to_null(store):
+    """Runs that published, failed, or predate the reason keep NULL."""
+    run = store.start_run(Workflow.BRANDING)
+    finished = store.finish_run(run.run_id, RunOutcome.DO_NOT_PUBLISH)
+    assert finished.no_publish_reason is None
+
+
 def test_the_three_outcomes_are_all_reachable(store):
     for outcome in RunOutcome:
         run = store.start_run(Workflow.BRANDING)
@@ -129,11 +145,13 @@ def test_an_intent_cannot_be_created_for_an_unknown_run(store):
         store.create_publish_intent("branding-does-not-exist", CANDIDATE_POST)
 
 
-def test_only_one_publish_intent_per_run(store):
-    """Acceptance: violating one-publish-per-run is rejected by the database."""
+def test_at_most_two_publish_intents_per_run(store):
+    """Acceptance: a third intent for one run is rejected by the database."""
     run, _ = _intent(store)
+    store.create_publish_intent(run.run_id, "a second post for the run")
     with pytest.raises(StateConstraintError, match="database constraint"):
         store.create_publish_intent(run.run_id, "a completely different post")
+    assert store.count_intents_for_run(run.run_id) == 2
 
 
 def test_the_same_content_cannot_be_published_twice(store):

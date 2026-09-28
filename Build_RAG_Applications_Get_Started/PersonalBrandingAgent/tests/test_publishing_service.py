@@ -168,28 +168,41 @@ def test_a_closed_store_stops_the_publish_before_any_request(store):
     assert not transport.called
 
 
-# --- one publication per run -------------------------------------------------
+# --- bounded publications per run --------------------------------------------
 
-def test_at_most_one_publish_reaches_the_gate_per_run(store):
-    """Acceptance: a second attempt in the same run is rejected by the database.
+def test_at_most_two_publishes_reach_the_gate_per_run(store):
+    """Acceptance: a third attempt in the same run is rejected, twice guarded.
 
-    ``MAX_PUBLISHES_PER_RUN`` is not re-checked in Python — the second
-    ``publish_intents`` row for the run is refused by
-    ``ux_publish_intents_run``, which is why the raise is a
-    ``StateConstraintError`` and not a refusal report.
+    ``MAX_PUBLISHES_PER_RUN`` is enforced by the application check on intent
+    creation *and* by the ``trg_publish_intents_run_limit`` trigger behind
+    it — either way the raise is a ``StateConstraintError`` and not a
+    refusal report, because the run limit is a safety invariant, not a
+    duplicate verdict.
     """
-    assert MAX_PUBLISHES_PER_RUN == 1
+    assert MAX_PUBLISHES_PER_RUN == 2
     run = _run(store)
     transport = FakeTransport(_published(store))
     service = _service(store, transport)
 
     assert service.publish(PublishRequest(content=TEXT), run.run_id).published
+    assert service.publish(PublishRequest(content="a second post entirely"),
+                           run.run_id).published
     with pytest.raises(StateConstraintError):
-        service.publish(PublishRequest(content="a different post entirely"),
+        service.publish(PublishRequest(content="a third post entirely"),
                         run.run_id)
 
-    assert len(transport.calls) == 1, "a second request was made in the same run"
-    assert len(store.list_publish_intents()) == 1
+    assert len(transport.calls) == 2, "a third request was made in the same run"
+    assert len(store.list_publish_intents()) == 2
+
+
+def test_the_run_limit_trigger_holds_without_the_application_check(store):
+    """The database refuses a third intent even when the caller skips the
+    application-level check (``max_per_run=None``)."""
+    run = _run(store)
+    store.create_publish_intent(run.run_id, "first post")
+    store.create_publish_intent(run.run_id, "second post")
+    with pytest.raises(StateConstraintError):
+        store.create_publish_intent(run.run_id, "third post")
 
 
 def test_a_later_run_may_publish_different_content(store):

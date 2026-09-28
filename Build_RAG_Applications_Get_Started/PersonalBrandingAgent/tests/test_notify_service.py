@@ -14,6 +14,7 @@ from app.errors import StateStoreError
 from app.notify import (
     SMTPConfig,
     SUBJECT,
+    NoPublishNotice,
     NotificationDecision,
     NotificationDeliveryError,
     NotificationFailureCategory,
@@ -21,6 +22,7 @@ from app.notify import (
     NotificationService,
     PublishedPost,
     WaiverReason,
+    build_no_publish_message,
 )
 from app.notify.errors import NotificationConfigurationError
 from app.state.enums import DeliveryState, RunOutcome
@@ -807,3 +809,106 @@ def test_the_publishing_layer_cannot_send_a_notification(module):
         if any(name == bad or name.startswith(f"{bad}.") for bad in forbidden)
     ]
     assert not offenders, f"{module.name} can send a notification: {offenders}"
+
+
+# --- a quiet run notifies ----------------------------------------------------
+
+def _notice(reason="generation_declined", refused=False, refusal=None):
+    return NoPublishNotice(reason=reason, refused=refused, refusal=refusal)
+
+
+def _quiet_run(store, reason="generation_declined"):
+    run = _run(store)
+    store.finish_run(run.run_id, RunOutcome.DO_NOT_PUBLISH,
+                     no_publish_reason=reason)
+    return run
+
+
+def test_no_publish_notification_carries_the_exact_reason(store):
+    """The persisted reason reaches the mailbox verbatim — never paraphrased."""
+    run = _quiet_run(store)
+    transport = CapturingTransport()
+    report = _service(store, transport).notify_no_publish(
+        _notice(), run_id=run.run_id)
+
+    assert report.sent
+    message = transport.messages[0]
+    assert message.kind is NotificationKind.NO_PUBLISH
+    assert message.subject == SUBJECT
+    assert "generation_declined" in message.body
+    assert "DO_NOT_PUBLISH" in message.body
+    assert run.run_id in message.body
+    assert "No action is required" in message.body
+
+
+def test_no_publish_notification_is_recorded_against_the_run_without_a_failure(
+        store):
+    """A quiet run is not a failure: the delivery row says so."""
+    run = _quiet_run(store)
+    transport = CapturingTransport(recipient="owner@example.com")
+    report = _service(store, transport).notify_no_publish(
+        _notice(), run_id=run.run_id)
+
+    stored = store.get_notification(report.notification.notification_id)
+    assert stored.delivery_state is DeliveryState.SENT
+    assert stored.run_id == run.run_id
+    assert stored.failure_id is None, "a quiet run is not a failure"
+    assert stored.subject == SUBJECT
+    assert store.list_notifications(run_id=run.run_id) == [stored]
+
+
+def test_no_publish_refusal_renders_without_inventing_a_reason(store):
+    """S2 travels as refused + message: no NoPublishReason is constructed."""
+    run = _quiet_run(store, reason=None)
+    transport = CapturingTransport()
+    report = _service(store, transport).notify_no_publish(
+        _notice(reason=None, refused=True,
+                refusal="exact_duplicate: this text already went out"),
+        run_id=run.run_id)
+
+    assert report.sent
+    body = transport.messages[0].body
+    assert transport.messages[0].kind is NotificationKind.NO_PUBLISH
+    assert "exact_duplicate: this text already went out" in body
+    assert "duplicate" in body.lower()
+
+
+def test_no_publish_message_without_a_reason_still_composes(store):
+    message = build_no_publish_message(
+        NoPublishNotice(), run_id="run_1", secrets=())
+
+    assert message.kind is NotificationKind.NO_PUBLISH
+    assert message.subject == SUBJECT
+    assert "(not recorded)" in message.body
+    assert "DO_NOT_PUBLISH" in message.body
+
+
+def test_no_publish_runs_are_never_suppressed(store):
+    """Each quiet run is a distinct event: no quiet window, no dedup by reason."""
+    run = _quiet_run(store)
+    transport = CapturingTransport()
+    service = _service(store, transport, repeat_after_hours=24)
+
+    first = service.notify_no_publish(_notice(), run_id=run.run_id)
+    second = service.notify_no_publish(_notice(), run_id=run.run_id)
+
+    assert first.sent and second.sent, "the second quiet run was suppressed"
+    assert len(transport.messages) == 2
+
+
+def test_failed_no_publish_delivery_leaves_the_run_untouched(store):
+    """A dead alerting path records its own failure — never the run's."""
+    run = _quiet_run(store)
+    transport = CapturingTransport(fail_with=NotificationDeliveryError(
+        NotificationFailureCategory.TRANSPORT, "SMTP down"))
+    report = _service(store, transport).notify_no_publish(
+        _notice(), run_id=run.run_id)
+
+    assert report.decision is NotificationDecision.FAILED
+    stored = store.get_notification(report.notification.notification_id)
+    assert stored.delivery_state is DeliveryState.FAILED
+    assert stored.run_id == run.run_id
+    assert stored.failure_id is None
+    untouched = store.get_run(run.run_id)
+    assert untouched.outcome is RunOutcome.DO_NOT_PUBLISH
+    assert untouched.no_publish_reason == "generation_declined"

@@ -110,7 +110,7 @@ def test_agent_decision_policy_is_unchanged():
         AgentResult(decision=AgentDecision.PUBLISH, verification=refused)
 
     from app.publishing.service import MAX_PUBLISHES_PER_RUN
-    assert MAX_PUBLISHES_PER_RUN == 1
+    assert MAX_PUBLISHES_PER_RUN == 2
 
     from app.workflows.branding import BRANDING_PHASES
     assert BRANDING_PHASES == ("context", "decide", "publish")

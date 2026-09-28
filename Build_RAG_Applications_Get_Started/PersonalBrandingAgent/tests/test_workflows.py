@@ -83,6 +83,7 @@ class CapturingNotifier:
         self.store = store
         self.run_calls: list[str] = []
         self.publication_calls: list = []
+        self.no_publish_calls: list = []
 
     def notify_run(self, run_id):
         self.run_calls.append(run_id)
@@ -96,6 +97,13 @@ class CapturingNotifier:
         return NotificationReport(
             decision=NotificationDecision.SENT,
             message="reported the publication",
+        )
+
+    def notify_no_publish(self, notice, *, run_id=None):
+        self.no_publish_calls.append((notice, run_id))
+        return NotificationReport(
+            decision=NotificationDecision.SENT,
+            message=f"reported no publish for {run_id}",
         )
 
 
@@ -307,6 +315,9 @@ def test_sync_completes_with_fakes(tmp_path):
     assert run.outcome is RunOutcome.DO_NOT_PUBLISH
     assert phases == ["load_registry", "synchronize"]
     assert result.phases == ("load_registry", "synchronize")
+    # Sync scope guard: a clean sync is a quiet success, not a branding
+    # no-publish — the DNP helper lives in branding.py and never fires here.
+    assert holder["notifier"].no_publish_calls == []
 
 
 def test_branding_no_opportunity_is_a_success_with_no_notification(tmp_path):
@@ -323,6 +334,71 @@ def test_branding_no_opportunity_is_a_success_with_no_notification(tmp_path):
     assert run.outcome is RunOutcome.DO_NOT_PUBLISH
     assert run.failed_phase is None
     assert phases == ["context", "decide"]
+    assert run.no_publish_reason == NoPublishReason.NO_VALUE.value
+    assert result.detail.get("no_publish_reason") == (
+        NoPublishReason.NO_VALUE.value
+    )
+    assert len(holder["notifier"].no_publish_calls) == 1
+
+
+@pytest.mark.parametrize("reason", [
+    NoPublishReason.NO_EVIDENCE,
+    NoPublishReason.NO_VALUE,
+    NoPublishReason.GENERATION_DECLINED,
+    NoPublishReason.GATE_REJECTED,
+    NoPublishReason.REVISION_EXHAUSTED,
+])
+def test_single_shot_decline_persists_its_reason_on_the_run(tmp_path, reason):
+    """S1: every non-failure decline persists its exact reason on the run row.
+
+    The persisted value must equal the Agent's decision — never inferred
+    afterwards. Failure reasons travel the WORKFLOW_FAILED path instead and
+    are covered by test_branding_reasoning_failure_is_a_workflow_failure.
+    """
+    cfg, _, _ = branding_config(tmp_path, agent_result=declined_result(reason))
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
+    run, _, _ = stored_outcome(tmp_path, result.run_id)
+    assert run.no_publish_reason == reason.value
+    assert result.detail.get("no_publish_reason") == reason.value
+
+
+def test_single_shot_decline_sends_exactly_one_no_publish_notification(tmp_path):
+    """S1 wiring: one quiet run → one no-publish report, and nothing else."""
+    cfg, holder, _ = branding_config(
+        tmp_path, agent_result=declined_result(NoPublishReason.GENERATION_DECLINED)
+    )
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
+    assert result.exit_code == EXIT_OK == 0
+    assert holder["notifier"].run_calls == []
+    assert holder["notifier"].publication_calls == []
+    calls = holder["notifier"].no_publish_calls
+    assert len(calls) == 1
+    notice, run_id = calls[0]
+    assert run_id == result.run_id
+    assert notice.reason == NoPublishReason.GENERATION_DECLINED.value
+    assert not notice.refused
+
+
+def test_no_publish_notification_failure_leaves_the_run_successful(tmp_path):
+    """A dead DNP alerting path must not rewrite the run it was reporting."""
+
+    class ExplodingNotifier(CapturingNotifier):
+        def notify_no_publish(self, notice, *, run_id=None):
+            raise RuntimeError("SMTP down")
+
+    cfg, _, _ = branding_config(tmp_path, agent_result=declined_result())
+    cfg.notifier_factory = lambda store: ExplodingNotifier(store)
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
+    assert result.exit_code == EXIT_OK == 0
+    run, _, _ = stored_outcome(tmp_path, result.run_id)
+    assert run.outcome is RunOutcome.DO_NOT_PUBLISH
+    assert run.no_publish_reason == NoPublishReason.NO_VALUE.value
 
 
 # ------------------------------------------------------- failures by phase ---
@@ -604,6 +680,12 @@ def test_branding_publishes_at_most_one_post(tmp_path):
     # A published post is reported once as a publication — never as a failure.
     assert holder["notifier"].run_calls == []
     assert len(holder["notifier"].publication_calls) == 1
+    # S3: a run that published stays DO_NOT_PUBLISH with a NULL reason —
+    # the publication row is the record, not the reason column.
+    run, _, _ = stored_outcome(tmp_path, result.run_id)
+    assert run.no_publish_reason is None
+    # A published run reports the post — and nothing else.
+    assert holder["notifier"].no_publish_calls == []
 
 
 def test_branding_duplicate_refusal_is_a_quiet_success(tmp_path):
@@ -622,6 +704,24 @@ def test_branding_duplicate_refusal_is_a_quiet_success(tmp_path):
     assert result.exit_code == EXIT_OK
     assert holder["notifier"].run_calls == []
     assert holder["notifier"].publication_calls == []
+    # S2 (pinned): a duplicate refusal keeps the reason column NULL — there
+    # is no closed-vocabulary NoPublishReason for a refused verified draft —
+    # while detail carries the refusal flag and message.
+    run, _, _ = stored_outcome(tmp_path, result.run_id)
+    assert run.no_publish_reason is None
+    assert result.detail.get("refused") is True
+    assert result.detail.get("refusal") == (
+        "exact_duplicate: this text already went out"
+    )
+    # The refusal is still reported — once, with the refusal message and no
+    # invented reason.
+    calls = holder["notifier"].no_publish_calls
+    assert len(calls) == 1
+    notice, run_id = calls[0]
+    assert run_id == result.run_id
+    assert notice.reason is None
+    assert notice.refused is True
+    assert notice.refusal == "exact_duplicate: this text already went out"
 
 
 def test_branding_failed_publication_is_a_workflow_failure(tmp_path):
@@ -639,6 +739,9 @@ def test_branding_failed_publication_is_a_workflow_failure(tmp_path):
     assert result.outcome is RunOutcome.WORKFLOW_FAILED
     assert result.failed_phase == "publish"
     assert holder["notifier"].run_calls == [result.run_id]
+    # Failure regression: the failure email goes out exactly as before, and
+    # no quiet-run report is added on top of it.
+    assert holder["notifier"].no_publish_calls == []
 
 
 # ------------------------------------------------------------- boundaries ---

@@ -21,9 +21,9 @@ def _seed(store, entries):
     return ensure_baseline(store, entries)
 
 
-def test_schema_is_at_v8_with_the_ledger_tables(store):
-    assert SCHEMA_VERSION == 8
-    assert store.schema_version == 8
+def test_schema_is_at_v9_with_the_ledger_tables(store):
+    assert SCHEMA_VERSION == 9
+    assert store.schema_version == 9
     tables = {
         row[0] for row in store._conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'"

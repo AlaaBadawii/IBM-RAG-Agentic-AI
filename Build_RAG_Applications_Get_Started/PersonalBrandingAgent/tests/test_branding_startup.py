@@ -215,3 +215,45 @@ def test_locked_entry_point_still_maps_to_exit_locked(tmp_path, monkeypatch):
 def test_default_store_factory_is_the_real_store(factory):
     """Defaults still point at the real layers, not at test doubles."""
     assert factory().store_factory is StateStore
+
+
+def test_branding_main_initializes_logging(monkeypatch):
+    """The branding entry point configures logging before running."""
+    from app.state import RunOutcome
+    from app.workflows import branding as branding_module
+    from app.workflows.common import WorkflowResult
+
+    calls: list = []
+    monkeypatch.setattr(
+        branding_module, "setup_logging",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        branding_module, "run_branding",
+        lambda *args, **kwargs: WorkflowResult(
+            run_id="run_test", workflow="branding",
+            outcome=RunOutcome.DO_NOT_PUBLISH),
+    )
+    assert branding_module.main([]) == EXIT_OK
+    assert len(calls) == 1
+
+
+def test_sync_main_initializes_logging(monkeypatch):
+    """The sync entry point configures logging before running."""
+    from app.state import RunOutcome
+    from app.workflows import sync as sync_module
+    from app.workflows.common import WorkflowResult
+
+    calls: list = []
+    monkeypatch.setattr(
+        sync_module, "setup_logging",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        sync_module, "run_sync",
+        lambda *args, **kwargs: WorkflowResult(
+            run_id="run_test", workflow="sync",
+            outcome=RunOutcome.DO_NOT_PUBLISH),
+    )
+    assert sync_module.main([]) == EXIT_OK
+    assert len(calls) == 1
