@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+my_env/
+
+# Environment / secrets — never commit real keys
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
