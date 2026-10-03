@@ -21,10 +21,10 @@
 | # | Course | Status | Projects in this repo |
 |---|---|---|---|
 | 1 | Develop Generative AI Applications: Get Started | **Completed** | GenAI Flask App · AI Email Assistant · Book/Movie Advisor |
-| 2 | Build RAG Applications: Get Started | **In Progress** (substantial) | LinkedIn Icebreaker Bot · Personal Branding Agent · Gradio demos |
+| 2 | Build RAG Applications: Get Started | **Completed** | LinkedIn Icebreaker Bot · Personal Branding Agent · Gradio demos |
 | 3 | Vector Databases for RAG: An Introduction | **Completed** | Books Advanced Search · Food Recommendation System · Employee Similarity Search (+ Job Matcher plan) |
-| 4 | Advanced RAG with Vector Databases and Retrievers | **In Progress** | YouTube RAG Summarizer & QA (working baseline, rebuild planned) |
-| 5 | Build Multimodal Generative AI Applications | **In Progress** (substantial) | Image Captioning · Vocab Learning App · Personal Storyteller · Style Finder · Nutrition Coach (+ 1 stub) |
+| 4 | Advanced RAG with Vector Databases and Retrievers | **Completed** | YouTube RAG Summarizer & QA (working baseline, rebuild planned) |
+| 5 | Build Multimodal Generative AI Applications | **Completed** | Image Captioning · Vocab Learning App · Personal Storyteller · Style Finder · Nutrition Coach (+ 1 stub) |
 | 6 | Fundamentals of Building AI Agents | **In Progress** (substantial) | AI Math Assistant · AI-Powered Data Analysis with LCEL |
 | 7 | Agentic AI with LangChain and LangGraph | Not Started | — |
 | 8 | Agentic AI with LangGraph, CrewAI, AutoGen and BeeAI | Not Started | — |
@@ -72,7 +72,7 @@ Free-text mood → exactly 3 recommendation cards validated by a nested Pydantic
 
 ### Course 2 — Build RAG Applications: Get Started
 
-**Status: In Progress (substantial).** IBM's course introduces RAG — document loading, chunking, embeddings, vector stores, retrieval, similarity search, query engines — taught through LlamaIndex and Gradio.
+**Status: Completed.** IBM's course introduces RAG — document loading, chunking, embeddings, vector stores, retrieval, similarity search, query engines — taught through LlamaIndex and Gradio.
 
 See [`Build_RAG_Applications_Get_Started/README.md`](Build_RAG_Applications_Get_Started/README.md).
 
@@ -150,7 +150,7 @@ Semantic job search over ~30 descriptions with evaluation metrics (Hit@K, Precis
 
 ### Course 4 — Advanced RAG with Vector Databases and Retrievers
 
-**Status: In Progress.** Work has started ahead of the certificate order via a single-project deep dive.
+**Status: Completed.** Work on this course is done via a single-project deep dive.
 
 #### YouTube RAG Summarizer & QA
 
@@ -162,7 +162,7 @@ YouTube URL → transcript fetch → dual path: direct map-reduce summarization 
 
 ### Course 5 — Build Multimodal Generative AI Applications
 
-**Status: In Progress (substantial).** Five of six labs are working implementations; one remains a stub (lab instructions only, no code).
+**Status: Completed.** Five of six labs are working implementations; the Meeting Assistant remains a stub (lab instructions only, no code).
 
 #### Image Captioning
 
@@ -344,7 +344,7 @@ IBM/
 │   ├── GenAI_Flask_App/                             # Flask + LangChain structured JSON output
 │   ├── AI_Email_Assistant/                          # multi-model email generator + Compare All (+ plan.md)
 │   └── Book_Movie_Advisor/                          # mood → structured recommendations
-├── Build_RAG_Applications_Get_Started/                # Course 2 — IN PROGRESS
+├── Build_RAG_Applications_Get_Started/                # Course 2 — COMPLETED
 │   ├── icebreaker/                                  # LlamaIndex RAG app, CLI + Gradio (submodule)
 │   ├── PersonalBrandingAgent/                       # RAG + LinkedIn agent (substantially implemented)
 │   │   ├── app/                                     # 14 packages: agent, retrieval, generation, ...
@@ -360,9 +360,9 @@ IBM/
 │   ├── Food_Recommendation_System/                   # food search → RAG chatbot (+ PLAN.md)
 │   ├── Similarity_Search_on_Employee_Records/        # ChromaDB fundamentals demo
 │   └── job_description_matcher/                      # plan + README (implementation pending)
-├── Advanced_RAG_with_Vector_Databases_and_Retrievers/ # Course 4 — IN PROGRESS
+├── Advanced_RAG_with_Vector_Databases_and_Retrievers/ # Course 4 — COMPLETED
 │   └── youtube-rag-summarizer/                       # transcript summarize + FAISS Q&A (+ PLAN.md)
-├── Build_Multimodal_Generative_AI_Applications/      # Course 5 — IN PROGRESS
+├── Build_Multimodal_Generative_AI_Applications/      # Course 5 — COMPLETED
 │   ├── Image_Captioning/                             # FastAPI + Gradio vision service (+ Docker, tests)
 │   ├── Vocab_Learning_App/                           # vocab → JSON lesson → MP3 (+ tests)
 │   ├── Personal_Storyteller/                         # story + narration mini-app
@@ -476,11 +476,13 @@ Notes:
 **Completed**
 
 - Course 1 — Develop Generative AI Applications: Get Started (3 projects)
+- Course 2 — Build RAG Applications: Get Started (Icebreaker, Personal Branding Agent, Gradio demos)
 - Course 3 — Vector Databases for RAG: An Introduction (Books, Food, Employee; Job Matcher planned)
+- Course 4 — Advanced RAG with Vector Databases and Retrievers (YouTube RAG Summarizer baseline)
+- Course 5 — Build Multimodal Generative AI Applications (Image Captioning, Vocab Learning App, Personal Storyteller, Style Finder, Nutrition Coach)
 - Course 6 agents (first two): AI Math Assistant, AI-Powered Data Analysis
-- Multimodal applications (Course 5): Image Captioning, Vocab Learning App, Personal Storyteller, Style Finder, Nutrition Coach
 
-**In Progress**
+**In Progress (extensions and refinements)**
 
 - Personal Branding Agent — remaining: first real-source sync, first live post through the new service, operator resolution for `unknown_requires_review`, mention-triggered responses
 - YouTube RAG Summarizer — provider-independent layered rebuild per `PLAN.md`
