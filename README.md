@@ -25,13 +25,13 @@
 | 3 | Vector Databases for RAG: An Introduction | **Completed** | Books Advanced Search · Food Recommendation System · Employee Similarity Search (+ Job Matcher plan) |
 | 4 | Advanced RAG with Vector Databases and Retrievers | **Completed** | YouTube RAG Summarizer & QA (working baseline, rebuild planned) |
 | 5 | Build Multimodal Generative AI Applications | **Completed** | Image Captioning · Vocab Learning App · Personal Storyteller · Style Finder · Nutrition Coach (+ 1 stub) |
-| 6 | Fundamentals of Building AI Agents | **In Progress** (substantial) | AI Math Assistant · AI-Powered Data Analysis with LCEL |
-| 7 | Agentic AI with LangChain and LangGraph | Not Started | — |
+| 6 | Fundamentals of Building AI Agents | **Completed** | AI Math Assistant · AI-Powered Data Analysis with LCEL · Tool-Calling Agent · NL-to-SQL Agent · Data Visualization Agent (lab) |
+| 7 | Agentic AI with LangChain and LangGraph | **In Progress** | — (no committed projects yet) |
 | 8 | Agentic AI with LangGraph, CrewAI, AutoGen and BeeAI | Not Started | — |
 | 9 | Build AI Agents using MCP | Not Started | — |
 | 10 | RAG and Agentic AI Capstone Project | Not Started | — |
 
-19 tracked items: 17 working implementations (including the YouTube single-file baseline), 1 plan-only (Job Matcher), 1 stub (Meeting Assistant).
+22 tracked items: 19 working implementations (including the YouTube single-file baseline), 1 plan-only (Job Matcher), 1 stub (Meeting Assistant), 1 lab in progress (Data Visualization Agent).
 
 ---
 
@@ -204,11 +204,11 @@ Intended meeting transcription/summarization app (Whisper + Gradio + watsonx per
 
 ### Course 6 — Fundamentals of Building AI Agents
 
-**Status: In Progress (substantial).** Two working tool-calling-agent projects; the old "Not Started" label predates them.
+**Status: Completed.** Five agent projects tracing a progression from prebuilt agent abstractions (`create_agent`, `create_openai_tools_agent`, `create_sql_agent`, `create_pandas_dataframe_agent`) to manually implemented tool-calling orchestration (a hand-written bind → execute → reply loop).
 
 #### AI Math Assistant
 
-LangChain agent that performs arithmetic via 7 tools (`add`, `add_with_options`, `sum_complex`, `sum_from_text`, `subtract`, `multiply`, `divide`) plus Wikipedia lookup (patched `User-Agent`, mocked in tests). Agent built with `langchain.agents.create_agent` (LangGraph-backed) on an OpenRouter model (`deepseek` flash default). 8 pytest files; project README reports 37 tests, offline-safe.
+LangChain agent that performs arithmetic via eight `@tool` functions (seven arithmetic plus Wikipedia lookup; patched `User-Agent` with retries, mocked in tests). Agent built with `langchain.agents.create_agent` (LangGraph-backed) on an OpenRouter model (`deepseek` flash default). 8 pytest files; project README reports 37 tests, offline-safe.
 
 **Status:** Completed · **Technologies:** LangChain 1.x, LangGraph, `langchain-openai` (OpenRouter base URL), `langchain-community` (Wikipedia), pytest · **Engineering focus:** `@tool` design, agent loop, mocked external calls.
 
@@ -220,18 +220,50 @@ Conversational CSV agent: inspects local datasets and reports classification-vs-
 
 > Note: despite the directory name, the data-analysis agent uses the tools-agent pattern, not an LCEL `prompt | llm | parser` pipe.
 
+#### Tool-Calling Agent
+
+Manual tool-calling loop on the IBM watsonx stack: the model is bound to five YouTube tools (`search_youtube`, `extract_video_id`, `fetch_transcript`, `get_full_metadata`, `get_thumbnails`) via `llm.bind_tools(...)`, and a hand-written executor runs the requested `tool_calls` and returns each result as a `ToolMessage` linked by `tool_call_id`. The loop in `src/run_agent.py` repeats invoke → execute → append until the model answers without tool calls, capped at `MAX_ITERATIONS = 10`.
+
+**Status:** Completed implementation (no test suite yet) · **Technologies:** LangChain 1.x, `langchain-ibm` (`ChatWatsonx`), `ibm-watsonx-ai`, `pytube`, `yt-dlp`, `youtube-transcript-api` · **Engineering focus:** manual agent loop, tool binding vs. execution, `ToolMessage` history management, structured error returns to the model.
+
+#### NL-to-SQL Agent
+
+Natural-language questions answered against a real MySQL database (Chinook sample, loaded from the committed `chinook-mysql.sql`): `llm_agent.py` builds the shared watsonx LLM with missing-variable checks, and `sql_agent.py` connects via SQLAlchemy + LangChain `SQLDatabase`, then runs a `create_sql_agent` tool-calling agent through a `--prompt` CLI. The project README reports a verified run (`347` albums).
+
+**Status:** Completed · **Technologies:** LangChain 1.x (`langchain-community` SQL agent, `SQLDatabase`), `langchain-ibm` (`ChatWatsonx`), SQLAlchemy, MySQL (Chinook) · **Engineering focus:** LLM-to-database integration, safe connection-URL construction, layer-by-layer debugging (model → connection → schema → agent).
+
+#### Data Visualization Agent
+
+Course lab on conversational charting with `create_pandas_dataframe_agent`: the retained 88-cell notebook builds an interactive pandas agent over a student dataset, and `main.py` sketches the same pattern (watsonx `WatsonxLLM` + dataframe agent generating a gender-count bar chart).
+
+**Status:** In progress — lab notebook retained; `main.py` still uses placeholder credentials and the project has no README, requirements, or `.env.example` yet · **Technologies:** `langchain-experimental` (`create_pandas_dataframe_agent`), `ibm-watsonx-ai`, pandas · **Engineering focus:** natural-language-to-chart workflows, dataframe agent prompting.
+
+**Key things learned (Course 6)**
+
+- Binding is not executing: `bind_tools` only exposes tool schemas; application code must run requested tools and return observations.
+- Tool-call lifecycle: keep the assistant's tool-call message plus the linked `ToolMessage` results (`tool_call_id`) so the model associates requests with observations.
+- Agent control flow: handle normal completion and iteration limits as distinct exits; a hard-coded limit message is not a model answer.
+- Errors as observations: returning tool failures to the model (unknown tool, bad args, wrong task-type probe) lets the agent recover instead of crashing.
+- Tool and prompt design shape behavior: docstrings are the model's contract; system instructions encode policy (e.g. classification probe for discrete labels only).
+- Debugging and hygiene: validate model, config, schema, tools, and orchestration layer by layer; pin versions against actual API signatures; report missing env vars by name without exposing secrets.
+
 ---
 
-### Courses 7–10 (Not Started)
+### Course 7 — Agentic AI with LangChain and LangGraph
+
+**Status: In Progress.** No committed projects in the repository yet. Next up: LangGraph workflow graphs, state, and tool use in LangGraph.
+
+---
+
+### Courses 8–10 (Not Started)
 
 | # | Course | Focus |
 |---|---|---|
-| 7 | Agentic AI with LangChain and LangGraph | Workflow graphs, state, tool use in LangGraph |
 | 8 | Agentic AI with LangGraph, CrewAI, AutoGen and BeeAI | Multi-agent frameworks and orchestration |
 | 9 | Build AI Agents using MCP | Model Context Protocol, FastMCP, tool servers |
 | 10 | RAG and Agentic AI Capstone Project | Full end-to-end agentic RAG project |
 
-No projects for these courses exist in the repository yet.
+No projects for Courses 8–10 exist in the repository yet.
 
 ---
 
@@ -277,6 +309,7 @@ Only technologies with real code in the repository are listed as demonstrated.
 ### Agents & Automation
 
 - `@tool`-based tool calling, OpenAI-style function-calling agents, bounded agent loops with max iterations
+- Manual tool-calling loops (`bind_tools` + `ToolMessage` history), NL-to-SQL agents (`create_sql_agent` + `SQLDatabase`/MySQL), pandas dataframe agents
 - Verification-first agent design: deterministic gates authoritative, LLM judge advisory-only
 - Idempotent publishing (hash + embedding + overuse checks), SQLite-backed workflow state, cron scheduling with locking, SMTP failure notifications
 - LinkedIn integration: OAuth 2.0 authorization-code flow with refresh handling, write-API publishing (`w_member_social`), structured error classification
@@ -369,9 +402,12 @@ IBM/
 │   ├── Style_Finder/                                 # outfit embedding match + Llama-4 analysis
 │   ├── cal_coach_app/                                # Flask nutrition coach (Flask + watsonx vision)
 │   └── AI_Meeting_Assistant/                         # stub: lab instructions only
-├── Fundamentals_of_Building_AI_Agents/               # Course 6 — IN PROGRESS
+├── Fundamentals_of_Building_AI_Agents/               # Course 6 — COMPLETED
 │   ├── AI_Math_Assistant/                            # tool-calling math + Wikipedia agent (+ tests)
-│   └── AI_Powered_Data_Analysis_with_LCEL/            # CSV classification/regression agent (+ tests, data)
+│   ├── AI_Powered_Data_Analysis_with_LCEL/            # CSV classification/regression agent (+ tests, data)
+│   ├── Tool_calling_Agent/                           # manual bind_tools loop over YouTube tools (watsonx)
+│   ├── NL_SQL_Agent/                                 # NL-to-SQL agent over MySQL Chinook (+ README)
+│   └── Data_Visualization_Agent/                     # pandas dataframe-agent lab (notebook + draft script)
 ├── .env.example                                     # OPENROUTER_API_KEY placeholder (root convention)
 ├── .gitignore                                       # .env, venvs, __pycache__, local chroma/state snapshots
 └── README.md                                        # this file
@@ -428,6 +464,9 @@ Variable **names** only — placeholders, never real values.
 | `Build_Multimodal_Generative_AI_Applications/cal_coach_app/` | IBM watsonx credentials via app config (no `.env.example`) |
 | `Fundamentals_of_Building_AI_Agents/AI_Math_Assistant/` | `OPENROUTER_API_KEY`, `BASE_URL` |
 | `Fundamentals_of_Building_AI_Agents/AI_Powered_Data_Analysis_with_LCEL/` | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `OPENROUTER_MODEL` |
+| `Fundamentals_of_Building_AI_Agents/Tool_calling_Agent/` | `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_PROJECT_NAME`, `WATSONX_URL`, `WATSONX_MODEL_ID` |
+| `Fundamentals_of_Building_AI_Agents/NL_SQL_Agent/` | `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `WATSONX_MODEL_ID`, `MYSQL_USERNAME`, `MYSQL_PASSWORD`, `MYSQLHOST`, `MYSQL_PORT`, `DB_NAME` |
+| `Fundamentals_of_Building_AI_Agents/Data_Visualization_Agent/` | None yet (no `.env.example`; draft script uses placeholder credentials) |
 
 > Example: `OPENROUTER_API_KEY=your_key_here` — get a free key at <https://openrouter.ai/keys>.
 
@@ -460,6 +499,8 @@ cd Build_Multimodal_Generative_AI_Applications/Vocab_Learning_App && python app.
 # Course 6 — Agents
 cd Fundamentals_of_Building_AI_Agents/AI_Math_Assistant && pytest tests/                   # offline-safe suite
 cd Fundamentals_of_Building_AI_Agents/AI_Powered_Data_Analysis_with_LCEL && pytest tests/ # offline tool tests
+cd Fundamentals_of_Building_AI_Agents/Tool_calling_Agent/src && python llm.py             # watsonx binding smoke test
+cd Fundamentals_of_Building_AI_Agents/NL_SQL_Agent && python sql_agent.py --prompt "How many albums are there in the database?"
 ```
 
 Notes:
@@ -480,10 +521,15 @@ Notes:
 - Course 3 — Vector Databases for RAG: An Introduction (Books, Food, Employee; Job Matcher planned)
 - Course 4 — Advanced RAG with Vector Databases and Retrievers (YouTube RAG Summarizer baseline)
 - Course 5 — Build Multimodal Generative AI Applications (Image Captioning, Vocab Learning App, Personal Storyteller, Style Finder, Nutrition Coach)
-- Course 6 agents (first two): AI Math Assistant, AI-Powered Data Analysis
+- Course 6 — Fundamentals of Building AI Agents (Math Assistant, Data Analysis with LCEL, Tool-Calling Agent, NL-to-SQL Agent; Data Visualization Agent lab notebook retained)
+
+**In Progress**
+
+- Course 7 — Agentic AI with LangChain and LangGraph (started; no committed projects yet — LangGraph workflow graphs and state are next)
 
 **In Progress (extensions and refinements)**
 
+- Data Visualization Agent (Course 6) — remaining: real credentials configuration, `requirements.txt`, project README
 - Personal Branding Agent — remaining: first real-source sync, first live post through the new service, operator resolution for `unknown_requires_review`, mention-triggered responses
 - YouTube RAG Summarizer — provider-independent layered rebuild per `PLAN.md`
 - Job Description Matcher — implementation from `plan.md`
@@ -491,7 +537,6 @@ Notes:
 
 **Upcoming**
 
-- LangGraph workflows and state (Course 7)
 - Multi-agent frameworks: CrewAI, AutoGen/AG2, BeeAI (Course 8)
 - MCP / FastMCP tool servers (Course 9)
 - RAG and Agentic AI Capstone (Course 10)

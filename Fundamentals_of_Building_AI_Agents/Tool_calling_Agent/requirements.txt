@@ -1,0 +1,9 @@
+langchain==1.4.4
+langchain-core==1.6.9
+langchain-ibm==1.1.2
+ibm-watsonx-ai==1.7.2
+pydantic==2.14.0
+python-dotenv==1.2.4
+pytube==15.0.0
+yt-dlp==2026.8.19
+youtube-transcript-api==1.2.4

@@ -1,0 +1,7 @@
+# Direct dependencies verified against the working local environment (Python 3.12).
+langchain==1.4.4
+langchain-community==0.4.2
+langchain-ibm==1.1.2
+sqlalchemy==2.1.4
+mysql-connector-python==8.4.0
+python-dotenv==1.2.4
