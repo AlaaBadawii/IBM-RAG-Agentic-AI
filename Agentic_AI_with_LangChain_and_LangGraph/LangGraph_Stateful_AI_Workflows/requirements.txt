@@ -1,0 +1,4 @@
+langgraph==0.2.57
+langchain-ibm==0.3.10
+ibm-watsonx-ai==1.8.0
+python-dotenv==1.2.4
