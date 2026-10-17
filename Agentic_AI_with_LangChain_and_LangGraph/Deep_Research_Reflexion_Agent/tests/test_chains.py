@@ -2,9 +2,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableLambda
 
-import responder
-import revisor
-from schema import AnswerQuestion, ReviseAnswer
+from deep_research_agent import responder
+from deep_research_agent import revisor
+from deep_research_agent.schema import AnswerQuestion, ReviseAnswer
 
 
 class _FakeLLM:

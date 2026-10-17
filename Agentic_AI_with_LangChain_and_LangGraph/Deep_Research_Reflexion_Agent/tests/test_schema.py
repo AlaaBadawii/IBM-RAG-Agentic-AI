@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from schema import AnswerQuestion, Reflection, ReviseAnswer
+from deep_research_agent.schema import AnswerQuestion, Reflection, ReviseAnswer
 
 
 def test_valid_answer_question_parses_nested_reflection():

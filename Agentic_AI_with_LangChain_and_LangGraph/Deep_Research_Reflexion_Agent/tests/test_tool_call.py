@@ -7,7 +7,7 @@ in ``test_chains.py`` (with the model mocked).
 
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
-from schema import AnswerQuestion, ReviseAnswer
+from deep_research_agent.schema import AnswerQuestion, ReviseAnswer
 
 
 def test_answer_question_tool_schema():

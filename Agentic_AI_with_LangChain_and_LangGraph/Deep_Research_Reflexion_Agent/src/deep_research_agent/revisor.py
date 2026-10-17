@@ -2,9 +2,9 @@ from functools import lru_cache
 
 from langchain_core.runnables import RunnableLambda
 
-from llm import get_llm
-from prompt import prompt_template
-from schema import ReviseAnswer
+from .llm import get_llm
+from .prompt import prompt_template
+from .schema import ReviseAnswer
 
 revise_instructions = """Revise your previous answer using the new information, applying the rigor and evidence-based approach of Dr. David Attia.
 - Incorporate the previous critique to add clinically relevant information, focusing on mechanistic understanding and individual variability.

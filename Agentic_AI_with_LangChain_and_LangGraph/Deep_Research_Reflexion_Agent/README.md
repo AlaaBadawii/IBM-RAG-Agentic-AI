@@ -8,7 +8,8 @@ search, and then revises the answer with citations. It runs on IBM
 
 The project is deliberately compact: a `MessageGraph` with three nodes and one
 conditional edge, Pydantic schemas for the model's structured output, and a
-fully offline test suite.
+fully offline test suite. The application lives in the importable
+`deep_research_agent` package under `src/`.
 
 > **Important — medical safety.** The system prompt casts the model as
 > "Dr. Paul 'Saladino MD'", a persona that advocates animal-based/carnivore
@@ -68,8 +69,11 @@ retrieval.
   well-formed `ToolMessage` objects linked by `tool_call_id`.
 - **Bounded revision loop** — `event_loop` stops after `MAX_ITERATIONS`
   (default 3) rounds of research to guarantee termination.
-- **Lazy, import-safe client** — importing any module never authenticates or
-  contacts an external service; the watsonx client is created on first use.
+- **Lazy, import-safe package** — importing `deep_research_agent` never
+  authenticates or contacts an external service; the watsonx client is created
+  on first use.
+- **Installable package** — a `src/` layout with a `pyproject.toml`; install
+  with `pip install -e .`.
 - **Offline test suite** — 48 `pytest` tests covering schemas, configuration,
   tool execution, chains, graph structure/routing, and a full mocked
   end-to-end run. No credentials or network required.
@@ -86,36 +90,38 @@ flowchart TD
 ```
 
 The diagram above is the logical routing performed by `event_loop`. The
-compiled graph is built in `graph.py` (`build_graph()` / `app`).
+compiled graph is built in `deep_research_agent.graph`
+(`build_graph()` / `app`).
 
 ## How the workflow works
 
 State is a growing list of chat messages (`MessageGraph`).
 
-1. **`respond`** (`responder.py`) renders `prompt_template` with
-   `first_instruction="Provide a detailed ~250 word answer"` and calls the LLM
-   bound to the `AnswerQuestion` tool. The reply is an `AIMessage` whose single
-   tool call contains:
+1. **`respond`** (`deep_research_agent.responder`) renders `prompt_template`
+   with `first_instruction="Provide a detailed ~250 word answer"` and calls the
+   LLM bound to the `AnswerQuestion` tool. The reply is an `AIMessage` whose
+   single tool call contains:
    - `answer` — the draft,
    - `reflection` — a nested `{missing, superfluous}` self-critique,
    - `search_queries` — 1–3 queries to research the gaps.
-2. **`execute_tools`** (`execute_tools.py`) reads the last message, and for each
-   `AnswerQuestion` / `ReviseAnswer` tool call runs every query in
-   `search_queries` through `TavilySearchResults`. All results for one tool call
-   are packed into a single JSON `ToolMessage` keyed by that call's
+2. **`execute_tools`** (`deep_research_agent.execute_tools`) reads the last
+   message, and for each `AnswerQuestion` / `ReviseAnswer` tool call runs every
+   query in `search_queries` through `TavilySearchResults`. All results for one
+   tool call are packed into a single JSON `ToolMessage` keyed by that call's
    `tool_call_id`. A failing query is recorded as an error string instead of
    aborting the run.
-3. **`revisor`** (`revisor.py`) receives the accumulated messages (including the
-   research `ToolMessage`s) and returns a `ReviseAnswer` tool call: a rewritten
-   answer with a `References` section plus a fresh set of `search_queries`.
-4. **`event_loop`** (`event_loop.py`) counts the `ToolMessage` objects in the
-   state. It routes back to `execute_tools` while the count is below
-   `MAX_ITERATIONS` (3) and otherwise returns `END`, so the loop always
+3. **`revisor`** (`deep_research_agent.revisor`) receives the accumulated
+   messages (including the research `ToolMessage`s) and returns a
+   `ReviseAnswer` tool call: a rewritten answer with a `References` section plus
+   a fresh set of `search_queries`.
+4. **`event_loop`** (`deep_research_agent.event_loop`) counts the `ToolMessage`
+   objects in the state. It routes back to `execute_tools` while the count is
+   below `MAX_ITERATIONS` (3) and otherwise returns `END`, so the loop always
    terminates.
 
 The initial draft and the final revised answer are extracted from the message
-history by `graph.extract_answers()`, which returns every `answer` field in
-order (draft first, final revision last).
+history by `deep_research_agent.graph.extract_answers()`, which returns every
+`answer` field in order (draft first, final revision last).
 
 ## Technology stack
 
@@ -135,22 +141,36 @@ order (draft first, final revision last).
 
 ```
 Deep_Research_Reflexion_Agent/
-├── .env.example          # Template for required environment variables
+├── src/
+│   └── deep_research_agent/
+│       ├── __init__.py
+│       ├── llm.py            # Lazy ChatWatsonx client (get_llm) + env validation
+│       ├── prompt.py         # Shared ChatPromptTemplate (system persona + messages)
+│       ├── schema.py         # Pydantic schemas: Reflection, AnswerQuestion, ReviseAnswer
+│       ├── search.py         # Tavily tool wrapper (not named tavily.py, to avoid shadowing the `tavily` package)
+│       ├── execute_tools.py  # "execute_tools" node: runs search_queries via Tavily
+│       ├── responder.py      # "respond" node: draft answer + critique + queries
+│       ├── revisor.py        # "revisor" node: revised answer + references + queries
+│       ├── event_loop.py     # Conditional routing: continue or stop (MAX_ITERATIONS)
+│       └── graph.py          # Builds/compiles the MessageGraph; module entry point
+├── tests/
+│   ├── conftest.py           # Seeds placeholder env; keeps the suite offline
+│   ├── test_prompt.py
+│   ├── test_tool_call.py
+│   ├── test_schema.py
+│   ├── test_config.py
+│   ├── test_execute_tools.py
+│   ├── test_chains.py
+│   ├── test_graph.py
+│   └── test_end_to_end.py
+├── scripts/
+│   └── render_graph.py       # Standalone utility: renders the graph to graph_plot.png (needs network)
+├── .env.example              # Template for required environment variables
 ├── .gitignore
-├── requirements.txt      # Runtime dependencies
-├── requirements-dev.txt  # Runtime + test dependencies
-├── conftest.py           # Pytest config: seeds placeholder env, keeps tests offline
-├── llm.py                # Lazy ChatWatsonx client (get_llm) + env validation
-├── prompt.py             # Shared ChatPromptTemplate (system persona + messages)
-├── schema.py             # Pydantic schemas: Reflection, AnswerQuestion, ReviseAnswer
-├── responder.py          # "respond" node: draft answer + critique + queries
-├── revisor.py            # "revisor" node: revised answer + references + queries
-├── execute_tools.py      # "execute_tools" node: runs search_queries via Tavily
-├── event_loop.py         # Conditional routing: continue or stop (MAX_ITERATIONS)
-├── search.py             # Tavily tool wrapper (named search.py to avoid shadowing the `tavily` package)
-├── graph.py              # Builds/compiles the MessageGraph; CLI entry point
-├── graph_plot.py         # Renders the graph to graph_plot.png (needs network)
-└── test_*.py             # Offline pytest suite
+├── README.md
+├── pyproject.toml            # Build/packaging config (setuptools, src layout) + pytest config
+├── requirements.txt          # Runtime dependencies
+└── requirements-dev.txt      # Runtime + test dependencies
 ```
 
 ## Prerequisites
@@ -169,9 +189,15 @@ cd IBM-RAG-Agentic-AI/Agentic_AI_with_LangChain_and_LangGraph/Deep_Research_Refl
 python3.12 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-pip install -r requirements.txt       # run the agent
-pip install -r requirements-dev.txt   # ...and run the tests
+pip install -r requirements.txt       # runtime dependencies
+pip install -r requirements-dev.txt   # ...plus test dependencies
+pip install -e .                      # install this package (editable)
 ```
+
+`pip install -e .` installs the `deep_research_agent` package. Runtime
+dependencies are read from `requirements.txt` by `pyproject.toml`, so they are
+not duplicated: the distribution is named `deep-research-reflexion-agent`
+while the importable package is `deep_research_agent`.
 
 ## Environment variables
 
@@ -194,16 +220,17 @@ TAVILY_API_KEY=ADD_TAVILY_API_KEY_HERE
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `WATSONX_API_KEY` | `llm.py` | Required. Your IBM Cloud API key. |
-| `WATSONX_PROJECT_ID` | `llm.py` | Required. The watsonx.ai project ID. |
-| `WATSONX_URL` | `llm.py` | Required. Regional endpoint (e.g. `https://eu-de.ml.cloud.ibm.com`). |
-| `WATSONX_MODEL_ID` | `llm.py` | Required. Model that supports tool calling. |
+| `WATSONX_API_KEY` | `deep_research_agent.llm` | Required. Your IBM Cloud API key. |
+| `WATSONX_PROJECT_ID` | `deep_research_agent.llm` | Required. The watsonx.ai project ID. |
+| `WATSONX_URL` | `deep_research_agent.llm` | Required. Regional endpoint (e.g. `https://eu-de.ml.cloud.ibm.com`). |
+| `WATSONX_MODEL_ID` | `deep_research_agent.llm` | Required. Model that supports tool calling. |
 | `WATSONX_PROJECT_NAME` | *(informational)* | Present in the template for reference; not read by the code. |
-| `TAVILY_API_KEY` | `search.py` | Required for any run that executes research. |
+| `TAVILY_API_KEY` | `deep_research_agent.search` | Required for any run that executes research. |
 
-If a required variable is missing, `get_llm()` raises an `OSError` naming the
-missing variables and pointing at `.env.example`; `search.py` raises a similar
-`OSError` for a missing `TAVILY_API_KEY`.
+If a required watsonx variable is missing, `get_llm()` raises an `OSError` naming
+the missing variables and pointing at `.env.example`; importing
+`deep_research_agent.search` raises a similar `OSError` for a missing
+`TAVILY_API_KEY`.
 
 ## Getting watsonx.ai and Tavily credentials
 
@@ -225,33 +252,37 @@ missing variables and pointing at `.env.example`; `search.py` raises a similar
 
 ## Running the project
 
-Activate the virtual environment and make sure `.env` is populated first.
+Activate the virtual environment, install the package (`pip install -e .`), and
+make sure `.env` is populated first. Run modules with `python -m` from the
+repository root:
 
 ```bash
 # Full reflection workflow (live watsonx.ai + Tavily calls)
-python graph.py
+python -m deep_research_agent.graph
 
 # Render the compiled graph to graph_plot.png (requires network access)
-python graph_plot.py
+python scripts/render_graph.py
 
 # Individual components (each performs a live call)
-python llm.py          # smoke-test the watsonx client
-python search.py       # smoke-test the Tavily wrapper
-python responder.py    # prompt for a question; prints the structured tool call
+python -m deep_research_agent.llm         # smoke-test the watsonx client
+python -m deep_research_agent.search      # smoke-test the Tavily wrapper
+python -m deep_research_agent.responder   # prompt for a question; prints the structured tool call
 ```
 
-`python graph.py` has no arguments; edit the `question` value in the
-`if __name__ == "__main__":` block to change the question.
+`python -m deep_research_agent.graph` takes no arguments; edit the `question`
+value in the module's `if __name__ == "__main__":` block to change the question.
 
 ## Testing
 
-The default suite is **fully offline**. It seeds placeholder credentials in
-`conftest.py` before importing project modules, mocks the LLM and Tavily, and
-verifies (in a subprocess with the network and the watsonx client booby-trapped)
-that importing the project does not touch the network.
+The default suite is **fully offline**. `tests/conftest.py` seeds placeholder
+credentials before importing the package, individual tests mock the LLM and
+Tavily, and `tests/test_config.py` verifies (in a subprocess with the network
+and the watsonx client booby-trapped) that importing the project does not touch
+the network. Pytest is configured in `pyproject.toml` with `testpaths = ["tests"]`.
 
 ```bash
 pip install -r requirements-dev.txt
+pip install -e .
 python -m pytest -q
 ```
 
@@ -259,14 +290,14 @@ Coverage areas:
 
 | File | What it covers |
 |---|---|
-| `test_schema.py` | `Reflection` / `AnswerQuestion` / `ReviseAnswer` validation, nested fields, list typing. |
-| `test_config.py` | Missing-environment error messages, lazy/cached client construction, import safety (no network). |
-| `test_execute_tools.py` | Single/multiple queries, multiple tool calls, empty/unsupported calls, search-error handling, correct `search_queries` argument (regression). |
-| `test_chains.py` | Responder/revisor bind the expected tools and instructions; chains are built lazily. |
-| `test_prompt.py` | Prompt renders the system/human/system structure and the requested instructions. |
-| `test_tool_call.py` | Pydantic schemas convert to the expected tool JSON schemas. |
-| `test_graph.py` | Graph compiles, entry point and edges are correct, routing stops at `MAX_ITERATIONS`, answer extraction is order-correct. |
-| `test_end_to_end.py` | Full mocked run: stages execute in order, research reaches the revisor, the loop terminates, final answer is returned, no real API is called. |
+| `tests/test_schema.py` | `Reflection` / `AnswerQuestion` / `ReviseAnswer` validation, nested fields, list typing. |
+| `tests/test_config.py` | Missing-environment error messages, lazy/cached client construction, import safety (no network). |
+| `tests/test_execute_tools.py` | Single/multiple queries, multiple tool calls, empty/unsupported calls, search-error handling, correct `search_queries` argument (regression). |
+| `tests/test_chains.py` | Responder/revisor bind the expected tools and instructions; chains are built lazily. |
+| `tests/test_prompt.py` | Prompt renders the system/human/system structure and the requested instructions. |
+| `tests/test_tool_call.py` | Pydantic schemas convert to the expected tool JSON schemas. |
+| `tests/test_graph.py` | Graph compiles, entry point and edges are correct, routing stops at `MAX_ITERATIONS`, answer extraction is order-correct. |
+| `tests/test_end_to_end.py` | Full mocked run: stages execute in order, research reaches the revisor, the loop terminates, final answer is returned, no real API is called. |
 
 ## Optional live smoke tests
 
@@ -275,9 +306,9 @@ integrations, the module `__main__` blocks are opt-in live checks that require
 valid credentials in `.env` and network access:
 
 ```bash
-python llm.py     # one real watsonx.ai completion
-python search.py  # one real Tavily search
-python graph.py   # one full live reflection run
+python -m deep_research_agent.llm     # one real watsonx.ai completion
+python -m deep_research_agent.search  # one real Tavily search
+python -m deep_research_agent.graph   # one full live reflection run
 ```
 
 These are intentionally **not** collected by `pytest` and will fail without
@@ -285,8 +316,8 @@ credentials.
 
 ## Expected execution behavior
 
-Running `python graph.py` prints the initial draft, then the final revised
-answer (the code prints these exact markers):
+Running `python -m deep_research_agent.graph` prints the initial draft, then the
+final revised answer (the code prints these exact markers):
 
 ```
 --- Initial Draft Answer ---
@@ -311,15 +342,20 @@ with one `ToolMessage` per research round and up to `MAX_ITERATIONS` revisions.
 - **`MessageGraph` is a legacy LangGraph API.** It works with the pinned
   `langgraph==0.2.57`; newer LangGraph versions favor `StateGraph`. This project
   keeps `MessageGraph` intentionally and pins the version accordingly.
-- **Fixed iteration count.** `MAX_ITERATIONS = 3` in `event_loop.py` is a
-  constant; the number of revisions is not configurable at runtime.
+- **Fixed iteration count.** `MAX_ITERATIONS = 3` in
+  `deep_research_agent.event_loop` is a constant; the number of revisions is not
+  configurable at runtime.
 - **Sequential search.** `execute_tools` runs queries one at a time and has no
   retry/backoff; provider rate limits or transient failures surface as error
   strings in the tool message.
-- **Community Tavily wrapper.** `search.py` uses
+- **Community Tavily wrapper.** `deep_research_agent.search` uses
   `langchain_community.tools.tavily_search.TavilySearchResults`; LangChain now
   also ships a dedicated `langchain-tavily` integration.
-- **Graph image needs network.** `graph_plot.py` calls
+- **Importing the graph needs a Tavily key.** `deep_research_agent.search`
+  validates `TAVILY_API_KEY` at import, so importing
+  `deep_research_agent.graph` requires that variable to be set (config
+  validation only; no network call is made).
+- **Graph image needs network.** `scripts/render_graph.py` calls
   `draw_mermaid_png()`, which contacts a remote renderer.
 - **No tracing/checkpointing.** The graph runs without a checkpointer or
   LangSmith tracing.
@@ -335,8 +371,8 @@ with `pytest` markers.
   gitignored; only `.env.example` (placeholders) is tracked.
 - Keep API keys out of source, notebooks, logs, and screenshots.
 - If a key is ever exposed, rotate it in the IBM Cloud and Tavily consoles.
-- The `.venv/`, `__pycache__/`, and `.pytest_cache/` directories are gitignored
-  and should not be committed.
+- The `.venv/`, `__pycache__/`, `*.egg-info/`, and `.pytest_cache/` directories
+  are gitignored and should not be committed.
 
 ## License
 

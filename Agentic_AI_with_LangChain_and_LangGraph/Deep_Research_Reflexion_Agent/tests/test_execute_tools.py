@@ -3,8 +3,8 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-import execute_tools as execute_tools_module
-from execute_tools import SUPPORTED_TOOLS, execute_tools
+import deep_research_agent.execute_tools as execute_tools_module
+from deep_research_agent.execute_tools import SUPPORTED_TOOLS, execute_tools
 
 
 def _ai_message(*tool_calls):

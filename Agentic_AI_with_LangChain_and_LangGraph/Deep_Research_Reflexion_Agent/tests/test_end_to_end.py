@@ -11,11 +11,9 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-import execute_tools as execute_tools_module
-import graph
-import responder
-import revisor
-from event_loop import MAX_ITERATIONS
+import deep_research_agent.execute_tools as execute_tools_module
+from deep_research_agent import graph, responder, revisor
+from deep_research_agent.event_loop import MAX_ITERATIONS
 
 
 class _FakeRunnable:

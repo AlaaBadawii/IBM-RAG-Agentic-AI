@@ -17,10 +17,10 @@ The workflow is a small reflection loop built with LangGraph's ``MessageGraph``:
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, MessageGraph
 
-from event_loop import event_loop
-from execute_tools import execute_tools
-from responder import responder_chain
-from revisor import revisor_chain
+from .event_loop import event_loop
+from .execute_tools import execute_tools
+from .responder import responder_chain
+from .revisor import revisor_chain
 
 
 def build_graph():

@@ -4,7 +4,7 @@ import json
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
-from search import tavily_tool
+from .search import tavily_tool
 
 # Tool calls whose ``search_queries`` argument should be executed by Tavily.
 SUPPORTED_TOOLS = {"AnswerQuestion", "ReviseAnswer"}

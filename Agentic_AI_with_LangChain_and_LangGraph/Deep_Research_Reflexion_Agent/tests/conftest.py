@@ -4,15 +4,12 @@ The default suite must run without real IBM watsonx.ai or Tavily credentials
 and must never contact an external service. Placeholder credentials are seeded
 here, before any project module is imported, and every test mocks the model and
 search calls that it needs.
+
+The package under test is imported from the editable installation rather than
+by manipulating ``sys.path``.
 """
 
 import os
-import sys
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 # ``dotenv.load_dotenv`` does not override variables that are already set, so
 # these placeholders shadow any real values in a local ``.env`` file.

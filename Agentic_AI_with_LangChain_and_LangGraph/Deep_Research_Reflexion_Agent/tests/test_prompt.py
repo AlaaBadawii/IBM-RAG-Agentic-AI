@@ -1,6 +1,6 @@
 from langchain_core.messages import HumanMessage
 
-from prompt import prompt_template
+from deep_research_agent.prompt import prompt_template
 
 
 def _render(first_instruction, question):

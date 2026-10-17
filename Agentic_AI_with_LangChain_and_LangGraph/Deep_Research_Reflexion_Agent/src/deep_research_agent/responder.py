@@ -2,9 +2,9 @@ from functools import lru_cache
 
 from langchain_core.runnables import RunnableLambda
 
-from llm import get_llm
-from prompt import prompt_template
-from schema import AnswerQuestion
+from .llm import get_llm
+from .prompt import prompt_template
+from .schema import AnswerQuestion
 
 first_responder_prompt = prompt_template.partial(
     first_instruction="Provide a detailed ~250 word answer"

@@ -1,9 +1,9 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END
 
-import graph
-from event_loop import MAX_ITERATIONS
-from event_loop import event_loop as route
+from deep_research_agent import graph
+from deep_research_agent.event_loop import MAX_ITERATIONS
+from deep_research_agent.event_loop import event_loop as route
 
 
 def _answer_message(name, answer, tool_id):

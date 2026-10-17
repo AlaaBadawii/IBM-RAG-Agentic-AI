@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-import llm
+from deep_research_agent import llm
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Import the whole project inside a fresh interpreter where both the network and
 # the watsonx client are booby-trapped. If any module authenticates, connects,
@@ -49,7 +49,17 @@ class _ForbiddenChatWatsonx:
 
 langchain_ibm.ChatWatsonx = _ForbiddenChatWatsonx
 
-import llm, prompt, schema, event_loop, search, responder, revisor, execute_tools, graph
+from deep_research_agent import (
+    event_loop,
+    execute_tools,
+    graph,
+    llm,
+    prompt,
+    responder,
+    revisor,
+    schema,
+    search,
+)
 
 assert graph.app is not None
 print("IMPORT_OK")
