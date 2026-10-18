@@ -12,9 +12,10 @@ nothing here runs on its own)::
 
     persist_discoveries(store, context)   discovery → durable ``queued`` rows
     store.list_backlog()                  the actionable pool, oldest first
-    store.claim_opportunities(run, limit) select ≤ MAX_PUBLISHES_PER_RUN
+    store.claim_opportunities(run, limit) select ≤ MAX_DECISIONS_PER_RUN
     build_opportunity_context(opportunity) reconstruct one claim's input
     ... the existing agent / publish path runs per claimed opportunity ...
+    (at most MAX_PUBLISHES_PER_RUN of the claimed rows actually publishes)
     store.record_opportunity_decision()   why something did not publish yet
     store.finalize_opportunity()          published / rejected / review
 
@@ -35,6 +36,7 @@ from hashlib import sha256
 from typing import Any, Sequence
 
 from app.context.enums import EvidenceStatus
+from app.context.evidence_roles import is_catalog_only, is_publishable_section
 from app.context.models import (
     ContextCoverage,
     ContextItem,
@@ -48,6 +50,7 @@ from app.logging_config import get_logger
 from app.state.models import ContentOpportunity
 
 __all__ = [
+    "EVIDENCE_SNAPSHOT_VERSION",
     "OpportunityDecision",
     "build_opportunity_context",
     "evidence_snapshot",
@@ -56,6 +59,15 @@ __all__ = [
 ]
 
 logger = get_logger(__name__)
+
+#: The evidence-selection policy version stamped on every snapshot this module
+#: writes. Bump when the policy changes *which* chunks it would choose for the
+#: same document — 2 is narrative-aware selection
+#: (:mod:`app.context.evidence_roles`). A stored row below this version is a
+#: repair candidate: the same fingerprint re-discovered now carries a better
+#: snapshot, and :func:`persist_discoveries` refreshes the actionable row in
+#: place rather than leaving the old selection frozen.
+EVIDENCE_SNAPSHOT_VERSION = 2
 
 
 class OpportunityDecision(str, Enum):
@@ -77,6 +89,7 @@ class OpportunityDecision(str, Enum):
     REQUIRES_REVIEW = "requires_review"
     PUBLISHED = "published"
     RECOVERED = "recovered"
+    EXHAUSTED = "exhausted"
 
 
 def opportunity_fingerprint(topic: str,
@@ -153,6 +166,21 @@ def persist_discoveries(store: Any, context: Any) -> list[ContentOpportunity]:
     Defensive by design: anything that is not a real assembled context
     (no evidence sections) yields ``[]`` with no writes, so instrumented
     callers with stand-in contexts behave exactly as before.
+
+    A chunk that is **only** a document's catalogue — its ``## Evidence``
+    path list, ``## Content Potential``, ``Story strength`` — is dropped
+    before persistence: an opportunity grounded in an index card is frozen
+    with nothing a writer can say. A section left with no narrative item is
+    not persisted at all, because it could never become a post. Unrecognized
+    structure is ``UNKNOWN``, not catalogue, so unfamiliar documents are
+    untouched.
+
+    A section that is not a publishing candidate at all
+    (:func:`app.context.evidence_roles.is_publishable_section`) — ``audit``,
+    ``unclassified``, or an ``in_progress_courses`` section with no
+    substantive learning signal — is likewise not persisted. It stays
+    available as context; it simply never becomes an opportunity that would
+    rotate through the backlog consuming the publish budget.
     """
     pairs = _section_items(context)
     if not pairs:
@@ -162,7 +190,18 @@ def persist_discoveries(store: Any, context: Any) -> list[ContentOpportunity]:
         by_section.setdefault(name, []).append(item)
     persisted: list[ContentOpportunity] = []
     for name, items in by_section.items():
-        snapshots = [evidence_snapshot(item) for item in items]
+        grounded = [item for item in items if not is_catalog_only(item)]
+        if not grounded:
+            # Every item in this section is a pure index card: the section has
+            # no story, so no post could rest on it.
+            continue
+        if not is_publishable_section(name, grounded):
+            # ``audit`` / ``unclassified`` material, or an ``in_progress_courses``
+            # section with no substantive learning signal: it is still context,
+            # but it is not something to publish about, so it never becomes an
+            # opportunity that would rotate through the backlog forever.
+            continue
+        snapshots = [evidence_snapshot(item) for item in grounded]
         identities = [(snap["source"], snap["content_hash"])
                       for snap in snapshots
                       if snap["source"] and snap["content_hash"]]
@@ -173,16 +212,55 @@ def persist_discoveries(store: Any, context: Any) -> list[ContentOpportunity]:
             continue
         strength = min(state_rank(snap["evidence_state"])
                        for snap in snapshots)
-        persisted.append(store.enqueue_opportunity(
+        opportunity = store.enqueue_opportunity(
             opportunity_fingerprint(name, identities),
             name,
             snapshots,
             evidence_strength=strength,
-        ))
+            snapshot_version=EVIDENCE_SNAPSHOT_VERSION,
+        )
+        opportunity = _refresh_if_actionable(store, opportunity, snapshots,
+                                             strength)
+        persisted.append(opportunity)
     if persisted:
         logger.info("Persisted %d content opportunitie(s) to the backlog",
                     len(persisted))
     return persisted
+
+
+def _refresh_if_actionable(store: Any, opportunity: ContentOpportunity,
+                           snapshots: list[dict], strength: int
+                           ) -> ContentOpportunity:
+    """Rebuild a stored snapshot when re-discovery now selects better evidence.
+
+    A fingerprint is ``topic + (source, content_hash)`` — it identifies *which
+    documents* ground an opportunity, not *which chunks* of them. When the
+    selection policy changes what it would choose for the same documents (the
+    incident's metadata tail versus the story it summarised), the fingerprint
+    is unchanged, so ``enqueue_opportunity`` would otherwise return the stale
+    row forever. Refreshing an *actionable* row in place fixes that without
+    ever touching a claim, a resolution, or the attempt count. Terminal and
+    claimed rows are left exactly as they are — history is not rewritten.
+
+    A store without the refresh method (an instrumented stand-in) is left
+    untouched, matching this module's defensive contract.
+    """
+    refresh = getattr(store, "refresh_opportunity_snapshot", None)
+    if refresh is None or not opportunity.actionable:
+        return opportunity
+    refreshed = refresh(
+        opportunity.opportunity_id, snapshots,
+        evidence_strength=strength,
+        snapshot_version=EVIDENCE_SNAPSHOT_VERSION,
+        expected_snapshot_hash=opportunity.snapshot_hash,
+    )
+    if refreshed is not None and refreshed.snapshot_hash != opportunity.\
+            snapshot_hash:
+        logger.info(
+            "Refreshed the evidence snapshot of opportunity %s (topic=%s)",
+            opportunity.opportunity_id, opportunity.topic,
+        )
+    return refreshed or opportunity
 
 
 def build_opportunity_context(opportunity: ContentOpportunity

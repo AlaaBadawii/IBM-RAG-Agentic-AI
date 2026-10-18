@@ -85,6 +85,7 @@ from app.agent.models import (
 from app.agent.prompt import (
     AGENT_PROMPT_VERSION,
     evidence_options,
+    resolve_topic,
     topic_candidates,
 )
 from app.context.models import PersonalBrandingContext
@@ -432,7 +433,10 @@ class BrandingAgent:
         and every one of them is checked against what the run actually built:
 
         * the **topic** must be one of the context's own non-empty evidence
-          sections — a topic the evidence does not support is not a proposal;
+          sections — a topic the evidence does not support is not a proposal.
+          A name echoed back with the opportunity's coverage line attached
+          (``"evidence: 3 item(s), …"``) is resolved to the offered name rather
+          than treated as a new one;
         * every **evidence label** must resolve against the options this run
           offered, or the answer is refused rather than quietly trimmed;
         * the **strategy** must come from the vocabulary the caller allowed, or
@@ -452,10 +456,17 @@ class BrandingAgent:
             )
         offered_topics = request.topics
         names = tuple(topic.name for topic in offered_topics)
-        if answer.topic not in names:
+        topic = resolve_topic(answer.topic, names)
+        if topic is None:
             raise UnusableReasoningAnswer(
                 f"the branding agent chose the topic {answer.topic!r}, which "
                 f"is not one of this context's opportunities: {list(names)}"
+            )
+        if topic != answer.topic:
+            logger.warning(
+                "branding agent named the topic %r with decoration; resolving "
+                "it to the offered opportunity %r",
+                answer.topic, topic,
             )
 
         if not answer.evidence_labels:
@@ -499,7 +510,7 @@ class BrandingAgent:
             )
 
         return AgentProposal(
-            topic=answer.topic,
+            topic=topic,
             context=context,
             evidence=evidence,
             angle=answer.angle,

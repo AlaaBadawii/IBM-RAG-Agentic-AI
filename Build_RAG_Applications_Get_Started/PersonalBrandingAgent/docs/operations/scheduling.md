@@ -12,7 +12,7 @@ which exits with the workflow's status.
 
 | Workflow | Schedule | Command |
 |---|---|---|
-| branding | every 8h (`0 */8 * * *`) | `python -m app.workflows.branding` |
+| branding | twice weekly, Tue + Fri 10:00 (`0 10 * * 2,5`) | `python -m app.workflows.branding` |
 | sync | daily 02:10 (`10 2 * * *`) | `python -m app.workflows.sync` |
 
 Install:
@@ -27,6 +27,29 @@ package, so `python -m` resolves from the working directory — see
 [`local-development.md`](local-development.md) §4) and appends output to the
 gitignored `logs/` directory. No exit-masking constructs may be added: the
 scheduler passes the workflow exit status straight through.
+
+### Cadence and the weekly target
+
+Branding is **twice weekly**: Tuesday and Friday at 10:00. Each run publishes
+**at most one** post (`MAX_PUBLISHES_PER_RUN = 1`), so the two runs together
+target **two posts a week**. A run that finds no candidate that clears the
+quality gates publishes nothing and exits `0` — the target never forces a post
+through a failed gate.
+
+Timezone: cron 3.0 has no `CRON_TZ` and ignores a crontab `TZ=` for
+scheduling, so `0 10 * * 2,5` fires at 10:00 *system* local time. Confirm the
+host's zone is the intended one (`timedatectl`); on this host it is
+`Africa/Cairo`, and DST is handled by the system clock, so no timezone
+environment is needed in the crontab.
+
+After each run the workflow checks the running week against the target
+(`WEEKLY_PUBLISH_TARGET`, default `2`; `BRANDING_RUNS_PER_WEEK`, default `2`).
+When the posts already recorded plus the runs still to come can no longer
+reach the target — for example the LinkedIn credential is unusable, so every
+run refuses to publish — it records a `weekly_target_jeopardy` failure and
+notifies once for that week (deduplicated per ISO week; later runs in the
+same week only increment the counter, they do not re-notify). The check is
+advisory and never changes the run's outcome or exit code.
 
 ### Why cron, not a systemd timer
 

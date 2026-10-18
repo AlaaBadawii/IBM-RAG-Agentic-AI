@@ -298,6 +298,35 @@ def test_the_record_keeps_provenance_for_every_claim_and_the_draft():
     assert record["evidence"][0]["chunk_id"] == ctx.evidence_items()[0].chunk_id
 
 
+def test_a_clean_post_carries_no_editorial_notes():
+    ctx = verified_context()
+    draft = post("I built a shipment API with FastAPI and SQLAlchemy models.",
+                 ctx)
+
+    result = verify(draft, ctx, judge=FakeJudge())
+
+    assert result.outcome is VerificationOutcome.PASS
+    assert result.editorial_notes == ()
+    assert result.to_record()["editorial_notes"] == []
+
+
+def test_editorial_notes_are_advisory_and_never_change_the_outcome():
+    """A discoverability observation is recorded, not enforced: a draft the
+    evidence supports still passes while carrying the note."""
+    ctx = verified_context()
+    draft = post(
+        "Excited to share.\n\nI built a shipment API with FastAPI and "
+        "SQLAlchemy models.",
+        ctx,
+    )
+
+    result = verify(draft, ctx, judge=FakeJudge())
+
+    assert result.outcome is VerificationOutcome.PASS
+    assert result.editorial_notes
+    assert result.to_record()["editorial_notes"] == list(result.editorial_notes)
+
+
 def test_a_draft_cannot_cite_evidence_the_context_does_not_hold():
     ctx = verified_context()
     forged = GeneratedPost(

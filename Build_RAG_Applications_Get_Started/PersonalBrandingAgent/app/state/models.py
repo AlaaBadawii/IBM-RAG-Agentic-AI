@@ -239,9 +239,18 @@ class ContentOpportunity:
     ``last_decision`` is unconstrained prose-adjacent vocabulary owned by the
     backlog layer (``queued``, ``selected``, ``deferred``, ``rejected``,
     ``verification_failed``, ``duplicate``, ``publish_failed``,
-    ``requires_review``, ``published``, ``recovered``) recording why the
-    opportunity did not publish yet — the per-opportunity counterpart of the
-    run-level ``no_publish_reason``.
+    ``requires_review``, ``published``, ``recovered``, ``exhausted``)
+    recording why the opportunity did not publish yet — the per-opportunity
+    counterpart of the run-level ``no_publish_reason``.
+
+    ``snapshot_version`` and ``snapshot_hash`` identify *how* the stored
+    evidence was selected. ``snapshot_version`` is the selection policy that
+    produced it (bumped when the policy changes what it would choose);
+    ``snapshot_hash`` is a deterministic digest of the stored snapshot, so a
+    re-discovery carrying different evidence for the same fingerprint can
+    refresh the row instead of being silently ignored. A row written before
+    these columns existed reads version ``1`` and an empty hash — "unknown,
+    treat as stale".
     """
 
     opportunity_id: str
@@ -254,6 +263,8 @@ class ContentOpportunity:
     updated_at: str
     project: str | None = None
     evidence_strength: int = 0
+    snapshot_version: int = 1
+    snapshot_hash: str = ""
     last_decision: str | None = None
     last_decision_at: str | None = None
     last_error: str | None = None
@@ -273,6 +284,7 @@ class ContentOpportunity:
         """True when the opportunity has left the active backlog."""
         return self.status in (
             OpportunityStatus.PUBLISHED, OpportunityStatus.REJECTED,
+            OpportunityStatus.EXHAUSTED,
         )
 
     @classmethod
@@ -288,12 +300,110 @@ class ContentOpportunity:
             updated_at=row["updated_at"],
             project=row["project"],
             evidence_strength=int(row["evidence_strength"]),
+            snapshot_version=int(row["snapshot_version"]),
+            snapshot_hash=row["snapshot_hash"],
             last_decision=row["last_decision"],
             last_decision_at=row["last_decision_at"],
             last_error=row["last_error"],
             claimed_by_run=row["claimed_by_run"],
             claimed_at=row["claimed_at"],
             publication_id=row["publication_id"],
+        )
+
+
+@dataclass(frozen=True)
+class OpportunityOutcome:
+    """One claimed opportunity's terminal disposition within one run.
+
+    The run-level outcome says *that* a run published nothing or failed; this
+    says *what each opportunity the run actually tried ended as* — the fact a
+    reader needs to act without opening the backlog (report §12 P3.1).
+    ``decision`` is the backlog layer's own vocabulary (``published``,
+    ``deferred``, ``rejected``, ``duplicate``, ``publish_failed``,
+    ``requires_review``, ``exhausted``), rendered as recorded, never
+    recomputed.
+
+    ``trace`` is the bounded selection provenance for this opportunity — the
+    chosen chunk ids and the rank at which each was selected — so a future
+    incident of the "wrong evidence was frozen" class is diagnosable from the
+    store alone (report §12 P3.3). It is a report of a run, never a source for
+    a post.
+    """
+
+    run_id: str
+    opportunity_id: str
+    topic: str
+    decision: str
+    rationale: str = ""
+    selected_count: int = 0
+    trace: tuple[dict, ...] = ()
+    created_at: str = ""
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "OpportunityOutcome":
+        try:
+            trace = tuple(json.loads(row["trace"]))
+        except (ValueError, TypeError):
+            trace = ()
+        return cls(
+            run_id=row["run_id"],
+            opportunity_id=row["opportunity_id"],
+            topic=row["topic"],
+            decision=row["decision"],
+            rationale=row["rationale"],
+            selected_count=int(row["selected_count"]),
+            trace=trace,
+            created_at=row["created_at"],
+        )
+
+
+@dataclass(frozen=True)
+class PublicationMetric:
+    """One post's engagement numbers, as captured at a known age.
+
+    ``age_hours`` is the post's age when these numbers were read, and it is
+    the field that makes comparison honest: two posts can only be compared at
+    a comparable age, because both a post's impressions and its engagement
+    rate keep moving for a while after publication. Nothing here is derived
+    into a decision — the pipeline reads metrics only to report them.
+    """
+
+    metric_id: str
+    publication_id: str
+    captured_at: str
+    age_hours: float
+    impressions: int = 0
+    reactions: int = 0
+    comments: int = 0
+    reposts: int = 0
+    source: str = "manual"
+    created_at: str = ""
+
+    @property
+    def engagements(self) -> int:
+        """Reactions, comments and reposts together."""
+        return self.reactions + self.comments + self.reposts
+
+    @property
+    def engagement_rate(self) -> float:
+        """Engagements per impression, or ``0.0`` when there were none."""
+        if self.impressions <= 0:
+            return 0.0
+        return self.engagements / self.impressions
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "PublicationMetric":
+        return cls(
+            metric_id=row["metric_id"],
+            publication_id=row["publication_id"],
+            captured_at=row["captured_at"],
+            age_hours=float(row["age_hours"]),
+            impressions=int(row["impressions"]),
+            reactions=int(row["reactions"]),
+            comments=int(row["comments"]),
+            reposts=int(row["reposts"]),
+            source=row["source"],
+            created_at=row["created_at"],
         )
 
 

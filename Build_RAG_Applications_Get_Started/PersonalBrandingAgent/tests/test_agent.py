@@ -635,6 +635,72 @@ def test_a_topic_that_is_not_an_opportunity_is_refused():
     assert result.failure.category is AgentFailureCategory.UNUSABLE_ANSWER
 
 
+def test_a_topic_that_echoes_the_opportunitys_coverage_line_is_resolved():
+    """The incident's reasoner named ``"evidence: 3 item(s), evidence states:
+    VERIFIED"`` for the opportunity ``evidence``. That is the opportunity, not
+    a new one, and it must not end the run as an unusable answer."""
+    ctx = evidence_context()
+    reasoner = FakeReasoner(proposal_answer(
+        topic="evidence: 3 item(s), evidence states: VERIFIED",
+    ))
+
+    result = agent(reasoner).run(ctx)
+
+    assert result.decision is AgentDecision.PUBLISH
+    assert result.proposal is not None
+    assert result.proposal.topic == "evidence"
+
+
+def test_a_topic_differing_only_in_case_is_resolved():
+    ctx = evidence_context()
+
+    proposal = agent(FakeReasoner(proposal_answer(topic="Evidence"))).propose(ctx)
+
+    assert isinstance(proposal, AgentProposal)
+    assert proposal.topic == "evidence"
+
+
+def test_a_topic_that_only_starts_with_an_opportunity_name_is_still_refused():
+    """``"evidence and lessons"`` is a *different* name that happens to begin
+    with an offered one; resolving it to ``evidence`` would be a guess, not a
+    reading. Only an offered name followed by a separator is decorated."""
+    result = agent(FakeReasoner(proposal_answer(
+        topic="evidence and lessons",
+    ))).run(evidence_context())
+
+    assert result.reason is NoPublishReason.INVALID_PROPOSAL
+    assert result.failure.category is AgentFailureCategory.UNUSABLE_ANSWER
+
+
+def test_resolve_topic_reads_only_what_was_offered():
+    from app.agent.prompt import resolve_topic
+
+    offered = ("evidence", "completed_projects", "in_progress_courses")
+
+    assert resolve_topic("evidence", offered) == "evidence"
+    assert resolve_topic("Evidence", offered) == "evidence"
+    assert resolve_topic("evidence: 3 items", offered) == "evidence"
+    assert resolve_topic("evidence (3 items)", offered) == "evidence"
+    assert resolve_topic("completed_projects - 2 items", offered) == (
+        "completed_projects"
+    )
+
+    assert resolve_topic(None, offered) is None
+    assert resolve_topic("", offered) is None
+    assert resolve_topic("   ", offered) is None
+    assert resolve_topic("kubernetes-migrations", offered) is None
+    assert resolve_topic("evidence and lessons", offered) is None
+
+
+def test_resolve_topic_prefers_the_more_specific_name():
+    from app.agent.prompt import resolve_topic
+
+    offered = ("evidence", "evidence_logs")
+
+    assert resolve_topic("evidence_logs: 4 items", offered) == "evidence_logs"
+    assert resolve_topic("evidence: 4 items", offered) == "evidence"
+
+
 def test_publishing_with_no_evidence_selected_is_refused():
     """A post with nothing behind it is not a proposal, however confidently
     the reasoner asserts one."""

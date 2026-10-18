@@ -81,6 +81,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from app.config import HYBRID_CANDIDATES
+from app.context.evidence_roles import has_narrative, selection_priority
 from app.retrieval.engine import RetrievalEngine
 from app.retrieval.models import RetrievalResult, RetrievedDocument
 from app.retrieval.scope import for_category
@@ -410,14 +411,102 @@ def _documents_of(vector_store, query: str, stratum: Stratum,
                   strategy: str,
                   known_sources: frozenset[str] = frozenset()
                   ) -> list[RetrievedDocument]:
-    """A stratum's documents, each with its own strongest chunks."""
+    """A stratum's documents, each with its own strongest chunks.
+
+    Which chunks ride along is decided by
+    :func:`_select_document_chunks`, not by the raw ranking: a document
+    contributes its narrative chunks before its metadata footer, even when
+    the footer is what scored highest.
+    """
     grouped = _by_document(_category_pool(vector_store, query, stratum.category,
                                           strategy))
     drawn: list[RetrievedDocument] = []
     for _source, chunks in _prefer_uncovered(grouped, known_sources
                                              )[:stratum.documents]:
-        drawn.extend(chunks[:stratum.chunks_per_document])
+        drawn.extend(_select_document_chunks(vector_store, chunks,
+                                             stratum.chunks_per_document))
     return drawn
+
+
+def _content_hash(document: RetrievedDocument) -> str:
+    """The document's content hash, from metadata or its chunk id.
+
+    Chunk ids are ``<content_hash>:<index>`` and the hash is hex, so the part
+    before the first colon is the hash even when metadata forgot to carry it.
+    """
+    digest = (document.metadata or {}).get("content_hash")
+    if digest:
+        return digest
+    return (document.chunk_id or "").partition(":")[0]
+
+
+def _sibling_chunks(vector_store, document: RetrievedDocument
+                    ) -> list[RetrievedDocument]:
+    """Every stored chunk of the same document, by ``content_hash``.
+
+    The retrieval pool holds only the chunks that ranked, so a document whose
+    title and story scored too low to make the pool has no narrative chunk to
+    prefer. Fetching the document's own chunks by hash is what makes
+    narrative-first selection independent of which chunks the ranking
+    happened to surface. Best-effort: any store that cannot answer, or any
+    document without a hash, contributes nothing rather than failing a run.
+    """
+    digest = _content_hash(document)
+    if not digest or vector_store is None:
+        return []
+    try:
+        stored = vector_store.get(where={"content_hash": digest},
+                                  include=["documents", "metadatas"])
+    except Exception:  # noqa: BLE001 — a store that cannot answer is not fatal
+        return []
+
+    siblings: list[RetrievedDocument] = []
+    ids = stored.get("ids") or []
+    documents = stored.get("documents") or []
+    metadatas = stored.get("metadatas") or []
+    for chunk_id, content, metadata in zip(ids, documents, metadatas):
+        meta = metadata or {}
+        siblings.append(RetrievedDocument(
+            content=content or "",
+            score=0.0,
+            source=meta.get("source") or document.source,
+            metadata=meta,
+            strategy=document.strategy,
+            chunk_id=chunk_id or "",
+        ))
+    return siblings
+
+
+def _select_document_chunks(vector_store, chunks: list[RetrievedDocument],
+                            limit: int) -> list[RetrievedDocument]:
+    """Up to ``limit`` chunks of one document, narrative chunks first.
+
+    Orders the document's chunks by
+    :func:`app.context.evidence_roles.selection_priority` — narrative, then
+    mixed, then unknown, then catalog — stably, so the similarity order still
+    breaks ties within a role. When none of the pool chunks is narrative (the
+    common incident shape: only the footer matched), the document's siblings
+    are fetched by ``content_hash`` so the story can still be found. Dedup is
+    by chunk id, and an absent id never deduplicates, the same rule the rest
+    of this module uses.
+    """
+    if limit <= 0 or not chunks:
+        return []
+    candidates = list(chunks)
+    if not any(has_narrative(document) for document in candidates):
+        candidates.extend(_sibling_chunks(vector_store, candidates[0]))
+
+    selected: list[RetrievedDocument] = []
+    seen: set[str] = set()
+    for document in sorted(candidates, key=selection_priority):
+        if document.chunk_id and document.chunk_id in seen:
+            continue
+        if document.chunk_id:
+            seen.add(document.chunk_id)
+        selected.append(document)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def _fill_candidates(vector_store, query: str, strata: tuple[Stratum, ...],

@@ -224,6 +224,15 @@ class VerificationResult:
     judge: str = "none"
     judge_prompt_version: str | None = None
 
+    editorial_notes: tuple[str, ...] = ()
+    """Advisory discoverability observations about the draft's writing.
+
+    Never a gate: a ``PASS`` may carry them, because they are about how
+    findable a post is, not whether it is grounded. Reported so a writer can
+    improve and recorded so a published post's review sees them
+    (:mod:`app.verification.editorial`).
+    """
+
     def __post_init__(self) -> None:
         all_violations = self._all_violations()
         rejecting = [v for v in all_violations if v.is_rejecting]
@@ -330,6 +339,7 @@ class VerificationResult:
             "advisory_note": self.advisory_note,
             "judge": self.judge,
             "judge_prompt_version": self.judge_prompt_version,
+            "editorial_notes": list(self.editorial_notes),
             "unresolved_labels": list(self.unresolved),
             "violations": [self._violation_record(v) for v in self.violations],
             "evidence": [

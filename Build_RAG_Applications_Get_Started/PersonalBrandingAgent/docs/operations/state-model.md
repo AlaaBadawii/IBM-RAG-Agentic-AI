@@ -134,12 +134,13 @@ Terminal states: `published` (post id returned), `failed` (definitively no
 post), `unknown_requires_review` (a post may exist — never retried, person
 must confirm).
 
-Guarantees: `ux_publish_intents_run` — at most one intent per run
+Guarantees: `trg_publish_intents_run_limit` — at most one intent per run
 (`MAX_PUBLISHES_PER_RUN = 1`, enforced by SQLite, not by workflow
-discipline); `ux_publish_intents_unresolved_content` — at most one
-*unresolved* intent per content hash across runs. A `failed` intent drops
-out of the second index (a definitive non-send must not block the content
-forever); `unknown_requires_review` deliberately stays in it.
+discipline; migration 1's unique index `ux_publish_intents_run` was replaced by
+this trigger in migration 13); `ux_publish_intents_unresolved_content` — at
+most one *unresolved* intent per content hash across runs. A `failed` intent
+drops out of the second index (a definitive non-send must not block the
+content forever); `unknown_requires_review` deliberately stays in it.
 
 ### 3.6 `publications` + `publication_evidence` — owned by Step 6
 

@@ -13,8 +13,8 @@ Guarantee                               Enforcement
 ======================================  =====================================
 A run ends as one of exactly three      ``workflow_runs.outcome`` CHECK
 outcomes, and only once it has finished ``(outcome IS NULL) = (finished_at IS NULL)``
-A publish state is one of five values   ``publish_intents.state`` CHECK
-At most one publish intent per run      ``ux_publish_intents_run``
+A publish state is one of five values           ``publish_intents.state`` CHECK
+At most one publish intent per run      ``trg_publish_intents_run_limit``
 At most one unresolved intent per       ``ux_publish_intents_unresolved_content``
 content hash
 At most one publication per intent      ``publications.intent_id`` UNIQUE
@@ -51,6 +51,17 @@ class Migration:
     version: int
     description: str
     statements: tuple[str, ...]
+    foreign_keys_off: bool = False
+    """Run this migration with foreign-key enforcement disabled.
+
+    SQLite cannot alter a CHECK constraint in place, so a migration that
+    widens one has to rebuild the table. The connection enables
+    ``PRAGMA foreign_keys``, and a rebuild of a referenced table is only
+    safe with enforcement off — a pragma that is a no-op inside a
+    transaction, which is why the runner toggles it around the migration
+    rather than inside it. The default is on, so every existing migration
+    keeps its enforcement.
+    """
 
 
 #: The schema-version ledger. Created outside the migrations themselves so
@@ -537,6 +548,172 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        version=10,
+        description="opportunity snapshot versioning and exhaustion retirement",
+        foreign_keys_off=True,
+        statements=(
+            # Two things change here, and both need a table rebuild because
+            # SQLite cannot widen a CHECK in place:
+            #
+            # * ``exhausted`` joins the status vocabulary — an opportunity that
+            #   has spent its whole attempt budget without ever producing a post
+            #   is retired by an explicit recorded decision instead of rotating
+            #   through the backlog forever.
+            # * a snapshot identity is recorded (``snapshot_version`` +
+            #   ``snapshot_hash``) so a stored evidence snapshot produced by an
+            #   older selection policy can be detected and refreshed in place on
+            #   re-discovery, rather than frozen for the life of the row.
+            """
+            CREATE TABLE content_opportunities_new (
+                opportunity_id   TEXT PRIMARY KEY,
+                fingerprint      TEXT NOT NULL UNIQUE,
+                topic            TEXT NOT NULL,
+                project          TEXT,
+                status           TEXT NOT NULL CHECK (status IN (
+                                     'queued',
+                                     'claimed',
+                                     'published',
+                                     'rejected',
+                                     'failed',
+                                     'requires_review',
+                                     'exhausted')),
+                evidence         TEXT NOT NULL DEFAULT '[]',
+                evidence_strength INTEGER NOT NULL DEFAULT 0,
+                snapshot_version INTEGER NOT NULL DEFAULT 1,
+                snapshot_hash    TEXT NOT NULL DEFAULT '',
+                attempts         INTEGER NOT NULL DEFAULT 0
+                                     CHECK (attempts >= 0),
+                last_decision    TEXT,
+                last_decision_at TEXT,
+                last_error       TEXT,
+                claimed_by_run   TEXT,
+                claimed_at       TEXT,
+                publication_id   TEXT
+                                     REFERENCES publications (publication_id),
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                CHECK ((status = 'claimed') = (claimed_by_run IS NOT NULL))
+            )
+            """,
+            # Carry every row across unchanged; snapshot_version stays 1 and
+            # snapshot_hash stays empty, which is exactly "produced before this
+            # column existed" — the repair pass treats that as stale.
+            """
+            INSERT INTO content_opportunities_new (
+                opportunity_id, fingerprint, topic, project, status, evidence,
+                evidence_strength, attempts, last_decision, last_decision_at,
+                last_error, claimed_by_run, claimed_at, publication_id,
+                created_at, updated_at)
+            SELECT
+                opportunity_id, fingerprint, topic, project, status, evidence,
+                evidence_strength, attempts, last_decision, last_decision_at,
+                last_error, claimed_by_run, claimed_at, publication_id,
+                created_at, updated_at
+            FROM content_opportunities
+            """,
+            "DROP TABLE content_opportunities",
+            "ALTER TABLE content_opportunities_new "
+            "RENAME TO content_opportunities",
+            "CREATE INDEX ix_content_opportunities_backlog "
+            "ON content_opportunities (status, attempts, created_at)",
+        ),
+    ),
+    Migration(
+        version=11,
+        description="per-run opportunity outcomes and selection trace",
+        statements=(
+            # The run's own terminal outcome already records *that* it
+            # published nothing (or failed); this table records *why*, per
+            # opportunity, so a notification can enumerate what each claimed
+            # opportunity ended as without opening the backlog — the incident
+            # email named one quiet reason and left two opportunities'
+            # dispositions to a database query (report §12 P3.1).
+            #
+            # ``trace`` is the bounded selection trace (chosen chunk ids and
+            # their rank, as JSON) the incident could only recover by decoding
+            # Chroma (report §12 P3.3). It is provenance, not evidence: the
+            # row is a report of a run, never a source for a post.
+            """
+            CREATE TABLE opportunity_outcomes (
+                run_id          TEXT NOT NULL,
+                opportunity_id  TEXT NOT NULL,
+                topic           TEXT NOT NULL,
+                decision        TEXT NOT NULL,
+                rationale       TEXT NOT NULL DEFAULT '',
+                selected_count  INTEGER NOT NULL DEFAULT 0,
+                trace           TEXT NOT NULL DEFAULT '[]',
+                created_at      TEXT NOT NULL,
+                PRIMARY KEY (run_id, opportunity_id)
+            )
+            """,
+            "CREATE INDEX ix_opportunity_outcomes_run "
+            "ON opportunity_outcomes (run_id)",
+        ),
+    ),
+    Migration(
+        version=12,
+        description="publication engagement metrics",
+        statements=(
+            # Post performance, imported by hand from a platform export (there
+            # is no API binding, and inventing one would be a live external
+            # call this system deliberately does not make). ``age_hours`` is
+            # the post's age when the numbers were captured, which is what
+            # makes two posts comparable: a 6-hour-old post cannot be judged
+            # against a 30-day-old one (report §12 P3, "compare by age").
+            # Metrics inform a person's reading; nothing here ever feeds a
+            # decision the pipeline makes.
+            """
+            CREATE TABLE publication_metrics (
+                metric_id      TEXT PRIMARY KEY,
+                publication_id TEXT NOT NULL
+                                 REFERENCES publications (publication_id),
+                captured_at    TEXT NOT NULL,
+                age_hours      REAL NOT NULL CHECK (age_hours >= 0),
+                impressions    INTEGER NOT NULL DEFAULT 0
+                                 CHECK (impressions >= 0),
+                reactions      INTEGER NOT NULL DEFAULT 0
+                                 CHECK (reactions >= 0),
+                comments       INTEGER NOT NULL DEFAULT 0
+                                 CHECK (comments >= 0),
+                reposts        INTEGER NOT NULL DEFAULT 0
+                                 CHECK (reposts >= 0),
+                source         TEXT NOT NULL DEFAULT 'manual',
+                created_at     TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX ix_publication_metrics_publication "
+            "ON publication_metrics (publication_id, age_hours)",
+            "CREATE INDEX ix_publication_metrics_age "
+            "ON publication_metrics (age_hours)",
+        ),
+    ),
+    Migration(
+        version=13,
+        description="one publish intent per run (at most one post per run)",
+        statements=(
+            # Migration 1 held "one intent per run" with the unique index
+            # ``ux_publish_intents_run``; migration 9 relaxed it to a trigger
+            # permitting two, to support multi-publish. The cadence is now one
+            # post per run, so the bound returns to one — the trigger stays
+            # (SQLite expresses "at most N per group" no other way) but its
+            # threshold moves from two to one. The application check in
+            # ``create_publish_intent`` fails fast with a clearer error; this
+            # is the backstop a forgotten check cannot bypass.
+            "DROP TRIGGER trg_publish_intents_run_limit",
+            """
+            CREATE TRIGGER trg_publish_intents_run_limit
+            BEFORE INSERT ON publish_intents
+            FOR EACH ROW
+            WHEN (SELECT COUNT(*) FROM publish_intents
+                  WHERE run_id = NEW.run_id) >= 1
+            BEGIN
+                SELECT RAISE(ABORT,
+                    'at most 1 publish intent per run');
+            END
+            """,
+        ),
+    ),
 )
 
 #: The schema version this code expects. Bump only by appending a migration.
@@ -562,6 +739,8 @@ TABLES: tuple[str, ...] = (
     "review_cursors",
     "developments",
     "content_opportunities",
+    "opportunity_outcomes",
+    "publication_metrics",
 )
 
 
@@ -615,16 +794,24 @@ def ensure_schema(conn: sqlite3.Connection) -> int:
 
 def _apply(conn: sqlite3.Connection, migration: Migration) -> None:
     """Apply one migration and record it, atomically."""
-    conn.execute("BEGIN IMMEDIATE")
+    if migration.foreign_keys_off:
+        # Must be outside the transaction to take effect; restored in the
+        # ``finally`` after the transaction has committed or rolled back.
+        conn.execute("PRAGMA foreign_keys = OFF")
     try:
-        for statement in migration.statements:
-            conn.execute(statement)
-        conn.execute(
-            "INSERT INTO schema_version (version, description, applied_at) "
-            "VALUES (?, ?, ?)",
-            (migration.version, migration.description, utc_now_iso()),
-        )
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in migration.statements:
+                conn.execute(statement)
+            conn.execute(
+                "INSERT INTO schema_version (version, description, applied_at) "
+                "VALUES (?, ?, ?)",
+                (migration.version, migration.description, utc_now_iso()),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        if migration.foreign_keys_off:
+            conn.execute("PRAGMA foreign_keys = ON")

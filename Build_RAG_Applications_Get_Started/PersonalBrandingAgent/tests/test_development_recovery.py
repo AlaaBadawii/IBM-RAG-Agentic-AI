@@ -50,8 +50,8 @@ def _transport(captured, post_id="urn:li:test-2"):
 
 # ------------------------------------------------------- recovery ---
 
-def test_schema_is_at_v9_with_recovery_column(store):
-    assert SCHEMA_VERSION == 9
+def test_schema_is_at_v12_with_recovery_column(store):
+    assert SCHEMA_VERSION == 13
     cols = [r[1] for r in store._conn.execute(
         "PRAGMA table_info(developments)")]
     assert "external_status" in cols

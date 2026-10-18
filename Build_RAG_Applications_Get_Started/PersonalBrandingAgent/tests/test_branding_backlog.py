@@ -30,6 +30,7 @@ from app.publishing.enums import PublishDecision
 from app.publishing.service import MAX_PUBLISHES_PER_RUN
 from app.state import OpportunityStatus, RunOutcome, StateStore
 from app.workflows import BrandingConfig, run_branding
+from app.workflows.branding import MAX_DECISIONS_PER_RUN
 
 
 # ------------------------------------------------------------------ fakes ---
@@ -401,8 +402,11 @@ def _transport(post_id=None, outcome=None):
     return send
 
 
-def test_two_publish_bound_with_third_left_queued(tmp_path):
-    assert MAX_PUBLISHES_PER_RUN == 2
+def test_one_publish_bound_with_siblings_left_queued(tmp_path):
+    """A run publishes one post; a second verified sibling is released, not
+    sent and not lost, and a third claimed-less row is never touched."""
+    assert MAX_PUBLISHES_PER_RUN == 1
+    assert MAX_DECISIONS_PER_RUN == 2
     calls: list = []
     cfg, holder, _ = backlog_config(
         tmp_path, contexts=[make_context(["aaa", "bbb", "ccc"])],
@@ -412,24 +416,26 @@ def test_two_publish_bound_with_third_left_queued(tmp_path):
     result = run_branding(cfg)
 
     assert result.outcome is RunOutcome.DO_NOT_PUBLISH
-    assert len(calls) == 2
+    assert len(calls) == 1, "more than one publish attempt in a single run"
     assert result.detail["considered"] == 3
     assert result.detail["selected"] == 2
-    assert result.detail["published_count"] == 2
-    assert result.detail["queued_remaining"] == 1
-    assert len(holder["notifier"].publication_calls) == 2
+    assert result.detail["published_count"] == 1
+    assert result.detail["queued_remaining"] == 2
+    assert len(holder["notifier"].publication_calls) == 1
     assert holder["notifier"].run_calls == []
 
-    rows = backlog_rows(tmp_path)
-    assert [o.topic for o in rows] == ["ccc"]
-    assert rows[0].attempts == 0
-    assert len({opp_id for _, opp_id in calls}) == 2
+    rows = {o.topic: o for o in backlog_rows(tmp_path)}
+    assert sorted(rows) == ["bbb", "ccc"]
+    # The verified-but-unpublished sibling was released for a later run: it is
+    # queued, unpenalized (the decision succeeded — only the budget ran out).
+    assert rows["bbb"].attempts == 0
+    assert rows["ccc"].attempts == 0
+    assert rows["ccc"].last_decision is None
     with open_store(tmp_path) as store:
-        assert len(store.list_publications(limit=10)) == 2
+        assert len(store.list_publications(limit=10)) == 1
         intents = store.list_publish_intents(limit=10)
-        assert len(intents) == 2
-        assert {i.opportunity_id for i in intents} == {
-            c[1] for c in calls}
+        assert len(intents) == 1
+        assert {i.opportunity_id for i in intents} == {calls[0][1]}
 
 
 def test_unselected_rows_are_untouched_not_consumed(tmp_path):
@@ -437,13 +443,15 @@ def test_unselected_rows_are_untouched_not_consumed(tmp_path):
         tmp_path, contexts=[make_context(["aaa", "bbb", "ccc"])])
     run_branding(cfg)
 
-    rows = backlog_rows(tmp_path)
-    assert len(rows) == 1 and rows[0].topic == "ccc"
-    assert rows[0].attempts == 0
-    assert rows[0].last_decision is None
+    rows = {o.topic: o for o in backlog_rows(tmp_path)}
+    # Only the two claimed selections were evaluated; the third row was never
+    # touched — not selected is not a decision about it.
+    assert sorted(rows) == ["bbb", "ccc"]
+    assert rows["ccc"].attempts == 0
+    assert rows["ccc"].last_decision is None
 
 
-def test_claim_is_bounded_by_the_publish_limit(tmp_path):
+def test_claim_is_bounded_by_the_decision_limit(tmp_path):
     seen: list = []
 
     def capturing_claim(store, run_id, limit):
@@ -455,7 +463,7 @@ def test_claim_is_bounded_by_the_publish_limit(tmp_path):
     cfg.claim_fn = capturing_claim
     run_branding(cfg)
 
-    assert seen == [MAX_PUBLISHES_PER_RUN]
+    assert seen == [MAX_DECISIONS_PER_RUN]
 
 
 # ------------------------------------------------------------- cross-run ---
@@ -477,9 +485,9 @@ def test_queued_survives_when_retrieval_omits_it(tmp_path):
 
     assert second.outcome is RunOutcome.DO_NOT_PUBLISH
     assert second.detail["selected"] == 2
-    assert second.detail["published_count"] == 2
-    assert second.detail["queued_remaining"] == 1
-    assert len(holder2["notifier"].publication_calls) == 2
+    assert second.detail["published_count"] == 1
+    assert second.detail["queued_remaining"] == 2
+    assert len(holder2["notifier"].publication_calls) == 1
 
 
 # ------------------------------------------------------ failure handling ---
@@ -488,27 +496,25 @@ def test_one_failure_does_not_corrupt_its_sibling(tmp_path):
     cfg, holder, _ = backlog_config(
         tmp_path, contexts=[make_context(["aaa", "bbb", "ccc"])],
         publish_reports=[
-            FakeBacklogReport(post_id="post_aaa"),
             FakeBacklogReport(
                 decision=PublishDecision.FAILED, post_id=None,
                 message="LinkedIn refused the request"),
         ])
     result = run_branding(cfg)
 
-    # The successful post keeps the run a success; the failure is recorded
-    # in the summary rather than rewriting the run as failed.
-    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
-    assert result.detail["published_count"] == 1
-    assert result.detail["failed"] == 1
-    assert result.detail["queued_remaining"] == 2
-    assert len(holder["notifier"].publication_calls) == 1
-    # Published selections report the post only — no quiet-run report on top.
+    # One publish attempt per run: the failure ends the attempt and fails the
+    # run, and the sibling that was never attempted returns to the backlog
+    # rather than being corrupted or dropped.
+    assert result.outcome is RunOutcome.WORKFLOW_FAILED
+    assert result.failed_phase == "publish"
+    assert holder["notifier"].run_calls == [result.run_id]
     assert holder["notifier"].no_publish_calls == []
 
     rows = {o.topic: o for o in backlog_rows(tmp_path)}
-    assert set(rows) == {"bbb", "ccc"}
-    assert rows["bbb"].attempts == 1
-    assert rows["bbb"].last_decision == "publish_failed"
+    assert set(rows) == {"aaa", "bbb", "ccc"}
+    assert rows["aaa"].attempts == 1
+    assert rows["aaa"].last_decision == "publish_failed"
+    assert rows["bbb"].attempts == 0
     assert rows["ccc"].attempts == 0
 
 
@@ -528,6 +534,68 @@ def test_all_selections_failing_is_a_workflow_failure(tmp_path):
     assert holder["notifier"].no_publish_calls == []
     rows = backlog_rows(tmp_path)
     assert len(rows) == 1 and rows[0].status is OpportunityStatus.QUEUED
+
+
+def test_a_run_records_each_claimed_opportunitys_terminal_outcome(tmp_path):
+    """A failed run persists what each opportunity it tried ended as, so the
+    notification can enumerate them without opening the backlog (§12 P3.1)."""
+    cfg, holder, _ = backlog_config(
+        tmp_path, contexts=[make_context(["aaa"])],
+        publish_reports=[
+            FakeBacklogReport(
+                decision=PublishDecision.FAILED, post_id=None,
+                message="LinkedIn refused the request"),
+        ])
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.WORKFLOW_FAILED
+    with open_store(tmp_path) as store:
+        outcomes = store.list_opportunity_outcomes(result.run_id)
+    assert len(outcomes) == 1
+    assert outcomes[0].topic == "aaa"
+    assert outcomes[0].decision == "publish_failed"
+    assert "refused the request" in outcomes[0].rationale
+
+
+def test_a_declined_opportunitys_outcome_keeps_its_reason(tmp_path):
+    cfg, holder, _ = backlog_config(
+        tmp_path, contexts=[make_context(["aaa"])],
+        agent=TopicAgent(decline={"aaa"}))
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
+    with open_store(tmp_path) as store:
+        outcomes = store.list_opportunity_outcomes(result.run_id)
+    assert len(outcomes) == 1
+    assert outcomes[0].topic == "aaa"
+    assert outcomes[0].decision == "deferred"
+    assert outcomes[0].rationale == "no_value"
+
+
+def test_a_published_opportunitys_outcome_carries_its_selection_trace(tmp_path):
+    class TracingAgent(TopicAgent):
+        def run(self, context):
+            result = super().run(context)
+            sections = getattr(context, "evidence_sections", ())
+            item = sections[0].items[0] if sections else None
+            if item is not None:
+                result.proposal.evidence_keys = ((item.source, item.chunk_id),)
+            return result
+
+    cfg, holder, _ = backlog_config(
+        tmp_path, contexts=[make_context(["aaa"])],
+        agent=TracingAgent(),
+        publish_reports=[FakeBacklogReport(post_id="post_aaa")])
+    result = run_branding(cfg)
+
+    with open_store(tmp_path) as store:
+        outcomes = store.list_opportunity_outcomes(result.run_id)
+    assert len(outcomes) == 1
+    assert outcomes[0].decision == "published"
+    assert outcomes[0].trace, "the chosen chunks are recorded (§12 P3.3)"
+    assert outcomes[0].trace[0] == {
+        "source": "evidence/aaa.md", "chunk_id": "hash-aaa:0", "rank": 0,
+    }
 
 
 def test_gate_rejection_is_terminal_but_sibling_safe(tmp_path):
@@ -601,18 +669,17 @@ def test_ambiguous_publication_blocks_and_locks_its_row(tmp_path):
         ])
     result = run_branding(cfg)
 
-    # The published sibling keeps the run a success; the ambiguity is
-    # recorded on its own row and in the summary — it must not rewrite
-    # the published post as a failed run.
-    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
-    assert result.detail["published_count"] == 1
+    # One publish attempt per run: the first candidate's ambiguous outcome
+    # ends the attempt and escalates. The sibling is released, never sent.
+    assert result.outcome is RunOutcome.REQUIRES_HUMAN_INTERVENTION
+    assert result.detail["published_count"] == 0
     assert result.detail["requires_review"] == 1
     with open_store(tmp_path) as store:
         by_status = {}
         for row in store._read("SELECT * FROM content_opportunities"):
             by_status.setdefault(row["status"], []).append(row["topic"])
         assert by_status["requires_review"] == ["aaa"]
-        assert by_status["published"] == ["bbb"]
+        assert by_status["queued"] == ["bbb"]
 
     # A later run refuses to publish over the ambiguity — even for the
     # other queued row — until a person resolves it.
@@ -712,3 +779,60 @@ def test_changed_evidence_is_a_new_opportunity_not_a_rewrite(tmp_path):
     run_branding(cfg2)
 
     assert len(backlog_rows(tmp_path)) == 2
+
+
+# ------------------------------------------------------- retirement ---
+
+def test_declined_opportunity_retires_once_its_budget_is_spent(tmp_path):
+    from app.opportunities.backlog import persist_discoveries
+
+    with open_store(tmp_path) as store:
+        row = persist_discoveries(store, make_context(["stuck"]))[0]
+        for _ in range(3):
+            store.record_opportunity_decision(
+                row.opportunity_id, "deferred", attempts_increment=1)
+
+    cfg, holder, _ = backlog_config(
+        tmp_path, contexts=[make_context([])],
+        agent=TopicAgent(decline={"stuck"}))
+    result = run_branding(cfg)
+
+    assert result.outcome is RunOutcome.DO_NOT_PUBLISH
+    # Rounding its budget on the current snapshot policy retires it as an
+    # explicit ``exhausted`` decision — not a silent disappearance.
+    with open_store(tmp_path) as store:
+        stored = store.get_opportunity(row.opportunity_id)
+        assert stored.status is OpportunityStatus.EXHAUSTED
+        assert stored.attempts == 4
+        assert stored.last_decision == "exhausted"
+        assert "retired after 4 attempt(s)" in (stored.last_error or "")
+    assert backlog_rows(tmp_path) == []
+
+
+def test_declined_opportunity_with_a_stale_snapshot_is_released_not_retired(
+        tmp_path):
+    from app.opportunities.backlog import persist_discoveries
+
+    with open_store(tmp_path) as store:
+        row = persist_discoveries(store, make_context(["stuck"]))[0]
+        for _ in range(3):
+            store.record_opportunity_decision(
+                row.opportunity_id, "deferred", attempts_increment=1)
+        store._conn.execute("UPDATE content_opportunities "
+                            "SET snapshot_version = 1, snapshot_hash = ''")
+        store._conn.commit()
+
+    # A later run discovers a different topic, so ``stuck`` is claimed from
+    # the backlog but never refreshed by discovery.
+    cfg, _, _ = backlog_config(
+        tmp_path, contexts=[make_context(["other"])],
+        agent=TopicAgent(decline={"stuck", "other"}))
+    run_branding(cfg)
+
+    # A stale snapshot is a repairable defect, not proof the row is
+    # unpostable: it is released so the refresh/repair path can heal it.
+    with open_store(tmp_path) as store:
+        stored = store.get_opportunity(row.opportunity_id)
+        assert stored.status is OpportunityStatus.QUEUED
+        assert stored.attempts == 4
+        assert stored.last_decision == "deferred"

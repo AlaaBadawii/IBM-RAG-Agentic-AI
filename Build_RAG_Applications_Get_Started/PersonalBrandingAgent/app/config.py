@@ -189,6 +189,18 @@ SMTP_TIMEOUT_SECONDS = _env_float("SMTP_TIMEOUT_SECONDS", 30.0)
 # of the same failure inside this window do not.
 SMTP_REPEAT_AFTER_HOURS = _env_float("SMTP_REPEAT_AFTER_HOURS", 24.0)
 
+# --- Publishing cadence (twice weekly) ------------------------------------
+# The branding schedule is two runs a week (Tue + Fri, see
+# ``ops/personal-branding-agent.cron``), one post per run, so the target is two
+# posts a week. ``WEEKLY_PUBLISH_TARGET`` is what the workflow checks after each
+# run to decide whether the week's target is still reachable; ``0`` disables the
+# check (the default the test suite runs under). ``BRANDING_RUNS_PER_WEEK`` is
+# how many scheduled runs a week is expected to have — used with the runs
+# already recorded this week to tell whether any run is left to make up a
+# shortfall. Both are configuration, not code, because the schedule is.
+WEEKLY_PUBLISH_TARGET = _env_int("WEEKLY_PUBLISH_TARGET", 2)
+BRANDING_RUNS_PER_WEEK = _env_int("BRANDING_RUNS_PER_WEEK", 2)
+
 
 def require_google_key() -> str:
     """Return the Google Gemini API key or raise ConfigError.

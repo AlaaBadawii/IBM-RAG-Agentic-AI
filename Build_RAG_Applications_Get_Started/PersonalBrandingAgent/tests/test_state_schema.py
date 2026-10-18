@@ -144,6 +144,52 @@ def test_journal_mode_is_wal(store_path):
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
+def test_a_v9_store_upgrades_to_current_preserving_opportunities(
+        tmp_path, monkeypatch):
+    """The v10 rebuild carries rows across and widens the status set; v11 adds
+    the per-run outcomes table without disturbing them."""
+    path = tmp_path / "v9.db"
+    legacy = tuple(m for m in schema_module.MIGRATIONS if m.version <= 9)
+    assert len(legacy) == 9
+    monkeypatch.setattr(schema_module, "MIGRATIONS", legacy)
+
+    conn = sqlite3.connect(str(path))
+    conn.isolation_level = None
+    try:
+        assert schema_module.ensure_schema(conn) == 9
+        conn.execute(
+            "INSERT INTO content_opportunities "
+            "(opportunity_id, fingerprint, topic, status, evidence, "
+            " evidence_strength, attempts, created_at, updated_at) "
+            "VALUES ('opp_1', 'fp', 'topic', 'queued', '[]', 0, 2, ?, ?)",
+            ("2026-01-01T00:00:00.000000+00:00",
+             "2026-01-01T00:00:00.000000+00:00"),
+        )
+    finally:
+        conn.close()
+    monkeypatch.undo()
+
+    with StateStore(path) as store:
+        assert store.schema_version == SCHEMA_VERSION
+        row = store.get_opportunity("opp_1")
+        assert row is not None
+        assert row.topic == "topic"
+        assert row.attempts == 2
+        # Rows predating the columns are stamped as "old policy".
+        assert row.snapshot_version == 1
+        assert row.snapshot_hash == ""
+        # The widened CHECK admits the new terminal state...
+        store._conn.execute(
+            "UPDATE content_opportunities SET status = 'exhausted' "
+            "WHERE opportunity_id = 'opp_1'")
+        store._conn.commit()
+        # ...without admitting anything outside the vocabulary.
+        with pytest.raises(sqlite3.IntegrityError):
+            store._conn.execute(
+                "UPDATE content_opportunities SET status = 'bogus' "
+                "WHERE opportunity_id = 'opp_1'")
+
+
 def test_foreign_keys_are_declared_and_enforced(store_path):
     with StateStore(store_path) as store:
         with pytest.raises(StateConstraintError):

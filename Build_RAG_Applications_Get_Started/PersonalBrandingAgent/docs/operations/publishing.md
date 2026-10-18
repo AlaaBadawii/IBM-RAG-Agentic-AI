@@ -25,9 +25,10 @@ duplicate checks (exact · near · overuse — refused before anything is writte
 ```
 
 At-most-one-post-per-run is a database property
-(`ux_publish_intents_run`), not workflow discipline. At most one
-*unresolved* intent per content hash across runs
-(`ux_publish_intents_unresolved_content`): a `failed` intent releases its
+(`trg_publish_intents_run_limit`, restoring the invariant migration 1's
+`ux_publish_intents_run` index expressed; see `state-model.md` §3.5), not
+workflow discipline. At most one *unresolved* intent per content hash across
+runs (`ux_publish_intents_unresolved_content`): a `failed` intent releases its
 content; an `unknown_requires_review` one keeps blocking it.
 
 Interrupted attempts resolve in opposite directions (`recover_run`):

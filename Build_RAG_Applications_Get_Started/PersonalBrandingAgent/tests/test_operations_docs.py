@@ -109,7 +109,9 @@ def test_cron_entries_are_valid_and_unmasked():
         for field, allowed in (
             minute, r"[\d\*,/\-]+"), (hour, r"[\d\*,/\-]+"):
             assert re.fullmatch(allowed, field), f"bad schedule field: {line}"
-        assert day == month == weekday == "*", f"unexpected date field: {line}"
+        assert day == month == "*", f"unexpected date field: {line}"
+        assert re.fullmatch(r"[\d,\-]+|\*", weekday), \
+            f"unexpected weekday field: {line}"
         command = " ".join(fields[5:])
         assert "|| true" not in command and "; exit 0" not in command
         module = re.search(r"app\.workflows\.(sync|branding)\b", command)

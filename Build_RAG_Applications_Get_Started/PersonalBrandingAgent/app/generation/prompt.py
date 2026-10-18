@@ -53,7 +53,7 @@ __all__ = [
 #: draft (``GenerationMetadata.prompt_version``), so a post that reads oddly six
 #: months from now can be traced to the prompt that produced it instead of
 #: being explained by whatever the prompt says today.
-PROMPT_VERSION = "grounded-post-v2"
+PROMPT_VERSION = "grounded-post-v3"
 
 #: The claims a post must never contain unless the supplied evidence supports
 #: them. Named here as a tuple so the rule can be *generated* into the
@@ -254,12 +254,15 @@ def _constraints_block(constraints: PublishingConstraints) -> str:
     """
     if constraints.is_empty:
         return ""
-    lines = ["Already published, so avoid repeating it:"]
-    if constraints.recent_topics:
-        lines.append(f"- topics: {', '.join(constraints.recent_topics)}")
-    if constraints.recent_projects:
-        lines.append(f"- projects: {', '.join(constraints.recent_projects)}")
+    lines = [
+        ("Recently published — avoid repeating these; a new angle on an "
+         "already-used category is fine:")
+    ]
     if constraints.recent_angles:
         lines.append(f"- angles: {', '.join(constraints.recent_angles)}")
+    if constraints.recent_projects:
+        lines.append(f"- projects: {', '.join(constraints.recent_projects)}")
+    if constraints.recent_topics:
+        lines.append(f"- topics: {', '.join(constraints.recent_topics)}")
     lines.extend(f"- {note}" for note in constraints.notes)
     return "\n".join(lines)

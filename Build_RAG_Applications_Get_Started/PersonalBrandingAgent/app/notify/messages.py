@@ -32,7 +32,12 @@ from app.logging_config import redact
 from app.notify.enums import NotificationKind
 from app.notify.models import NoPublishNotice, NotificationMessage, PublishedPost
 from app.state.enums import RunOutcome
-from app.state.models import OperationalFailure, WorkflowRun, utc_now_iso
+from app.state.models import (
+    OperationalFailure,
+    OpportunityOutcome,
+    WorkflowRun,
+    utc_now_iso,
+)
 
 #: The subject of *every* notification, whatever it is about. One mailbox
 #: receives both the problems and the posts, so one predictable subject is what
@@ -123,6 +128,24 @@ def _failure_block(failure: OperationalFailure, *, heading: str | None,
     return lines
 
 
+def _opportunity_lines(opportunities: Sequence[OpportunityOutcome], *,
+                       secrets: Sequence[str]) -> list[str]:
+    """One line per claimed opportunity: what it ended as, and why.
+
+    The disposition is the backlog layer's own vocabulary, rendered verbatim —
+    the composer maps and paraphrases nothing, exactly as it does for a
+    failure. A longer rationale is quoted whole; the workflow already bounds
+    what it stores.
+    """
+    lines: list[str] = []
+    for outcome in opportunities:
+        entry = f"- {outcome.opportunity_id} ({outcome.topic}): {outcome.decision}"
+        if outcome.rationale:
+            entry += f" — {outcome.rationale}"
+        lines.append(redact(entry, *secrets))
+    return lines
+
+
 def build_failure_message(failure: OperationalFailure, *,
                           secrets: Sequence[str] = ()) -> NotificationMessage:
     """One phase's failure, as an email.
@@ -152,12 +175,16 @@ def build_failure_message(failure: OperationalFailure, *,
 
 
 def build_run_message(run: WorkflowRun, failures: Iterable[OperationalFailure],
-                      *, secrets: Sequence[str] = ()) -> NotificationMessage:
+                      *, opportunities: Sequence[OpportunityOutcome] = (),
+                      secrets: Sequence[str] = ()) -> NotificationMessage:
     """A finished run, as an email, with every failure recorded against it.
 
     This is the workflow-facing entry point, and the reason the notification
     layer exists: the workflow wrapper knows how the run terminated, which is
-    the fact a person has to hear, and the failures say why.
+    the fact a person has to hear, and the failures say why. When the caller
+    supplies the run's per-opportunity outcomes, they are enumerated too, so a
+    run that failed or published nothing reports *what each opportunity it
+    tried ended as* rather than only its first quiet reason (report §12 P3.1).
     """
     recorded = list(failures)
     outcome = (run.outcome.value if run.outcome is not None
@@ -191,6 +218,10 @@ def build_run_message(run: WorkflowRun, failures: Iterable[OperationalFailure],
             heading=f"--- Failure {index} of {len(recorded)} ---",
             secrets=secrets,
         )
+        lines.append("")
+    if opportunities:
+        lines += ["--- Opportunities ---", ""]
+        lines += _opportunity_lines(opportunities, secrets=secrets)
         lines.append("")
     lines.append(_action(requires_human))
     return NotificationMessage(kind=NotificationKind.ISSUE,

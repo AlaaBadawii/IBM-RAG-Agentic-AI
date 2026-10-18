@@ -28,8 +28,8 @@ What it guarantees, in the order it enforces them:
 
 What it does **not** claim: exactly-once delivery to LinkedIn. That guarantee is
 not achievable without read-back and must not be promised. What the system
-actually has is *at most ``MAX_PUBLISHES_PER_RUN`` publication attempts per
-run reaching the final publish gate* — enforced by the application check in
+actually has is *at most one publication attempt per run reaching the final
+publish gate* (``MAX_PUBLISHES_PER_RUN``) — enforced by the application check in
 :meth:`publish` and, behind it, the ``trg_publish_intents_run_limit``
 trigger in SQLite — plus a durable intent, an explicit ambiguous state, and
 a recovery path that fails closed.
@@ -69,7 +69,13 @@ __all__ = [
 #: (failing fast, before any request is built), and the database trigger
 #: ``trg_publish_intents_run_limit`` rejects any insert beyond it — the
 #: backstop a forgotten application check cannot bypass.
-MAX_PUBLISHES_PER_RUN = 2
+#:
+#: One, not more: the scheduled cadence is one post per run so that a run can
+#: never publish twice, whatever its backlog holds. A run may still *decide*
+#: on more than one candidate (see ``MAX_DECISIONS_PER_RUN`` in the branding
+#: workflow) so a declined candidate falls through to the next, but only the
+#: first verified, non-duplicate draft is sent.
+MAX_PUBLISHES_PER_RUN = 1
 
 #: Signature of the one thing this service calls to publish. The real
 #: implementation is :func:`~app.integrations.linkedin.publish_to_linkedin`;

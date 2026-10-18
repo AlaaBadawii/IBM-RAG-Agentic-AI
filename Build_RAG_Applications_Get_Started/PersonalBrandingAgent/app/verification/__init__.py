@@ -41,6 +41,7 @@ What this package does not do: it does not retrieve, it does not write
 anything, and it does not publish. There is no store handle and no path to the
 corpus anywhere in it — the evidence that exists is the evidence it was handed.
 """
+from app.verification.editorial import discoverability_notes
 from app.verification.enums import (
     ClaimVerdict,
     RevisionDecision,
@@ -66,9 +67,9 @@ from app.verification.revision import (
     revision_decision,
 )
 from app.verification.support import (
-    JudgeVerdict,
     JudgedClaim,
     JudgementRequest,
+    JudgeVerdict,
     SupportJudge,
 )
 from app.verification.verifier import EvidenceVerifier, verify
@@ -98,6 +99,7 @@ __all__ = [
     "VerificationResult",
     "Violation",
     "ViolationKind",
+    "discoverability_notes",
     "revision_decision",
     "verify",
 ]

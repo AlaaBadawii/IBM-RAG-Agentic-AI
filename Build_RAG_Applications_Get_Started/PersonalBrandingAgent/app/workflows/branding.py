@@ -1,4 +1,4 @@
-"""The 8-hour branding workflow (``PLAN.md`` Step 11).
+"""The scheduled branding workflow (``PLAN.md`` Step 11).
 
 Owns and sequences the existing branding pipeline — nothing more:
 
@@ -13,13 +13,16 @@ Owns and sequences the existing branding pipeline — nothing more:
   generation and the Step 9 verification gates under Step 9's own stopping
   rule). The workflow branches on the returned ``AgentResult``; it never
   re-derives the decision. With a non-empty backlog, up to
-  ``MAX_PUBLISHES_PER_RUN`` claimed opportunities are each decided
-  independently; with an empty backlog the run is exactly the historical
-  single-shot path.
-* ``publish`` sends up to ``MAX_PUBLISHES_PER_RUN`` posts through the Step 6
-  publishing service, each with its own intent lifecycle and its own
-  recovery. An ambiguous outcome is never retried — it escalates to a
-  person. Opportunities that are not selected stay queued, untouched.
+  ``MAX_DECISIONS_PER_RUN`` claimed opportunities are each decided
+  independently — a declined candidate falls through to the next — while with
+  an empty backlog the run is exactly the historical single-shot path.
+* ``publish`` sends **at most ``MAX_PUBLISHES_PER_RUN`` (one) post** through
+  the Step 6 publishing service, with its own intent lifecycle and its own
+  recovery: the first verified, non-duplicate draft goes out and the run
+  stops publishing. An ambiguous outcome is never retried — it escalates to a
+  person. Opportunities that are not selected stay queued, untouched; a
+  selection the publish budget could not reach is released for a later run
+  rather than dropped.
 * Every phase transition is recorded; a failure identifies its phase.
 * A ``workflow_runs`` row tracks the run from start to its recorded outcome.
 * The workflow — never the Agent — classifies the outcome and decides whether
@@ -58,14 +61,26 @@ exit code. No scheduler lives here (Step 12).
 """
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from app import config as app_config
 from app.agent.enums import NoPublishReason
 from app.errors import StateStoreError
 from app.logging_config import get_logger, setup_logging
 from app.notify.service import NotificationService
-from app.opportunities.backlog import OpportunityDecision
-from app.state.enums import OpportunityStatus, PublishState, RunOutcome, Workflow
+from app.opportunities.backlog import (
+    EVIDENCE_SNAPSHOT_VERSION,
+    OpportunityDecision,
+)
+from app.state.enums import (
+    MAX_OPPORTUNITY_ATTEMPTS,
+    OpportunityStatus,
+    PublishState,
+    RunOutcome,
+    Workflow,
+)
+from app.state.models import utc_now
 from app.state.store import StateStore
 from app.workflows.common import (
     EXIT_OK,
@@ -83,6 +98,14 @@ logger = get_logger(__name__)
 #: The branding workflow's phases, in order. The workflow enters each one,
 #: and each transition is recorded — so a run's trail is queryable afterwards.
 BRANDING_PHASES = ("context", "decide", "publish")
+
+#: How many opportunities one run may *decide* on. Deliberately decoupled from
+#: :data:`app.publishing.service.MAX_PUBLISHES_PER_RUN`: a run may reason over
+#: more than one candidate so a decline or a thin draft falls through to the
+#: next, but only one of them can ever be sent. This is the fallback budget,
+#: not a publish budget — raising it trades extra model calls for a better
+#: chance of filling the cadence, never for a second post.
+MAX_DECISIONS_PER_RUN = 2
 
 __all__ = ["BRANDING_PHASES", "BrandingConfig", "main", "run_branding"]
 
@@ -284,6 +307,16 @@ class BrandingConfig:
     per selection), else to the real Step 6 binding with backlog linkage.
     """
 
+    weekly_target: int = 0
+    """Posts a week should contain; ``0`` disables the cadence check.
+
+    Defaulted to 0 so a bare ``BrandingConfig()`` (every test) never emits a
+    cadence notification. The production entry point supplies
+    ``app_config.WEEKLY_PUBLISH_TARGET`` explicitly.
+    """
+    branding_runs_per_week: int = 2
+    """Scheduled branding runs a week is expected to have (the cadence)."""
+
 
 def _prepare_run(cfg: BrandingConfig, store: StateStore, run_id: str):
     """Assemble, persist discoveries, and load the actionable backlog.
@@ -309,15 +342,21 @@ def _prepare_run(cfg: BrandingConfig, store: StateStore, run_id: str):
 def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
     """Run one branding pass and return its structured result.
 
-    Up to ``MAX_PUBLISHES_PER_RUN`` posts are published per run: with an
+    At most ``MAX_PUBLISHES_PER_RUN`` (one) post is published per run: with an
     empty backlog the run is the historical single-shot path (one optional
     draft, the publish phase entered at most once); with a backlog, up to
-    the bound of claimed opportunities are each decided and published
-    independently. See the module docstring for the outcome table.
+    ``MAX_DECISIONS_PER_RUN`` claimed opportunities are each decided and the
+    first verified, non-duplicate draft is published. See the module docstring
+    for the outcome table.
 
     The whole run executes under the Step 12 overlap guard: a second
     invocation while this workflow is locked raises :class:`WorkflowLocked`
     without running anything.
+
+    After the run's outcome is recorded, the weekly publishing target is
+    checked (when configured): a run that leaves the week unable to reach the
+    target — too few posts, no scheduled run left — records the miss and
+    notifies a person. The check never changes the run's outcome.
     """
     cfg = config or BrandingConfig()
     try:
@@ -326,156 +365,261 @@ def run_branding(config: BrandingConfig | None = None) -> WorkflowResult:
         logger.error("Branding workflow could not open the state store: %s", exc)
         raise
     with workflow_lock(store, Workflow.BRANDING):
-        run = start(store, Workflow.BRANDING)
         notifier = cfg.notifier_factory(store)
+        result = _run_branding_once(cfg, store, notifier)
+        _enforce_weekly_target(cfg, store, notifier, result.run_id)
+        return result
 
-        try:
-            prepared = run_phase(
-                store, run, "context",
-                lambda: _prepare_run(cfg, store, run.run_id),
-            )
-            context, persisted, pool = prepared
-            agent = cfg.agent_factory(store)
-            if pool:
-                return _run_backlog_pool(
-                    cfg, store, run, notifier, agent,
-                    persisted, pool,
-                )
-            agent_result = run_phase(
-                store, run, "decide", lambda: agent.run(context)
-            )
-        except Escalation as esc:
-            return finish(
-                store, run, esc.outcome,
-                failed_phase=esc.phase, error=esc.error,
-                error_category=esc.error_category, notifier=notifier,
-            )
 
-        if agent_result.failed:
-            failure = agent_result.failure
-            assert failure is not None  # ``failed`` is exactly "carries a failure"
-            error = (
-                f"branding reasoning failed ({failure.category.value}): "
-                f"{failure.detail}"
-            )
-            logger.warning("Branding run %s: %s", run.run_id, error)
-            record_phase_failure(store, run, "decide", error, "reasoning_failed",
-                                 human=False)
-            return finish(
-                store, run, RunOutcome.WORKFLOW_FAILED,
-                failed_phase="decide", error=error,
-                error_category="reasoning_failed",
-                notifier=notifier,
-                detail={"no_publish_reason": agent_result.reason.value},
-            )
+def _run_branding_once(cfg: BrandingConfig, store: StateStore,
+                       notifier: Any) -> WorkflowResult:
+    """The guarded run body: open the run, then one path to an outcome."""
+    run = start(store, Workflow.BRANDING)
 
-        if not agent_result.is_publishable:
-            reason = agent_result.reason.value if agent_result.reason else "unknown"
-            logger.info(
-                "Branding run %s decided DO_NOT_PUBLISH (%s)",
-                run.run_id, reason,
+    try:
+        prepared = run_phase(
+            store, run, "context",
+            lambda: _prepare_run(cfg, store, run.run_id),
+        )
+        context, persisted, pool = prepared
+        agent = cfg.agent_factory(store)
+        if pool:
+            return _run_backlog_pool(
+                cfg, store, run, notifier, agent,
+                persisted, pool,
             )
-            result = finish(
-                store, run, RunOutcome.DO_NOT_PUBLISH,
-                notifier=notifier,
-                detail={
-                    "no_publish_reason": reason,
-                    "attempts_made": agent_result.attempts_made,
-                },
-                no_publish_reason=reason,
-            )
-            _report_no_publish(store, notifier, run.run_id, reason=reason)
-            return result
+        agent_result = run_phase(
+            store, run, "decide", lambda: agent.run(context)
+        )
+    except Escalation as esc:
+        return finish(
+            store, run, esc.outcome,
+            failed_phase=esc.phase, error=esc.error,
+            error_category=esc.error_category, notifier=notifier,
+        )
 
-        # The Agent proposed a verified post. Before touching the network, check
-        # whether an earlier attempt's outcome is still unknown: publishing over
-        # an ambiguity is how a duplicate happens.
-        history = cfg.history_fn(store)
-        pending = history.requires_review()
-        if pending:
-            error = (
-                "an earlier publication attempt is still awaiting human review "
-                f"({len(pending)} unresolved); refusing to publish over an ambiguity"
-            )
-            logger.warning("Branding run %s: %s", run.run_id, error)
-            record_phase_failure(store, run, "publish", error,
-                                 "unresolved_ambiguity", human=True)
-            return finish(
-                store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
-                failed_phase="publish", error=error,
-                error_category="unresolved_ambiguity",
-                notifier=notifier,
-            )
-
-        try:
-            publish_via = cfg.publish_fn or _default_publish
-            report = run_phase(
-                store, run, "publish",
-                lambda: publish_via(agent_result, run.run_id, store),
-            )
-        except Escalation as esc:
-            return finish(
-                store, run, esc.outcome,
-                failed_phase=esc.phase, error=esc.error,
-                error_category=esc.error_category, notifier=notifier,
-            )
-
-        if report.requires_human_intervention:
-            error = (
-                "publication requires human review: "
-                f"{report.message} (decision={report.decision.value})"
-            )
-            logger.warning("Branding run %s: %s", run.run_id, error)
-            record_phase_failure(store, run, "publish", error,
-                                 "publication_needs_review", human=True)
-            return finish(
-                store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
-                failed_phase="publish", error=error,
-                error_category="publication_needs_review",
-                notifier=notifier,
-            )
-        if report.refused:
-            logger.info(
-                "Branding run %s published nothing (duplicate refusal: %s)",
-                run.run_id, report.message,
-            )
-            # A duplicate refusal is recorded in detail only: there is no
-            # closed-vocabulary NoPublishReason for "a verified draft the
-            # duplicate gate refused", so the column stays NULL by design.
-            # (A backlog run whose selections were all refused instead
-            # records NO_VALUE via _finish_backlog_run; both shapes are
-            # pinned by tests and neither is harmonized.)
-            result = finish(
-                store, run, RunOutcome.DO_NOT_PUBLISH,
-                notifier=notifier,
-                detail={"refused": True, "refusal": report.message},
-            )
-            _report_no_publish(
-                store, notifier, run.run_id,
-                refused=True, refusal=report.message,
-            )
-            return result
-        if report.published:
-            post_id = report.linkedin_post_id or ""
-            logger.info(
-                "Branding run %s published post %s", run.run_id, post_id
-            )
-            _report_publication(store, notifier, run.run_id, post_id)
-            return finish(
-                store, run, RunOutcome.DO_NOT_PUBLISH,
-                notifier=notifier,
-                detail={"published": True, "linkedin_post_id": post_id},
-            )
-        error = f"publication failed: {report.message}"
+    if agent_result.failed:
+        failure = agent_result.failure
+        assert failure is not None  # ``failed`` is exactly "carries a failure"
+        error = (
+            f"branding reasoning failed ({failure.category.value}): "
+            f"{failure.detail}"
+        )
         logger.warning("Branding run %s: %s", run.run_id, error)
-        record_phase_failure(store, run, "publish", error, "publication_failed",
+        record_phase_failure(store, run, "decide", error, "reasoning_failed",
                              human=False)
         return finish(
             store, run, RunOutcome.WORKFLOW_FAILED,
+            failed_phase="decide", error=error,
+            error_category="reasoning_failed",
+            notifier=notifier,
+            detail={"no_publish_reason": agent_result.reason.value},
+        )
+
+    if not agent_result.is_publishable:
+        reason = agent_result.reason.value if agent_result.reason else "unknown"
+        logger.info(
+            "Branding run %s decided DO_NOT_PUBLISH (%s)",
+            run.run_id, reason,
+        )
+        result = finish(
+            store, run, RunOutcome.DO_NOT_PUBLISH,
+            notifier=notifier,
+            detail={
+                "no_publish_reason": reason,
+                "attempts_made": agent_result.attempts_made,
+            },
+            no_publish_reason=reason,
+        )
+        _report_no_publish(store, notifier, run.run_id, reason=reason)
+        return result
+
+    # The Agent proposed a verified post. Before touching the network, check
+    # whether an earlier attempt's outcome is still unknown: publishing over
+    # an ambiguity is how a duplicate happens.
+    history = cfg.history_fn(store)
+    pending = history.requires_review()
+    if pending:
+        error = (
+            "an earlier publication attempt is still awaiting human review "
+            f"({len(pending)} unresolved); refusing to publish over an ambiguity"
+        )
+        logger.warning("Branding run %s: %s", run.run_id, error)
+        record_phase_failure(store, run, "publish", error,
+                             "unresolved_ambiguity", human=True)
+        return finish(
+            store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
             failed_phase="publish", error=error,
-            error_category="publication_failed",
+            error_category="unresolved_ambiguity",
             notifier=notifier,
         )
+
+    try:
+        publish_via = cfg.publish_fn or _default_publish
+        report = run_phase(
+            store, run, "publish",
+            lambda: publish_via(agent_result, run.run_id, store),
+        )
+    except Escalation as esc:
+        return finish(
+            store, run, esc.outcome,
+            failed_phase=esc.phase, error=esc.error,
+            error_category=esc.error_category, notifier=notifier,
+        )
+
+    if report.requires_human_intervention:
+        error = (
+            "publication requires human review: "
+            f"{report.message} (decision={report.decision.value})"
+        )
+        logger.warning("Branding run %s: %s", run.run_id, error)
+        record_phase_failure(store, run, "publish", error,
+                             "publication_needs_review", human=True)
+        return finish(
+            store, run, RunOutcome.REQUIRES_HUMAN_INTERVENTION,
+            failed_phase="publish", error=error,
+            error_category="publication_needs_review",
+            notifier=notifier,
+        )
+    if report.refused:
+        logger.info(
+            "Branding run %s published nothing (duplicate refusal: %s)",
+            run.run_id, report.message,
+        )
+        # A duplicate refusal is recorded in detail only: there is no
+        # closed-vocabulary NoPublishReason for "a verified draft the
+        # duplicate gate refused", so the column stays NULL by design.
+        # (A backlog run whose selections were all refused instead
+        # records NO_VALUE via _finish_backlog_run; both shapes are
+        # pinned by tests and neither is harmonized.)
+        result = finish(
+            store, run, RunOutcome.DO_NOT_PUBLISH,
+            notifier=notifier,
+            detail={"refused": True, "refusal": report.message},
+        )
+        _report_no_publish(
+            store, notifier, run.run_id,
+            refused=True, refusal=report.message,
+        )
+        return result
+    if report.published:
+        post_id = report.linkedin_post_id or ""
+        logger.info(
+            "Branding run %s published post %s", run.run_id, post_id
+        )
+        _report_publication(store, notifier, run.run_id, post_id)
+        return finish(
+            store, run, RunOutcome.DO_NOT_PUBLISH,
+            notifier=notifier,
+            detail={"published": True, "linkedin_post_id": post_id},
+        )
+    error = f"publication failed: {report.message}"
+    logger.warning("Branding run %s: %s", run.run_id, error)
+    record_phase_failure(store, run, "publish", error, "publication_failed",
+                         human=False)
+    return finish(
+        store, run, RunOutcome.WORKFLOW_FAILED,
+        failed_phase="publish", error=error,
+        error_category="publication_failed",
+        notifier=notifier,
+    )
+
+
+@dataclass(frozen=True)
+class WeeklyTargetStatus:
+    """Where one week stands against the publishing target.
+
+    ``remaining_runs`` is how many scheduled branding runs this week is still
+    expected to make; ``in_jeopardy`` is True exactly when the posts already
+    recorded plus those remaining runs cannot reach ``target`` — the week can
+    no longer be filled even if every remaining run publishes once.
+    """
+
+    target: int
+    published: int
+    runs_this_week: int
+    remaining_runs: int
+    week_start: str
+
+    @property
+    def in_jeopardy(self) -> bool:
+        return self.published + self.remaining_runs < self.target
+
+
+def _week_start(now: datetime) -> datetime:
+    """Monday 00:00 UTC of ``now``'s ISO week (the cadence's own unit)."""
+    moment = now.astimezone(timezone.utc)
+    midnight = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight - timedelta(days=midnight.weekday())
+
+
+def _weekly_target_status(store: StateStore, target: int,
+                          runs_per_week: int) -> WeeklyTargetStatus:
+    """Count this week's posts and scheduled runs, and decide jeopardy."""
+    start_iso = _week_start(utc_now()).isoformat()
+    published = len(store.list_publication_records(
+        since=start_iso, outcome=PublishState.PUBLISHED))
+    runs_this_week = sum(
+        1 for entry in store.list_runs(Workflow.BRANDING, limit=100)
+        if (getattr(entry, "started_at", "") or "") >= start_iso)
+    remaining = max(0, runs_per_week - runs_this_week)
+    return WeeklyTargetStatus(
+        target=target, published=published, runs_this_week=runs_this_week,
+        remaining_runs=remaining, week_start=start_iso)
+
+
+def _enforce_weekly_target(cfg: BrandingConfig, store: StateStore,
+                           notifier: Any, run_id: str) -> None:
+    """Record and notify a weekly target no remaining run can reach.
+
+    Best-effort and never changes the run's outcome: the run is already
+    recorded when this runs. ``weekly_target`` ≤ 0 disables the check (the
+    test suite's default). The notification is deduplicated per ISO week
+    through a stable ``dedupe_key``, so a week that stays behind sends one
+    first alert and then only quiet repetitions — never one email per run.
+    """
+    target = getattr(cfg, "weekly_target", 0) or 0
+    if target <= 0:
+        return
+    runs_per_week = getattr(cfg, "branding_runs_per_week", 2) or 2
+    try:
+        status = _weekly_target_status(store, target, runs_per_week)
+    except Exception as exc:  # noqa: BLE001 — informational only
+        logger.warning(
+            "Branding run %s: weekly-target check failed: %s", run_id, exc)
+        return
+    if not status.in_jeopardy:
+        return
+    message = (
+        f"the weekly publishing target is in jeopardy: {status.published} "
+        f"post(s) recorded this week, {status.remaining_runs} scheduled "
+        f"branding run(s) left, target {target}. If candidates keep declining "
+        f"the quality gates, or the LinkedIn credential is unusable, the week "
+        f"will miss its target."
+    )
+    logger.warning("Branding run %s: %s", run_id, message)
+    try:
+        failure = store.record_failure(
+            phase="target",
+            error_category="weekly_target_jeopardy",
+            message=message,
+            retryable=False,
+            requires_human_intervention=True,
+            run_id=run_id,
+            workflow=Workflow.BRANDING,
+            dedupe_key=f"weekly_target_jeopardy:{status.week_start[:10]}",
+        )
+    except StateStoreError as exc:
+        logger.warning(
+            "Branding run %s: could not record the weekly-target miss: %s",
+            run_id, exc)
+        return
+    try:
+        notifier.notify_failure(failure)
+    except Exception as exc:  # noqa: BLE001 — the run already finished
+        logger.warning(
+            "Branding run %s: weekly-target notification failed: %s",
+            run_id, exc)
 
 
 def _release_backlog_claim(store: StateStore, opportunity: Any, run_id: str,
@@ -494,6 +638,54 @@ def _release_backlog_claim(store: StateStore, opportunity: Any, run_id: str,
         release_claim=True, run_id=run_id,
         attempts_increment=attempts_increment, error=error,
     )
+
+
+def _release_or_retire(store: StateStore, opportunity: Any, run_id: str,
+                       decision: OpportunityDecision,
+                       rationale: str | None = None) -> bool:
+    """Release a deferral, or retire it once its budget is spent.
+
+    Rotation without retirement means a permanently-unpublishable row
+    re-consumes the per-run publish budget forever (the incident's backlog
+    held fourteen such rows). A deferral becomes a terminal ``exhausted``
+    decision only when **both** hold:
+
+    * the row already carries a current-policy snapshot — a stale snapshot is
+      a repairable defect, not evidence the opportunity is unpostable, so it
+      is released and left for the refresh/repair path;
+    * releasing it now would spend its whole attempt budget.
+
+    Retiring is an explicit recorded decision (``last_decision='exhausted'``
+    with the last rationale preserved), never a silent disappearance.
+    Returns ``True`` when the row was retired.
+    """
+    snapshot_is_current = (
+        getattr(opportunity, "snapshot_version", 0) >= EVIDENCE_SNAPSHOT_VERSION
+        and bool(getattr(opportunity, "snapshot_hash", ""))
+    )
+    if (decision is OpportunityDecision.DEFERRED and snapshot_is_current
+            and opportunity.attempts + 1 >= MAX_OPPORTUNITY_ATTEMPTS):
+        attempts = opportunity.attempts + 1
+        note = f"retired after {attempts} attempt(s)"
+        error = f"{rationale} — {note}" if rationale else note
+        # Count the attempt this claim consumed before retiring the row, so
+        # ``attempts`` records the same budget the backstop measured.
+        store.record_opportunity_decision(
+            opportunity.opportunity_id, OpportunityDecision.EXHAUSTED.value,
+            attempts_increment=1, run_id=run_id, error=error,
+        )
+        store.finalize_opportunity(
+            opportunity.opportunity_id, OpportunityStatus.EXHAUSTED,
+            run_id=run_id, decision=OpportunityDecision.EXHAUSTED.value,
+            error=error,
+        )
+        logger.info(
+            "Branding run %s: opportunity %s retired as exhausted after %d "
+            "attempt(s)", run_id, opportunity.opportunity_id, attempts,
+        )
+        return True
+    _release_backlog_claim(store, opportunity, run_id, decision, rationale)
+    return False
 
 
 def _run_backlog_pool(cfg: BrandingConfig, store: StateStore, run: Any,
@@ -517,8 +709,6 @@ def _run_backlog_pool(cfg: BrandingConfig, store: StateStore, run: Any,
     claims this run still holds belong to an unfinished run, which is
     exactly what the next run's stale-claim recovery releases.
     """
-    from app.publishing.service import MAX_PUBLISHES_PER_RUN
-
     events: list[tuple] = []
     selections: list[tuple] = []
     published: list[tuple] = []
@@ -526,7 +716,7 @@ def _run_backlog_pool(cfg: BrandingConfig, store: StateStore, run: Any,
     quiet_reason: str | None = None
 
     try:
-        claimed = cfg.claim_fn(store, run.run_id, MAX_PUBLISHES_PER_RUN) or []
+        claimed = cfg.claim_fn(store, run.run_id, MAX_DECISIONS_PER_RUN) or []
     except StateStoreError as exc:
         return _backlog_store_dead(store, run, notifier, str(exc))
     if not claimed:
@@ -648,12 +838,14 @@ def _decide_backlog_claim(cfg: BrandingConfig, store: StateStore, run: Any,
                 "Branding run %s: opportunity %s rejected by the gate",
                 run.run_id, opp_id)
         else:
-            _release_backlog_claim(
+            retired = _release_or_retire(
                 store, opportunity, run.run_id,
                 OpportunityDecision.DEFERRED, rationale)
             logger.info(
-                "Branding run %s: opportunity %s deferred (%s)",
-                run.run_id, opp_id, reason.value)
+                "Branding run %s: opportunity %s %s (%s)",
+                run.run_id, opp_id,
+                "retired as exhausted" if retired else "deferred",
+                reason.value)
         return ("quiet", reason.value)
 
     logger.info(
@@ -687,12 +879,19 @@ def _publish_backlog_selections(cfg: BrandingConfig, store: StateStore,
                                 run: Any, notifier: Any,
                                 selections: list, published: list,
                                 events: list, tally: dict) -> None:
-    """Publish each selection with its own intent lifecycle.
+    """Publish at most ``MAX_PUBLISHES_PER_RUN`` selection this run.
 
-    Results accumulate into ``published``, ``events``, and ``tally``;
-    every claim is released or finalized exactly once, whatever the
-    outcome.
+    A run makes **one publish attempt**: the first verified, non-duplicate
+    draft is sent and the run stops publishing. A candidate the duplicate gate
+    *refuses* creates no intent and blocks nothing, so it falls through to the
+    next candidate; any other outcome — published, failed, or ambiguous — has
+    spent the run's single write-ahead intent, so every remaining selection is
+    released for a later run (never dropped, never counted as a failed
+    attempt). Results accumulate into ``published``, ``events`` and ``tally``;
+    every claim is released or finalized exactly once, whatever the outcome.
     """
+    from app.publishing.service import MAX_PUBLISHES_PER_RUN
+
     publish_one = _publish_entry(cfg)
     history = cfg.history_fn(store)
     pending = history.requires_review()
@@ -704,15 +903,25 @@ def _publish_backlog_selections(cfg: BrandingConfig, store: StateStore,
         logger.warning("Branding run %s: %s", run.run_id, error)
         record_phase_failure(store, run, "publish", error,
                              "unresolved_ambiguity", human=True)
-        for opportunity, _ in selections:
-            _release_backlog_claim(
-                store, opportunity, run.run_id,
-                OpportunityDecision.DEFERRED, error, attempts_increment=0)
+        _release_sibling_selections(store, run.run_id, selections, error)
         events.append(
             (RunOutcome.REQUIRES_HUMAN_INTERVENTION, "publish", error))
         return
 
-    for opportunity, agent_result in selections:
+    for index, (opportunity, agent_result) in enumerate(selections):
+        if len(published) >= MAX_PUBLISHES_PER_RUN:
+            # The run's single publish budget is spent. A verified draft the
+            # budget could not reach returns to the backlog for a later run —
+            # not sent (the cap is the point) and not counted as a failed
+            # attempt (the decision succeeded; only the run ran out of room).
+            reason = ("verified, but this run's publish budget was already "
+                      "spent; returned to the backlog for a later run")
+            _release_sibling_selections(
+                store, run.run_id, selections[index:], reason)
+            logger.info(
+                "Branding run %s: %d verified selection(s) left unpublished — "
+                "publish budget spent", run.run_id, len(selections) - index)
+            break
         try:
             report = run_phase(
                 store, run, "publish",
@@ -722,10 +931,37 @@ def _publish_backlog_selections(cfg: BrandingConfig, store: StateStore,
         except Escalation as esc:
             _triage_publish_exception(
                 store, opportunity, run.run_id, esc, events)
-            continue
+            _release_sibling_selections(
+                store, run.run_id, selections[index + 1:],
+                "an earlier selection in this run could not complete its "
+                "publish attempt")
+            break
         _settle_publish_report(
             store, run, notifier, opportunity, report,
             published, events, tally)
+        if not report.refused:
+            # Any outcome other than a duplicate refusal has consumed the
+            # run's one write-ahead intent, so no further candidate may be
+            # attempted this run; the rest return to the backlog.
+            _release_sibling_selections(
+                store, run.run_id, selections[index + 1:],
+                "this run's single publish attempt was spent")
+            break
+
+
+def _release_sibling_selections(store: StateStore, run_id: str,
+                                selections: list, reason: str) -> None:
+    """Return verified-but-unattempted selections to the backlog.
+
+    The publish budget — one attempt per run — is the reason these are not
+    sent. Releasing with ``attempts_increment=0`` keeps them as strong
+    candidates for the next run: the decision succeeded, only the run ran out
+    of room. Never called for the selection a report already settled.
+    """
+    for opportunity, _ in selections:
+        _release_backlog_claim(
+            store, opportunity, run_id,
+            OpportunityDecision.DEFERRED, reason, attempts_increment=0)
 
 
 def _settle_publish_report(store: StateStore, run: Any, notifier: Any,
@@ -896,6 +1132,7 @@ def _finish_backlog_run(store: StateStore, run: Any, notifier: Any,
              if event[0] is RunOutcome.REQUIRES_HUMAN_INTERVENTION]
     failed = [event for event in events
               if event[0] is RunOutcome.WORKFLOW_FAILED]
+    _record_run_outcomes(store, run, claimed or [], selections)
     if published:
         detail = _backlog_summary(
             store, persisted, pool, selections, published,
@@ -957,6 +1194,54 @@ def _finish_backlog_run(store: StateStore, run: Any, notifier: Any,
         deferred=_deferred_lines(store, claimed or []),
     )
     return result
+
+
+def _record_run_outcomes(store: StateStore, run: Any, claimed: list,
+                         selections: list) -> None:
+    """Persist each claimed opportunity's terminal disposition for this run.
+
+    The run outcome already records *that* the run published nothing or
+    failed; this records *what each opportunity it tried ended as*, so the
+    run's notification can enumerate them without opening the backlog
+    (report §12 P3.1) and a later diagnosis has the chosen chunk ids and ranks
+    (report §12 P3.3). Read back from the stored row rather than from
+    in-memory results, so the lines say what the run actually recorded — the
+    same rule :func:`_deferred_lines` follows. Best-effort: the run outcome is
+    already durable, so a report that cannot be written must never change what
+    happened.
+    """
+    if not claimed:
+        return
+    traces = _selection_traces(selections)
+    for opportunity in claimed:
+        opp_id = opportunity.opportunity_id
+        try:
+            row = store.get_opportunity(opp_id)
+        except Exception:  # noqa: BLE001 — informational only
+            continue
+        if row is None:
+            continue
+        decision = getattr(row, "last_decision", None) or "unpublished"
+        rationale = (getattr(row, "last_error", None) or "").strip()
+        if len(rationale) > 200:
+            rationale = rationale[:197] + "..."
+        try:
+            store.record_opportunity_outcome(
+                run.run_id, opp_id, row.topic, decision,
+                rationale=rationale, evidence=traces.get(opp_id, ()))
+        except Exception:  # noqa: BLE001 — informational only
+            continue
+
+
+def _selection_traces(selections: list) -> dict[str, tuple]:
+    """Chosen ``(source, chunk_id)`` pairs per opportunity, in selection order."""
+    traces: dict[str, tuple] = {}
+    for opportunity, agent_result in selections:
+        proposal = getattr(agent_result, "proposal", None)
+        keys = getattr(proposal, "evidence_keys", ()) if proposal is not None else ()
+        if keys:
+            traces[opportunity.opportunity_id] = tuple(keys)
+    return traces
 
 
 def _deferred_lines(store: StateStore, claimed: list) -> tuple[str, ...]:
@@ -1066,7 +1351,10 @@ def main(argv: list[str] | None = None) -> int:
     del argv  # no flags: the run is fully described by its recorded outcome.
     setup_logging()
     try:
-        result = run_branding()
+        result = run_branding(BrandingConfig(
+            weekly_target=app_config.WEEKLY_PUBLISH_TARGET,
+            branding_runs_per_week=app_config.BRANDING_RUNS_PER_WEEK,
+        ))
     except WorkflowLocked as locked:
         print(f"branding locked out: {locked}")
         return EXIT_LOCKED

@@ -2,8 +2,8 @@
 #
 # Cron was chosen over a systemd timer for this deployment:
 #
-# * one user, one machine, fixed coarse intervals (8h / 24h) — no second
-#   granularity, no unit dependencies, no journal integration needed;
+# * one user, one machine, fixed coarse intervals (twice weekly / 24h) — no
+#   second granularity, no unit dependencies, no journal integration needed;
 # * one file versus two services plus two timers plus daemon-reload plus
 #   lingering for user timers;
 # * cron works without a running systemd init (containers, minimal installs),
@@ -27,8 +27,11 @@
 
 PROJECT_ROOT=/home/alaabadawii/LLMs/IBM/Build_RAG_Applications_Get_Started/PersonalBrandingAgent
 
-# Branding pipeline, every 8 hours (00:00, 08:00, 16:00).
-0 */8 * * * cd "$PROJECT_ROOT" && .venv/bin/python -m app.workflows.branding >> "$PROJECT_ROOT/logs/branding-cron.log" 2>&1
+# Branding pipeline, twice weekly: Tuesday and Friday at 10:00.
+# The schedule is interpreted in the daemon's timezone, which is the system
+# timezone (Africa/Cairo on this host). cron 3.0pl1 has no CRON_TZ support and
+# ignores a crontab TZ= for scheduling, so the time is local by definition.
+0 10 * * 2,5 cd "$PROJECT_ROOT" && .venv/bin/python -m app.workflows.branding >> "$PROJECT_ROOT/logs/branding-cron.log" 2>&1
 
 # Knowledge synchronization, daily at 02:10.
 10 2 * * * cd "$PROJECT_ROOT" && .venv/bin/python -m app.workflows.sync >> "$PROJECT_ROOT/logs/sync-cron.log" 2>&1

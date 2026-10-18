@@ -138,7 +138,12 @@ class NotificationService:
             return self._waive(WaiverReason.NORMAL_OUTCOME, _NOTIFIABLE_ELSEWHERE)
 
         failures = store.list_failures(run_id=run_id)
-        message = build_run_message(run, failures, secrets=self._secrets)
+        try:
+            opportunities = store.list_opportunity_outcomes(run_id)
+        except Exception:  # noqa: BLE001 — the report is richer with them, not wrong without
+            opportunities = ()
+        message = build_run_message(run, failures, opportunities=opportunities,
+                                    secrets=self._secrets)
         return self._deliver(message, key=("run_id", run.run_id),
                              run_id=run.run_id, failure_id=None, subject_of=run)
 

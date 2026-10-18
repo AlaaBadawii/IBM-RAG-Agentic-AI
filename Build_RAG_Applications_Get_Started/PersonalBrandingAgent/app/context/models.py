@@ -24,6 +24,7 @@ order the retriever happened to return things in.
 from dataclasses import dataclass, field
 
 from app.context.enums import EvidenceStatus, FreshnessState
+from app.context.evidence_roles import EvidenceRole, classify_chunk
 from app.context.taxonomy import state_rank
 from app.retrieval.models import RetrievedDocument
 
@@ -85,6 +86,22 @@ class ContextItem:
     """Strategy-specific score. **Not comparable across strategies**
     (``app/retrieval/models.py``), and deliberately not used for ordering
     here, for that reason among others."""
+
+    @property
+    def evidence_role(self) -> EvidenceRole:
+        """Whether this chunk is a story or an index card (Step 4 vocabulary).
+
+        Derived from the chunk's own headings by
+        :func:`app.context.evidence_roles.classify_chunk`, so it costs nothing
+        to carry and cannot disagree with the text. ``UNKNOWN`` for a chunk
+        whose structure the vocabularies do not recognize — never ``CATALOG``.
+        """
+        return classify_chunk(self.content)
+
+    @property
+    def is_catalog_only(self) -> bool:
+        """True when this chunk is a pure index card and cannot ground a post."""
+        return self.evidence_role is EvidenceRole.CATALOG
 
     @property
     def ordering_key(self) -> tuple[int, str, str]:

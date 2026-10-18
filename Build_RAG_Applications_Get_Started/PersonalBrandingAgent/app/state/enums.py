@@ -75,6 +75,13 @@ class OpportunityStatus(str, Enum):
     deliberately *not* actionable: a post may exist, so only a person may
     release it. ``claimed`` is transient within a run (see
     ``StateStore.claim_opportunities``).
+
+    ``exhausted`` is retirement: an opportunity that has consumed its whole
+    attempt budget across distinct runs without ever producing a post is
+    moved here by an explicit recorded decision (``last_decision =
+    'exhausted'``) rather than rotated forever. It leaves the actionable
+    backlog — so it stops consuming the per-run publish budget — but the row,
+    its snapshot, and the reason it retired are all preserved.
     """
 
     QUEUED = "queued"
@@ -83,6 +90,7 @@ class OpportunityStatus(str, Enum):
     REJECTED = "rejected"
     FAILED = "failed"
     REQUIRES_REVIEW = "requires_review"
+    EXHAUSTED = "exhausted"
 
 
 #: Opportunity states a run may select from. ``failed`` is included on
@@ -97,10 +105,19 @@ BACKLOG_OPPORTUNITY_STATES = (
 #: Opportunity states that leave the active backlog. ``rejected`` is an
 #: explicit, recorded decision (with its reason on the row) — never the same
 #: thing as "not selected", which leaves the row ``queued`` and untouched.
+#: ``exhausted`` is the same kind of explicit decision, taken because the
+#: attempt budget is spent rather than because a gate refused the draft.
 TERMINAL_OPPORTUNITY_STATES = (
     OpportunityStatus.PUBLISHED,
     OpportunityStatus.REJECTED,
+    OpportunityStatus.EXHAUSTED,
 )
+
+#: How many distinct-run attempts one opportunity may consume before it is
+#: retired as ``exhausted``. Chosen so a snapshot gets several chances across
+#: the refresh/repair cycle (the incident rows arrived here already at 2–3)
+#: without an unpostable row rotating forever and eating the publish budget.
+MAX_OPPORTUNITY_ATTEMPTS = 4
 
 
 class LifecycleState(str, Enum):

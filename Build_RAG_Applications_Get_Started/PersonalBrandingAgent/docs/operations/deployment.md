@@ -97,10 +97,10 @@ crontab ops/personal-branding-agent.cron
 crontab -l
 ```
 
-Result: branding every 8h (`0 */8 * * *`), sync daily at 02:10, output
-appended to `logs/branding-cron.log` / `logs/sync-cron.log`, exit statuses
-unmasked (`0` success · `1` failed · `2` needs a person · `3` locked out).
-Full rationale and per-code meaning: [`scheduling.md`](scheduling.md).
+Result: branding twice weekly (Tue + Fri 10:00, `0 10 * * 2,5`), sync daily at
+02:10, output appended to `logs/branding-cron.log` / `logs/sync-cron.log`, exit
+statuses unmasked (`0` success · `1` failed · `2` needs a person · `3` locked
+out). Full rationale and per-code meaning: [`scheduling.md`](scheduling.md).
 
 ## 6. Verification commands
 

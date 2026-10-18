@@ -399,8 +399,8 @@ def test_excluded_material_is_not_a_change(
 def test_state_invariants_intact(store):
     from app.state import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 9
-    assert store.schema_version == 9
+    assert SCHEMA_VERSION == 13
+    assert store.schema_version == 13
     store.ensure_tracked_work("w", "W", sources=("s",))
     store.ensure_development("w", "d", "D")
     assert len(store.list_tracked_work()) == 1

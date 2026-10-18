@@ -393,7 +393,10 @@ def test_cron_invokes_both_workflows_without_masking():
             ).read_text()
     assert "app.workflows.sync" in text
     assert "app.workflows.branding" in text
-    assert "*/8" in text
+    # Branding is twice weekly (Tue + Fri at 10:00); the old every-8h trigger
+    # must not survive a cadence change.
+    assert "0 10 * * 2,5" in text
+    assert "*/8" not in text
     commands = [line for line in text.splitlines()
                 if line.strip() and not line.lstrip().startswith("#")
                 and "=" not in line.split()[0]]

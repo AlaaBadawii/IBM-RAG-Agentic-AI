@@ -151,6 +151,36 @@ def test_a_failed_run_produces_exactly_one_notification(store):
     assert "Notified:" in body
 
 
+def test_a_failed_run_enumerates_each_opportunitys_outcome(store):
+    """A failed run's email lists what each claimed opportunity ended as,
+    rather than leaving it to a database query (report §12 P3.1)."""
+    run, _ = _finished(store, RunOutcome.WORKFLOW_FAILED)
+    store.record_opportunity_outcome(
+        run.run_id, "opp_4cf21f3a5c7d", "stories_lessons", "deferred",
+        rationale="generation_declined")
+    store.record_opportunity_outcome(
+        run.run_id, "opp_507666864e7a", "evidence", "deferred",
+        rationale="no_value")
+    transport = CapturingTransport()
+
+    _service(store, transport).notify_run(run.run_id)
+
+    body = transport.messages[0].body
+    assert "--- Opportunities ---" in body
+    assert ("opp_4cf21f3a5c7d (stories_lessons): deferred — "
+            "generation_declined") in body
+    assert "opp_507666864e7a (evidence): deferred — no_value" in body
+
+
+def test_a_run_without_recorded_outcomes_renders_no_opportunities_block(store):
+    run, _ = _finished(store, RunOutcome.WORKFLOW_FAILED)
+    transport = CapturingTransport()
+
+    _service(store, transport).notify_run(run.run_id)
+
+    assert "--- Opportunities ---" not in transport.messages[0].body
+
+
 def test_the_delivery_is_recorded_against_the_run(store):
     run, _ = _finished(store, RunOutcome.WORKFLOW_FAILED)
     transport = CapturingTransport(recipient="owner@example.com")

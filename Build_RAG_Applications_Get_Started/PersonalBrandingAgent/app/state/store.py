@@ -76,7 +76,9 @@ from app.state.models import (
     MissedWindow,
     Notification,
     OperationalFailure,
+    OpportunityOutcome,
     Publication,
+    PublicationMetric,
     PublicationRecord,
     PublishIntent,
     ReviewCursor,
@@ -102,6 +104,12 @@ DEFAULT_LOCK_TTL_SECONDS = 3600.0
 #: from hanging.
 BUSY_TIMEOUT_SECONDS = 5.0
 
+#: How many chosen chunks of each opportunity the per-run selection trace
+#: keeps. Bounded so a run's report cannot grow with the evidence pool: the
+#: trace exists to say *which* chunks a decision drew on, and the first ten
+#: say that as well as ten thousand would.
+MAX_OUTCOME_TRACE = 10
+
 _EnumT = TypeVar("_EnumT")
 
 
@@ -113,6 +121,41 @@ def content_hash_of(text: str) -> str:
     not comparable and are never stored in the same column.
     """
     return sha256(text.encode("utf-8")).hexdigest()
+
+
+def _baseline_of(rows: Sequence[sqlite3.Row], *, requested_age: float,
+                 tolerance_hours: float) -> dict:
+    """Average engagement across a set of age-comparable metric rows.
+
+    Averages are ``None`` when there is nothing to average, so "no comparable
+    posts yet" is never read as "the baseline is zero engagement".
+    """
+    count = len(rows)
+    result = {
+        "count": count,
+        "age_hours": float(requested_age),
+        "tolerance_hours": float(tolerance_hours),
+        "min_age_hours": None,
+        "max_age_hours": None,
+        "avg_impressions": None,
+        "avg_engagements": None,
+        "avg_engagement_rate": None,
+    }
+    if not count:
+        return result
+    ages = [float(row["age_hours"]) for row in rows]
+    impressions = sum(int(row["impressions"]) for row in rows)
+    engagements = sum(
+        int(row["reactions"]) + int(row["comments"]) + int(row["reposts"])
+        for row in rows
+    )
+    result["min_age_hours"] = min(ages)
+    result["max_age_hours"] = max(ages)
+    result["avg_impressions"] = impressions / count
+    result["avg_engagements"] = engagements / count
+    result["avg_engagement_rate"] = (engagements / impressions
+                                     if impressions else 0.0)
+    return result
 
 
 def _coerce_enum(value: "_EnumT | str", enum_cls: type[_EnumT], field: str) -> _EnumT:
@@ -141,6 +184,21 @@ def _new_run_id(workflow: str) -> str:
     """A run id that is unique and readable in a log or a query."""
     stamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
     return f"{workflow}-{stamp}-{uuid.uuid4().hex[:8]}"
+
+
+def _snapshot_digest(evidence: Sequence[dict]) -> str:
+    """Deterministic digest of one evidence snapshot.
+
+    Sorted keys and a stable separator make the digest a function of the
+    evidence content alone, so two diffs of the same list hash the same and
+    a refresh can tell "unchanged" from "different" without a field-by-field
+    comparison. Empty stack hashes to the empty string, matching the column's
+    default for rows written before the column existed.
+    """
+    if not evidence:
+        return ""
+    canonical = json.dumps(list(evidence), sort_keys=True, ensure_ascii=False)
+    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class StateStore:
@@ -751,7 +809,8 @@ class StateStore:
     def enqueue_opportunity(self, fingerprint: str, topic: str,
                             evidence: Sequence[dict],
                             project: str | None = None,
-                            evidence_strength: int = 0) -> ContentOpportunity:
+                            evidence_strength: int = 0,
+                            snapshot_version: int = 1) -> ContentOpportunity:
         """Persist one discovered opportunity, idempotently.
 
         ``INSERT OR IGNORE`` on the fingerprint: re-discovering the same
@@ -759,6 +818,12 @@ class StateStore:
         row, and never an overwrite of the row's lifecycle state. A repeat
         discovery must not reset attempts, clear a claim, or revive a
         terminal row.
+
+        ``snapshot_version`` records which evidence-selection policy produced
+        the snapshot; the deterministic ``snapshot_hash`` is derived from the
+        evidence itself. Together they let
+        :meth:`refresh_opportunity_snapshot` tell a stale snapshot from a
+        current one without re-deriving anything.
         """
         if not fingerprint.strip():
             raise ValueError("fingerprint must be non-empty")
@@ -768,15 +833,101 @@ class StateStore:
         self._write(
             "INSERT OR IGNORE INTO content_opportunities (opportunity_id, "
             "fingerprint, topic, project, status, evidence, "
-            "evidence_strength, attempts, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?)",
+            "evidence_strength, snapshot_version, snapshot_hash, "
+            "attempts, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, 0, ?, ?)",
             (_new_id("opp"), fingerprint, topic, project,
-             json.dumps(list(evidence)), int(evidence_strength), now, now),
+             json.dumps(list(evidence)), int(evidence_strength),
+             int(snapshot_version), _snapshot_digest(evidence), now, now),
             f"enqueueing opportunity {fingerprint}",
         )
         stored = self.get_opportunity_by_fingerprint(fingerprint)
         assert stored is not None
         return stored
+
+    def refresh_opportunity_snapshot(
+            self, opportunity_id: str, evidence: Sequence[dict], *,
+            evidence_strength: int | None = None,
+            snapshot_version: int = 1,
+            expected_snapshot_hash: str | None = None
+    ) -> ContentOpportunity:
+        """Replace the stored evidence of an *actionable* opportunity.
+
+        This is the repair half of snapshot versioning: a queued or failed
+        opportunity whose stored snapshot no longer matches what current
+        selection would choose (or that predates the snapshot columns) is
+        refreshed in place, so a weak snapshot is not re-served forever. It
+        never touches lifecycle state — status, attempts, claim ownership and
+        ``last_decision`` all stay put — and it is a no-op when:
+
+        * the row is not actionable (claimed, terminal, or awaiting review);
+        * the incoming snapshot has the same digest (re-discovery is idempotent);
+        * ``expected_snapshot_hash`` is given but the row has since changed
+          under it (a lost race leaves the fresher value alone).
+
+        Returns the current row, whether or not it changed.
+        """
+        digest = _snapshot_digest(evidence)
+        with self._transaction(f"refreshing the snapshot of {opportunity_id}"):
+            current = self.get_opportunity(opportunity_id)
+            if current is None:
+                raise StateStoreError(f"unknown opportunity {opportunity_id}")
+            if not current.actionable:
+                return current
+            if expected_snapshot_hash is not None and \
+                    current.snapshot_hash != expected_snapshot_hash:
+                return current
+            evidence_changed = current.snapshot_hash != digest
+            version_changed = current.snapshot_version != int(snapshot_version)
+            if not evidence_changed and not version_changed:
+                return current
+            now = utc_now_iso()
+            if evidence_changed:
+                self._write(
+                    "UPDATE content_opportunities SET evidence = ?, "
+                    "evidence_strength = COALESCE(?, evidence_strength), "
+                    "snapshot_version = ?, snapshot_hash = ?, updated_at = ? "
+                    "WHERE opportunity_id = ?",
+                    (json.dumps(list(evidence)),
+                     None if evidence_strength is None
+                     else int(evidence_strength),
+                     int(snapshot_version), digest, now, opportunity_id),
+                    f"refreshing the snapshot of {opportunity_id}",
+                )
+            else:
+                # Same evidence, older policy stamp: record the stamp so the
+                # row stops reading as stale without rewriting the snapshot.
+                self._write(
+                    "UPDATE content_opportunities SET snapshot_version = ?, "
+                    "updated_at = ? WHERE opportunity_id = ?",
+                    (int(snapshot_version), now, opportunity_id),
+                    f"stamping the snapshot of {opportunity_id}",
+                )
+            refreshed = self.get_opportunity(opportunity_id)
+            assert refreshed is not None
+            return refreshed
+
+    def list_stale_snapshot_opportunities(
+            self, current_version: int, limit: int = 100
+    ) -> list[ContentOpportunity]:
+        """Actionable opportunities whose snapshot is not from this policy.
+
+        "Stale" means ``snapshot_version`` is below ``current_version`` or the
+        row has no recorded digest (a row written before the column existed).
+        Only actionable rows are returned — a claimed, retired, or published
+        row is never a repair candidate.
+        """
+        states = tuple(state.value for state in BACKLOG_OPPORTUNITY_STATES)
+        placeholders = ", ".join("?" * len(states))
+        rows = self._read(
+            "SELECT * FROM content_opportunities "
+            f"WHERE status IN ({placeholders}) "
+            "AND (snapshot_version < ? OR snapshot_hash = '') "
+            "ORDER BY attempts ASC, created_at ASC, fingerprint ASC "
+            "LIMIT ?",
+            (*states, int(current_version), limit),
+        )
+        return [ContentOpportunity.from_row(row) for row in rows]
 
     def get_opportunity(self, opportunity_id: str) -> ContentOpportunity | None:
         rows = self._read(
@@ -822,6 +973,174 @@ class StateStore:
             states,
         )
         return int(rows[0]["n"])
+
+    # -- per-run opportunity outcomes (run reports) --------------------------
+
+    def record_opportunity_outcome(
+            self, run_id: str, opportunity_id: str, topic: str, decision: str,
+            *, rationale: str = "",
+            evidence: Sequence[tuple[str, str]] = ()) -> None:
+        """Record one claimed opportunity's terminal disposition for a run.
+
+        Idempotent per ``(run_id, opportunity_id)``: the same run re-recording
+        an opportunity replaces its row rather than duplicating it. ``evidence``
+        is the chosen ``(source, chunk_id)`` pairs, stored as a bounded,
+        order-preserving selection trace — provenance for a later diagnosis,
+        never a source for a post.
+        """
+        if not run_id.strip():
+            raise ValueError("run_id must be non-empty")
+        if not opportunity_id.strip():
+            raise ValueError("opportunity_id must be non-empty")
+        trace = [
+            {"source": source, "chunk_id": chunk_id, "rank": rank}
+            for rank, (source, chunk_id) in enumerate(evidence)
+        ][:MAX_OUTCOME_TRACE]
+        self._write(
+            "INSERT OR REPLACE INTO opportunity_outcomes (run_id, "
+            "opportunity_id, topic, decision, rationale, selected_count, "
+            "trace, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (run_id, opportunity_id, topic, decision, rationale,
+             len(evidence), json.dumps(trace), utc_now_iso()),
+            f"recording outcome of opportunity {opportunity_id} for run {run_id}",
+        )
+
+    def list_opportunity_outcomes(self, run_id: str) -> list[OpportunityOutcome]:
+        """One run's recorded per-opportunity outcomes, in insertion order."""
+        rows = self._read(
+            "SELECT * FROM opportunity_outcomes WHERE run_id = ? "
+            "ORDER BY rowid",
+            (run_id,),
+        )
+        return [OpportunityOutcome.from_row(row) for row in rows]
+
+    # -- publication metrics (engagement reporting) --------------------------
+
+    def record_publication_metric(
+            self, publication_id: str, *, age_hours: float,
+            impressions: int = 0, reactions: int = 0, comments: int = 0,
+            reposts: int = 0, captured_at: str | None = None,
+            source: str = "manual") -> PublicationMetric:
+        """Record one reading of a post's engagement at a known age.
+
+        ``age_hours`` is required and must be non-negative: a metric with no
+        age cannot be compared to anything, so the store refuses to hold one.
+        Repeated readings are kept, not merged — a post measured at 6h and at
+        7 days is two facts, and collapsing them would destroy the age axis
+        the comparison depends on.
+        """
+        for name, value in (("age_hours", age_hours),
+                            ("impressions", impressions),
+                            ("reactions", reactions),
+                            ("comments", comments), ("reposts", reposts)):
+            if value < 0:
+                raise ValueError(f"{name} must be non-negative, got {value!r}")
+        if not publication_id.strip():
+            raise ValueError("publication_id must be non-empty")
+        now = utc_now_iso()
+        metric_id = _new_id("metric")
+        self._write(
+            "INSERT INTO publication_metrics (metric_id, publication_id, "
+            "captured_at, age_hours, impressions, reactions, comments, "
+            "reposts, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (metric_id, publication_id, captured_at or now, float(age_hours),
+             int(impressions), int(reactions), int(comments), int(reposts),
+             source, now),
+            f"recording a metric for publication {publication_id}",
+        )
+        stored = self.get_publication_metric(metric_id)
+        assert stored is not None
+        return stored
+
+    def get_publication_metric(self, metric_id: str) -> PublicationMetric | None:
+        rows = self._read(
+            "SELECT * FROM publication_metrics WHERE metric_id = ?",
+            (metric_id,),
+        )
+        return PublicationMetric.from_row(rows[0]) if rows else None
+
+    def list_publication_metrics(
+            self, publication_id: str | None = None, *,
+            limit: int = 200) -> list[PublicationMetric]:
+        """Metrics in capture order, optionally for one publication.
+
+        Newest capture first, so a caller's first row is the most recent
+        reading of that post.
+        """
+        if publication_id is None:
+            rows = self._read(
+                "SELECT * FROM publication_metrics "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (limit,),
+            )
+        else:
+            rows = self._read(
+                "SELECT * FROM publication_metrics WHERE publication_id = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (publication_id, limit),
+            )
+        return [PublicationMetric.from_row(row) for row in rows]
+
+    def comparable_age_baseline(
+            self, age_hours: float, *, tolerance_hours: float = 6.0,
+            exclude_publication_id: str | None = None,
+            source: str | None = None) -> dict:
+        """Engagement averages across posts measured at a comparable age.
+
+        "Comparable" means within ``tolerance_hours`` of ``age_hours``. A post
+        can be left out with ``exclude_publication_id`` so a post is not
+        compared against itself. Returns the count and the averages; with no
+        comparable rows the averages are ``None`` rather than a misleading
+        zero.
+        """
+        lower = max(0.0, age_hours - tolerance_hours)
+        upper = age_hours + tolerance_hours
+        sql = (
+            "SELECT age_hours, impressions, reactions, comments, reposts, "
+            "publication_id FROM publication_metrics "
+            "WHERE age_hours >= ? AND age_hours <= ?"
+        )
+        params: list = [lower, upper]
+        if exclude_publication_id is not None:
+            sql += " AND publication_id != ?"
+            params.append(exclude_publication_id)
+        if source is not None:
+            sql += " AND source = ?"
+            params.append(source)
+        rows = self._read(sql, tuple(params))
+        return _baseline_of(rows, requested_age=age_hours,
+                            tolerance_hours=tolerance_hours)
+
+    def compare_publication_to_baseline(
+            self, publication_id: str, *, tolerance_hours: float = 6.0) -> dict:
+        """One post's most recent metric against its comparable-age baseline.
+
+        Uses the post's own latest ``age_hours``, so the comparison is always
+        at the age the post was last measured. Returns the metric, the
+        baseline, and the deltas; when the post has no metric yet, the metric
+        and deltas are ``None``.
+        """
+        latest = self.list_publication_metrics(publication_id, limit=1)
+        metric = latest[0] if latest else None
+        if metric is None:
+            return {"metric": None, "baseline": None,
+                    "impressions_delta": None, "engagement_rate_delta": None}
+        baseline = self.comparable_age_baseline(
+            metric.age_hours, tolerance_hours=tolerance_hours,
+            exclude_publication_id=publication_id)
+        impressions_delta = None
+        engagement_rate_delta = None
+        if baseline["count"]:
+            impressions_delta = metric.impressions - baseline["avg_impressions"]
+            engagement_rate_delta = (
+                metric.engagement_rate - baseline["avg_engagement_rate"]
+            )
+        return {
+            "metric": metric,
+            "baseline": baseline,
+            "impressions_delta": impressions_delta,
+            "engagement_rate_delta": engagement_rate_delta,
+        }
 
     def covered_evidence_sources(self) -> frozenset[str]:
         """Every source already persisted as opportunity evidence.
@@ -983,8 +1302,7 @@ class StateStore:
                     f"opportunity {opportunity_id} is not claimed by "
                     f"{run_id!r}; refusing to finalize another run's claim"
                 )
-            if (current.status is OpportunityStatus.PUBLISHED
-                    or current.status is OpportunityStatus.REJECTED):
+            if current.status in TERMINAL_OPPORTUNITY_STATES:
                 raise StateConstraintError(
                     f"opportunity {opportunity_id} is already resolved as "
                     f"{current.status.value}; refusing to resolve it twice"

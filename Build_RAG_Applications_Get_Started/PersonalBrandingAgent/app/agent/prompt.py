@@ -29,6 +29,7 @@ make an invented label real, and the resolver never trusts one.
 """
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -40,6 +41,7 @@ from app.agent.models import (
     ReasoningRequest,
     TopicCandidate,
 )
+from app.context.evidence_roles import is_publishable_section
 from app.context.models import PersonalBrandingContext
 from app.generation.prompt import NO_STATE_LABEL, PROHIBITED_CLAIMS
 
@@ -49,6 +51,7 @@ __all__ = [
     "build_reasoning_prompt",
     "evidence_options",
     "parse_reasoning_answer",
+    "resolve_topic",
     "topic_candidates",
 ]
 
@@ -138,11 +141,19 @@ def topic_candidates(context: PersonalBrandingContext
                      ) -> tuple[TopicCandidate, ...]:
     """The content opportunities this context actually holds.
 
-    One per **non-empty evidence section**, in the context's own section order
-    — which is the corpus's hierarchy rank, so the strongest material is
-    offered first and an empty section is not offered at all. This is the
-    Agent's vocabulary of topics, and it is derived rather than invented: a
-    section exists because retrieval returned documents that belong to it.
+    One per **publishable, non-empty evidence section**, in the context's own
+    section order — which is the corpus's hierarchy rank, so the strongest
+    material is offered first and an empty section is not offered at all. This
+    is the Agent's vocabulary of topics, and it is derived rather than
+    invented: a section exists because retrieval returned documents that belong
+    to it.
+
+    Publishability is the corpus's own rule
+    (:func:`app.context.evidence_roles.is_publishable_section`): ``audit`` and
+    ``unclassified`` material is never something to write a post about, and an
+    ``in_progress_courses`` section is offered only when it carries a
+    substantive learning signal. Such material remains available as context —
+    it is simply not a topic.
 
     Guidance sections are deliberately absent. A writing-style document is not
     something to publish *about*, and offering it would invite exactly the
@@ -155,7 +166,7 @@ def topic_candidates(context: PersonalBrandingContext
             evidence_states=section.coverage.evidence_states_present,
         )
         for section in context.evidence_sections
-        if section.items
+        if section.items and is_publishable_section(section.name, section.items)
     )
 
 
@@ -396,6 +407,58 @@ def _strategies_block(strategies: tuple[str, ...]) -> str:
 
 
 # ------------------------------------------------------------- the answer ---
+
+#: What a reasoner puts after an opportunity's name when it echoes the
+#: opportunity's coverage line back instead of naming the opportunity alone.
+#: The incident's answer named ``"evidence: 3 item(s), evidence states:
+#: VERIFIED"`` for the opportunity ``evidence``. A separator here means the
+#: string *names* the opportunity; a letter means it is a different name.
+_TOPIC_DECORATION = ":,;—–-("
+
+
+def resolve_topic(raw: str | None, offered: Sequence[str]) -> str | None:
+    """The offered topic name ``raw`` refers to, or ``None``.
+
+    Exact match first, then a case-insensitive one, then the offered name a
+    *decorated* string begins with. The last case exists because a reasoner can
+    echo an opportunity's coverage line back as the topic: the incident's answer
+    named ``"evidence: 3 item(s), evidence states: VERIFIED"``, which is a
+    naming of the opportunity ``evidence`` and not a new one. The name that was
+    actually offered is what travels on, so downstream code still sees a
+    vocabulary entry rather than a model's sentence.
+
+    A string that merely *starts* with a name but continues with a word
+    (``"evidence and lessons"``) is a different name and resolves to nothing,
+    so a genuinely unknown topic is still refused rather than guessed at.
+    Resolution is deliberately deterministic and one-shot — the reasoner is
+    asked exactly once per run, and a decoration is not worth a second call.
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    for name in offered:
+        if text == name:
+            return name
+    lowered = text.casefold()
+    for name in offered:
+        if lowered == name.casefold():
+            return name
+    best: str | None = None
+    for name in offered:
+        if _is_decorated(text, name) and (best is None or len(name) > len(best)):
+            best = name
+    return best
+
+
+def _is_decorated(text: str, name: str) -> bool:
+    """``text`` names ``name`` and then a separator, and so is ``name``."""
+    if len(text) <= len(name) or text[:len(name)].casefold() != name.casefold():
+        return False
+    rest = text[len(name):].lstrip()
+    return bool(rest) and rest[0] in _TOPIC_DECORATION
+
 
 def parse_reasoning_answer(text: str) -> ReasoningAnswer:
     """The answer in a model's reply.

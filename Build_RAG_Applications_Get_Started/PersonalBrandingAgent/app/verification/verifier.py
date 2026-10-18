@@ -33,6 +33,7 @@ from app.context.models import ContextItem, PersonalBrandingContext
 from app.generation.models import GeneratedPost
 from app.logging_config import get_logger, redact
 from app.verification.claims import content_terms, split_claims
+from app.verification.editorial import discoverability_notes
 from app.verification.enums import (
     ClaimVerdict,
     Severity,
@@ -164,6 +165,13 @@ class EvidenceVerifier:
         )
         outcome = self._outcome(tuple(post_level), claim_results)
 
+        editorial = discoverability_notes(post.content)
+        if editorial:
+            logger.info(
+                "editorial notes for a draft (%s): %s",
+                outcome.value, "; ".join(editorial),
+            )
+
         result = VerificationResult(
             outcome=outcome,
             claims=claim_results,
@@ -177,6 +185,7 @@ class EvidenceVerifier:
             advisory_note=note,
             judge=judge_name,
             judge_prompt_version=judge_version,
+            editorial_notes=editorial,
         )
         logger.info(
             "verified a draft: %s (%d claim(s), %d finding(s), degraded=%s)",

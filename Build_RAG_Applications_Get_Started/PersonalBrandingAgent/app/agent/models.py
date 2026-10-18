@@ -39,6 +39,7 @@ resolved. Resolving them is
 the two apart is what makes "the Agent cannot invent a source" checkable.
 """
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.agent.enums import (
@@ -61,6 +62,7 @@ from app.publishing.models import (
 from app.verification.models import VerificationResult
 
 __all__ = [
+    "REPETITION_WINDOW_DAYS",
     "AgentFailure",
     "AgentProposal",
     "AgentResult",
@@ -487,25 +489,108 @@ class AgentResult:
 
 # ------------------------------------------------------------------ helpers ---
 
+#: How far back "recently published" reaches, in days. The repetition signal a
+#: writer needs is *recent* coverage — an angle the audience saw this month —
+#: not a cumulative lifetime tally of a category. A cumulative count blocks a
+#: whole topic ("stories_lessons has been covered") even when the angle (a CI
+#: debugging story versus an LLM-arithmetic lesson) is entirely new, which is
+#: exactly the amplifier the incident report calls out
+#: (``docs/operations/incident-generation-declined-2026-10-17.md`` §11.3 / RC-4).
+REPETITION_WINDOW_DAYS = 30
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    """Parse a stored ISO-8601 timestamp, or ``None`` if it is unusable.
+
+    Accepts the store's ``...T00:00:00.000000+00:00`` and the ``Z`` suffix
+    fixtures use. A naive timestamp is read as UTC. Unparseable input is
+    ``None`` — never an exception, because a malformed history row must not be
+    able to turn a run into a crash.
+    """
+    if not value:
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _window_start(history: HistoryDigest,
+                  window_days: int | None) -> datetime | None:
+    """The cutoff before which coverage is not "recent".
+
+    Anchored to the newest publication in the digest rather than to a wall
+    clock, because this layer holds no clock by design. In a live system a run
+    happens shortly after the last publication, so the window measured back
+    from it is the recent past as of the last thing the audience saw; when
+    nothing has been published recently, the window is empty and nothing is
+    suppressed — a bias toward publishing, which is the corrective direction.
+    """
+    if not window_days or window_days <= 0:
+        return None
+    stamps = [_parse_timestamp(summary.published_at)
+              for summary in history.publications]
+    stamps = [stamp for stamp in stamps if stamp is not None]
+    if not stamps:
+        return None
+    return max(stamps) - timedelta(days=window_days)
+
+
+def _within(timestamp: str | None, cutoff: datetime | None) -> bool:
+    """True when a row belongs in the recent window.
+
+    No cutoff means no windowing. A row whose timestamp cannot be parsed is
+    kept: dropping it would silently *hide* coverage the writer should know
+    about, and caution here means over-disclosing, not under-disclosing.
+    """
+    if cutoff is None:
+        return True
+    parsed = _parse_timestamp(timestamp)
+    if parsed is None:
+        return True
+    return parsed >= cutoff
+
+
 def publishing_constraints(history: HistoryDigest, *,
-                           notes: tuple[str, ...] = ()
+                           notes: tuple[str, ...] = (),
+                           window_days: int | None = REPETITION_WINDOW_DAYS
                            ) -> PublishingConstraints:
-    """What the history means for a writer, as writing constraints.
+    """What the history means for a writer, as *recent* writing constraints.
 
     The same translation Step 8 anticipated when it typed
     ``PublishingConstraints`` as a plain value "the caller — Step 10's Agent,
     through Step 6's read service — hands over". Everything here is *what the
-    person reading the post has already seen*: not a rule about what may be
-    published. The duplicate policy is enforced by Step 6 over stored state,
-    because it has to hold whether or not a model chose to respect it, and
-    ``PLAN.md`` Step 10 forbids duplicating those gates inside the Agent.
+    person reading the post has already seen recently*: not a rule about what
+    may be published. The duplicate policy is enforced by Step 6 over stored
+    state, because it has to hold whether or not a model chose to respect it,
+    and ``PLAN.md`` Step 10 forbids duplicating those gates inside the Agent.
+
+    Only coverage inside ``window_days`` of the most recent publication is
+    handed over, so the writer is told "this angle is fresh" rather than
+    "this category has ever been used". Topics, projects and angles are all
+    windowed; the angle is the signal that distinguishes two genuinely
+    different stories that happen to share a category. ``window_days=None``
+    disables windowing and reproduces the previous cumulative behavior.
     """
+    cutoff = _window_start(history, window_days)
     return PublishingConstraints(
-        recent_topics=tuple(row.value for row in history.topics),
-        recent_projects=tuple(row.value for row in history.projects),
+        recent_topics=tuple(
+            row.value for row in history.topics
+            if _within(row.last_used_at, cutoff)
+        ),
+        recent_projects=tuple(
+            row.value for row in history.projects
+            if _within(row.last_used_at, cutoff)
+        ),
         recent_angles=tuple(
             summary.angle for summary in history.publications
-            if summary.angle
+            if summary.angle and _within(summary.published_at, cutoff)
         ),
         notes=tuple(notes),
     )
