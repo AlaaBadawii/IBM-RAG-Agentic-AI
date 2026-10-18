@@ -8,3 +8,8 @@ __pycache__/
 venv/
 .venv/
 logs/
+
+# Improvement Lab outputs are private per-run artifacts, never committed.
+improvement/artifacts/*
+!improvement/artifacts/.gitkeep
+improvement/evidence/
