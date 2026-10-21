@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "react-agent-langgraph"
+version = "0.1.0"
+description = "An educational ReAct agent built with LangGraph, LangChain and IBM watsonx.ai."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Make ``src`` importable so the offline suite runs from a source checkout
+# without requiring ``pip install -e .`` (an editable install also works).
+pythonpath = ["src"]
