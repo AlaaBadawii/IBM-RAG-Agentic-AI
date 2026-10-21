@@ -1,0 +1,48 @@
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Application output and caches
+app.log
+*.log
+document_cache/
+*.pkl
+chroma_db/
+chroma_*/
+*.sqlite3
+
+# Local documents and scratch data. Keep only documents you have permission
+# to publish; the example dropdown refers to files under examples/.
+test_docs/
+test/
+examples/*.pdf
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
