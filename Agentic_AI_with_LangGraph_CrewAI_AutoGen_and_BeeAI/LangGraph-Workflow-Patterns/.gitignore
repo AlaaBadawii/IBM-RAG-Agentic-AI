@@ -1,0 +1,30 @@
+# Local secrets — never commit credentials
+.env
+.env.*
+!.env.example
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Editors / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+tmp/

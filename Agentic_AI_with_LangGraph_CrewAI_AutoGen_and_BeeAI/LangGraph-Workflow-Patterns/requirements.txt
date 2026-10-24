@@ -1,0 +1,11 @@
+# Direct dependencies for LangGraph-Workflow-Patterns.
+# Versions reflect the tested development environment (Python 3.12.14);
+# other versions are untested.
+
+langgraph==0.2.68
+langchain-ibm==0.3.5
+python-dotenv==1.0.1
+pydantic==2.10.6
+
+# Optional: graph rendering (requires the system Graphviz package)
+# pygraphviz==2.0.4
