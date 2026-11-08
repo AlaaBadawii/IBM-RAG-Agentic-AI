@@ -1,0 +1,10 @@
+# AutoGen Lab dependencies
+autogen==0.14.1
+autogen-agentchat==0.7.5
+autogen-core==0.7.5
+pyautogen==0.10.0
+python-dotenv==1.2.4
+pydantic==2.14.3
+matplotlib==3.11.2
+numpy==2.5.4
+openai==2.54.0
