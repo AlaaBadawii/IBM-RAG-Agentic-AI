@@ -1,135 +1,93 @@
 # Course 2 — Build RAG Applications: Get Started
 
-**Status: In Progress**
+**Course status: Completed as of November 9, 2026 · Estimated duration: 7 hours**
 
-Three projects exploring RAG (Retrieval-Augmented Generation) pipelines, Gradio interfaces, and agent architectures using **OpenRouter** (for LLMs), **local Hugging Face embeddings**, and **ChromaDB** for vector storage. All projects swap IBM's proprietary watsonx provider for free, OpenAI-compatible alternatives.
+[← Certificate overview](../README.md)
 
-The course progresses from simple Gradio demos through a full RAG application (the LinkedIn Icebreaker Bot) to a production-oriented agent with OAuth integration and a structured knowledge base.
+## Overview and Learning Objectives
 
----
+The course introduces retrieval-augmented generation: loading documents, splitting
+them into chunks, creating embeddings, indexing, retrieving relevant context, and
+generating grounded answers. It compares LangChain and LlamaIndex and uses Gradio
+to expose model-backed workflows through interactive interfaces.
 
-## Projects
+- Understand the difference between an LLM's prior knowledge and retrieved context.
+- Follow the load → split → embed → index → retrieve → generate pipeline.
+- Compare query-engine abstractions with explicit retrieval steps.
+- Build Gradio interfaces from functions and input/output components.
 
-### LinkedIn Icebreaker Bot (`icebreaker/`)
+Course completion is separate from the availability and maturity of the retained projects.
 
-An AI-powered tool that generates personalized icebreakers and conversation starters based on LinkedIn profiles. Uses **LlamaIndex** for indexing, **OpenRouter** for the LLM, and **local Hugging Face embeddings** (`sentence-transformers/all-MiniLM-L6-v2`) for semantic retrieval.
+## Project and Lab Index
 
-- Rebuild of the IBM "AI Icebreaker Bot" lab with the proprietary provider swapped for OpenRouter + local embeddings
-- Full RAG pipeline: splitting → indexing → retrieval → generation
-- Available as both a Gradio web UI and a CLI
-- Switch LLM models at runtime (via CLI flag or web UI dropdown)
-- Uses mock data by default (no API keys required for testing)
-- **Note:** ProxyCurl API (used for LinkedIn profile extraction) was discontinued as of Feb 2025; the project supports mock data and is adapting to alternative data sources
+| Entry | Actual repository state | Documentation |
+|---|---|---|
+| Gradio UI Experiments | Implemented sentence builder; experimental image script with an incompatible model/classifier flow | [README](Gradio/README.md) |
+| LinkedIn Icebreaker Bot (`icebreaker`) | Unavailable gitlink; source is not tracked by this repository | Historical context below |
+| Personal Branding Agent | Extracted independent project, maintained in its own repository | [Standalone repository](https://github.com/AlaaBadawii/PersonalBrandingAgent) |
 
-### Gradio UI Experiments (`Gradio/`)
+### Gradio UI Experiments
 
-Two hands-on Gradio demonstrations for practicing the Gradio component model before building the LinkedIn Icebreaker Bot UI.
+[`Gradio/app.py`](Gradio/app.py) builds a deterministic sentence from sliders,
+dropdowns, checkboxes, and radio buttons. It runs on `127.0.0.1:7860` and needs no
+LLM API key.
 
-1. **Sentence Builder** — A `gr.Interface` that generates a descriptive sentence from structured inputs (sliders, dropdowns, checkboxes, radio buttons)
-2. **Image Captioning** — A `gr.Interface` using **BLIP** (Bootstrapping Language-Image Pre-training) from Salesforce to generate top predicted ImageNet labels with confidence scores
+[`Gradio/main.py`](Gradio/main.py) retains an image-interface experiment using
+`Salesforce/blip-image-captioning-base`, torchvision preprocessing, and an
+ImageNet label list. BLIP captioning output is not ImageNet classification output;
+the current inference flow needs a code correction before it can be described as
+a working captioner or classifier. See the project README for details.
 
-Both demos are single-file applications demonstrating Gradio's `gr.Interface` pattern with diverse component types.
+### Icebreaker Availability
 
-### Personal Branding Agent (`PersonalBrandingAgent/`)
+The Git index records `icebreaker` as mode `160000`, pointing to commit
+`9b8a9da7b0381686874d71740e74c72a71b7f74f`. No `.gitmodules` configuration is
+tracked and the referenced commit is unavailable in the parent repository.
+A fresh clone therefore does not provide runnable Icebreaker source. Any local
+files under that path are not GitHub-visible evidence for this portfolio.
 
-A production-oriented agent that generates, evaluates, and publishes authentic LinkedIn posts grounded in a personal knowledge base. Built as an extension of the IBM course "Build RAG Applications: Get Started."
+Historically, this was an Icebreaker RAG lab/rebuild associated with LlamaIndex,
+profile retrieval, and provider substitution. Its current commands, dependencies,
+ports, API requirements, and implementation status cannot be verified from this
+repository. Mock profile data alone would not remove the need for an API key when
+a workflow still calls a hosted LLM.
 
-- **Knowledge base** — structured `data/` corpus with projects, courses, certificates, evidence (with state tracking), stories, writing style, and public positioning
-- **LinkedIn OAuth** — full OAuth 2.0 flow with token refresh and post publishing via the LinkedIn REST API
-- **RAG pipeline** (in progress) — ingest → retrieve → generate → evaluate → publish, defined in `PLAN.md` (10 phases)
-- Modular architecture separating knowledge, reasoning, generation, evaluation, and tools
-- **Current status:** knowledge base and OAuth complete; RAG pipeline being built incrementally
+### Extracted Personal Branding Agent
 
----
+[PersonalBrandingAgent — Abu Prompt](https://github.com/AlaaBadawii/PersonalBrandingAgent)
+grew into an independent implementation of evidence-grounded LinkedIn content
+generation and publishing. Its engineering work includes a curated knowledge
+base, hybrid retrieval, deterministic verification, duplicate-safe publishing,
+and workflow state. Setup, test results, operational status, and remaining work
+belong to that standalone repository.
 
-## Tech Stack
+## Technologies Actually Retained Here
 
-Only libraries actually imported in source code:
+- Python and Gradio (`Interface`, input/output components, launch configuration).
+- `transformers`, PyTorch, torchvision, Pillow, and `requests` in the image experiment.
+- LangChain, LlamaIndex, embeddings, and vector-store workflows are course concepts;
+  the missing Icebreaker and extracted agent do not supply runnable RAG source in this directory.
 
-- **Python** 3.10+
-- **Gradio** — web UI framework (icebreaker, Gradio demos)
-- **LlamaIndex** — data indexing and retrieval (icebreaker)
-- **LangChain** — LCEL chains, `ChatPromptTemplate`, `JsonOutputParser` (PersonalBrandingAgent)
-- **Pydantic** — structured output schemas
-- **sentence-transformers** (`all-MiniLM-L6-v2`) — local Hugging Face embeddings for all projects
-- **chromadb** — vector database (PersonalBrandingAgent)
-- **OpenRouter** — LLM provider via OpenAI-compatible chat-completions API
-- **python-dotenv** — environment variable loading
-- **transformers**, **torch**, **PIL** — BLIP image captioning (Gradio demos)
+## Setup and Execution
 
----
-
-## What's Built
-
-- A full RAG pipeline in the icebreaker bot (splitting → indexing → retrieval → generation)
-- Two Gradio demos demonstrating component variety (sliders, dropdowns, checkboxes, radio, image, label)
-- A structured personal knowledge base with 9 data categories and evidence state tracking
-- LinkedIn OAuth 2.0 integration with token refresh and post publishing
-- Multi-model support across all projects (runtime model switching)
-- Both CLI and web UI interfaces where applicable
-- XSS-safe rendering via `escapeHtml()` on dynamic output (icebreaker)
-
----
-
-## Planned / Not Yet Built
-
-### icebreaker
-- **ProxyCurl replacement** — the LinkedIn profile extraction API was discontinued; mock data works but real-profile support needs an alternative data source
-- **Server-side streaming** — listed as a stretch goal in `plan.md`; not implemented
-
-### PersonalBrandingAgent
-- **RAG pipeline** — ingest → retrieve → generate → evaluate → publish is defined in `PLAN.md` (10 phases) and in progress
-- **Evaluation and quality gates** — PASS / REVISE / REJECT grading not yet implemented
-- **Publishing pipeline** — OAuth + publish scripts exist; the full automated pipeline is not complete
-- **Full agent loop** — the agent autonomy layer is the main remaining work
-
----
-
-## Setup / Run
-
-Each project is self-contained with its own `requirements.txt` and uses environment variables for secrets. **Never commit `.env` files.**
+From the repository root, for the sentence-builder lab:
 
 ```bash
-cd Build_RAG_Applications_Get_Started/<project>
+cd Build_RAG_Applications_Get_Started/Gradio
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # set OPENROUTER_API_KEY (and LinkedIn keys for PersonalBrandingAgent)
+python -m pip install gradio
+python app.py
 ```
 
-### Run commands
+Open <http://127.0.0.1:7860>. No `requirements.txt` or `.env.example` is tracked for
+these demos. The image experiment imports additional packages and is documented
+as experimental in the [project README](Gradio/README.md).
 
-```bash
-# Icebreaker Bot — CLI with mock data
-cd Build_RAG_Applications_Get_Started/icebreaker && python main.py --mock
+## Engineering Lessons
 
-# Icebreaker Bot — Gradio web UI
-cd Build_RAG_Applications_Get_Started/icebreaker && python app.py
-
-# Gradio Sentence Builder
-cd Build_RAG_Applications_Get_Started/Gradio && python app.py
-
-# Gradio Image Captioning
-cd Build_RAG_Applications_Get_Started/Gradio && python main.py
-
-# Personal Branding Agent — see PLAN.md for pipeline setup
-cd Build_RAG_Applications_Get_Started/PersonalBrandingAgent
-```
-
-- Icebreaker and Gradio demos serve on `http://127.0.0.1:7860` by default (Gradio default port)
-- PersonalBrandingAgent is a library project — run components per `PLAN.md` phases
-
-### Environment variables
-
-| Project | Variables |
-|---|---|
-| `icebreaker` | `OPENROUTER_API_KEY` (required for real profiles), `PROXYCURL_API_KEY` (discontinued) |
-| `Gradio` | None required (uses default model) |
-| `PersonalBrandingAgent` | `OPENROUTER_API_KEY`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` |
-
-### Known issues
-
-- **ProxyCurl discontinued** — the icebreaker bot's LinkedIn data extraction relied on ProxyCurl API, which was discontinued in Feb 2025. The project currently uses mock data (`--mock` flag). An alternative data source is needed for real-profile support.
-- **Free model rotation** — OpenRouter's free-model lineup changes frequently. If a model ID returns "model not found," check the current free list at [openrouter.ai/models](https://openrouter.ai/models?max_price=0) and update `config.py`.
-- **Parameter name drift** — `langchain-openai` major-version bumps rename constructor parameters (`max_tokens` → `max_completion_tokens`, `openai_api_key/openai_api_base` → `api_key/base_url`).
-- **Base URL**: All projects use `https://openrouter.ai/api/v1`. A similar-looking `https://api.openrouter.ai/v1` does not resolve in many environments (DNS failure).
+- Retrieval quality and chunk boundaries determine the context available to generation.
+- A query engine can hide several steps; understanding those steps helps debug grounding.
+- A model's output contract must match preprocessing and UI output types.
+- A gitlink is not a copy of a project's source; repository availability must be verified separately.
+- Independent extensions can outgrow a course folder and need their own documentation and lifecycle.

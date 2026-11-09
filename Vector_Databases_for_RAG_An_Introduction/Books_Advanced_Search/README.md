@@ -4,6 +4,8 @@ A Python application that stores book records in **ChromaDB**, generates embeddi
 
 This project is part of **Course 3 — Vector Databases for RAG: An Introduction** (IBM RAG and Agentic AI Professional Certificate). It follows the IBM lab progression from document storage through similarity search with metadata filtering.
 
+**Status: Implemented search exercises with known limitations.** [Course 3](../README.md) · [Certificate](../../README.md)
+
 ---
 
 ## 1. What this project does
@@ -38,7 +40,7 @@ Books are defined in `data/books.py` (`books`). Each record contains:
 | `themes` | Comma-separated themes |
 | `setting` | Setting description |
 
-> **Note:** `data/books.py` includes a `dotenv` import (`load_dotenv()`) and an `os.getenv("BOOKS_DATA", books)` fallback, though no `.env` file is present in the project. This is a legacy artifact and not part of the core application logic.
+> **Note:** `data/books.py` calls `load_dotenv()` and reads `BOOKS_DATA` with the built-in list as its default. An environment value is a string and is not parsed into records. Leave `BOOKS_DATA` unset to use the eight committed books; no API key is needed.
 
 ### Searchable text vs. metadata
 
@@ -86,7 +88,7 @@ service.filter_books({"genre": {"$in": ["Fantasy", "Science Fiction"]}})
 # Rating filtering using $gte
 service.filter_books({"rating": {"$gte": 4.3}})
 
-# Combined with $and
+# Semantic search with a rating filter
 service.search_similar_books("dystopian society control oppression future", n_results=3, where={"rating": {"$gte": 4.0}})
 ```
 
@@ -184,7 +186,7 @@ The application follows a layered architecture with clear separation of concerns
                                     │
                                     ▼
                            ┌─────────────────┐
-                           │     CLI / API   │
+                           │ Exercise Runner │
                            │ scripts/run_    │
                            │    search.py    │
                            └─────────────────┘
@@ -195,7 +197,7 @@ The application follows a layered architecture with clear separation of concerns
 | Module | Responsibility |
 |---|---|
 | `data/books.py` | Book dataset — isolated from all application logic |
-| `app/config.py` | Centralized configuration (collection name, persist directory, embedding model) |
+| `app/config.py` | Collection name and persist directory; declares an unused embedding-model constant |
 | `app/documents.py` | Converts books to semantic documents and structured metadata |
 | `app/vector_store.py` | ChromaDB client creation and collection retrieval |
 | `app/repository.py` | Abstraction over ChromaDB operations (add, get, search, filter, upsert, update, delete) |
@@ -228,7 +230,7 @@ ChromaDB
 |---|---|---|
 | `COLLECTION_NAME` | `"books"` | Chroma collection name |
 | `PERSIST_DIRECTORY` | `"storage/chroma"` | Persistent storage directory (survives restarts) |
-| `EMBEDDING_MODEL_NAME` | `"all-MiniLM-L6-v2"` | 384-dim embeddings, trained on 1B sentence pairs |
+| `EMBEDDING_MODEL_NAME` | `"all-MiniLM-L6-v2"` | Declared but not read by `vector_store.py`, which hardcodes the same model ID |
 
 ---
 
@@ -257,13 +259,14 @@ class BookSearchResult(BaseModel):
 
 ## 8. Setup
 
-**Requirements:** Python 3.10+, internet access for downloading the embedding model on first run.
+**Requirements:** Python 3.10+, internet access for downloading the embedding model on first run. Start from the repository root:
 
 ```bash
-cd Books_Advanced_Search
+cd Vector_Databases_for_RAG_An_Introduction/Books_Advanced_Search
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+python -m pip install python-dotenv pydantic pytest
 ```
 
 `requirements.txt`:
@@ -272,14 +275,19 @@ chromadb
 sentence-transformers
 ```
 
-> **Note:** `data/books.py` imports `dotenv`, so `python-dotenv` may also need to be installed if the import fails:
-> ```
-> pip install python-dotenv
-> ```
+> The manifest declares only ChromaDB and sentence-transformers. `python-dotenv` and Pydantic are direct source imports; pytest is needed for the optional test runner. They are shown explicitly above rather than assuming transitive installation.
 
 ---
 
 ## 9. Usage
+
+From the project root, the actual demonstration runner is:
+
+```bash
+python -m scripts.run_search
+```
+
+`app/run_search.py` only defines `ingest_books()`; `python -m app.run_search` does not ingest or display searches.
 
 ### Ingest books into ChromaDB
 
@@ -333,8 +341,8 @@ display_similarity_results(results)
 
 ## 10. How it works
 
-1. **Embedding function** — `SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")` converts text into 384-dimensional vectors using cosine distance. The embedding function is instantiated at module level in `app/vector_store.py`.
-2. **Collection creation** — `client.get_or_create_collection()` creates or retrieves the `books` collection with the embedding function.
+1. **Embedding function** — `SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")` converts text into 384-dimensional vectors. The embedding function is instantiated at module level in `app/vector_store.py`; it does not set the distance metric.
+2. **Collection creation** — `client.get_or_create_collection()` creates or retrieves the `books` collection with the embedding function. No metric is explicitly configured, so a newly created collection uses the installed Chroma version's default (normally squared L2); an existing stored collection retains its own configuration.
 3. **Ingestion** — Each book is converted into a semantic document (via `build_book_document()`) and structured metadata (via `build_metadatas()`), then upserted via `collection.upsert()`.
 4. **Search** — `collection.query()` accepts `query_texts`, `n_results`, and optional `where` filters, returning IDs, documents, metadatas, and distances. The `BookSearchService` converts these into `BookSearchResult` objects.
 5. **Filtering** — `collection.get()` with a `where` parameter retrieves documents matching metadata criteria (exact match, `$gte`, `$lte`, `$in`, `$and`, `$or`, etc.).
@@ -358,7 +366,7 @@ display_similarity_results(results)
 
 - **ChromaDB collections** — creating, ingesting, and querying a persistent vector store
 - **SentenceTransformer embeddings** — converting text to vectors with `SentenceTransformerEmbeddingFunction`
-- **Cosine distance** — the distance metric used; 0 = identical, 1 = opposite
+- **Collection distance configuration** — the metric is independent of the embedding model and is not explicitly selected by this source
 - **Document construction** — combining multiple fields into an effective searchable text string
 - **Metadata filtering** — using `where` clauses in `collection.get()` for structured filtering
 - **Combined search** — using `where` in `collection.query()` to filter semantic results
@@ -371,15 +379,15 @@ display_similarity_results(results)
 
 ## 13. Testing
 
-The project includes 5 tests under `tests/`. All tests pass, but they use a print-based pattern rather than assertion-based verification.
+The project includes **5 print-based exercise functions across 3 test files** under `tests/`. They display results rather than asserting behavior. No pass result or coverage percentage is claimed by this documentation update.
 
-| Test | Description | Status |
-|---|---|---|
-| `test_search_similar_books` | Searches for "magical fantasy adventure with friendship and courage" with n_results=3 | ✅ Passes |
-| `test_filter_books_by_genre` | Filters by `$in` genre: ["Fantasy", "Science Fiction"] | ✅ Passes |
-| `test_filter_books_by_rating` | Filters by `$gte` rating: 4.3 | ✅ Passes |
-| `test_combined_semantic_metadata_search_1` | Combined search with genre + author `$in` filter | ✅ Passes |
-| `test_combined_semantic_metadata_search_2` | Combined search with rating `$gte` 4.0 | ✅ Passes |
+| Exercise | Description |
+|---|---|
+| `test_search_similar_books` | Similarity query with n_results=3 |
+| `test_filter_books_by_genre` | Genre `$in` filtering |
+| `test_filter_books_by_rating` | Rating `$gte` filtering |
+| `test_combined_semantic_metadata_search_1` | Genre + author `$in` filter |
+| `test_combined_semantic_metadata_search_2` | Similarity + rating filter |
 
 Run tests with:
 
@@ -410,9 +418,9 @@ python -m pytest tests/ -v
 
 ## 15. Known issues
 
-1. **Tests do not assert behavior.** All 5 tests pass but they print results rather than verifying them with assertions.
+1. **Tests do not assert behavior.** All five exercise functions print results instead of verifying them with assertions; model downloads and the persistent database also affect execution.
 2. **`get_books()` likely has a bug.** The repository method returns a single dict (`result["ids"][0]`) instead of a list of all books.
 3. **`build_book_documents()` silently swallows `KeyError`.** It prints an error and continues, which could hide data issues.
 4. **`filter_books()` in `BookSearchService` returns raw dicts, not `BookSearchResult` objects.** The `search_similar_books()` method properly converts to `BookSearchResult`, but `filter_books()` does not.
-5. **`data/books.py` has `dotenv` dependency.** It calls `load_dotenv()` and checks `os.getenv("BOOKS_DATA", books)`, but no `.env` file exists and this is not part of the core application logic.
+5. **Dependency and configuration gaps.** `python-dotenv` and Pydantic are not explicitly listed in `requirements.txt`; `BOOKS_DATA` is read but not parsed, so it is not a usable structured-data override.
 6. **`utils.py` at project root is not part of the planned architecture.** It contains `print_books()` which is used by tests but is not in the planned module structure.

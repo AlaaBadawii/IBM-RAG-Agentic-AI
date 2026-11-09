@@ -1,6 +1,8 @@
 # NourishBot — A CrewAI Multi-Agent Nutrition Assistant
 
-**IBM RAG & Agentic AI Professional Certificate — Course Project**
+**Status: Implemented guided CrewAI lab; local reasoning-model configuration remains separate from tool credentials.**
+
+**Course 8 — IBM RAG and Agentic AI Professional Certificate.** [Course overview](../README.md) · [Certificate](../../README.md)
 
 > This project is part of my work in the **IBM RAG & Agentic AI Professional
 > Certificate**. It is an educational lab and portfolio piece, not a production
@@ -166,12 +168,12 @@ NourishBot/
 ### Install
 
 ```bash
-cd NourishBot
+cd Agentic_AI_with_LangGraph_CrewAI_AutoGen_and_BeeAI/NourishBot
 
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ### Configure credentials
@@ -189,9 +191,14 @@ WATSONX_PROJECT_ID=your_project_id
 ```
 
 `src/watsonx.py` loads `.env` from the project root. If `WATSONX_API_KEY` is
-empty, the client falls back to the original lab configuration
-(`project_id="skills-network"` and no explicit API key). For a personal IBM
-Cloud project, set all three values.
+empty, credentials are created without an explicit key for ambient lab auth.
+URL and project ID independently fall back to the Skills Network defaults.
+For the **tools** in a personal IBM Cloud project, set all three values.
+
+These variables do not configure the CrewAI agents' reasoning model: the agents
+have no explicit `llm` assignment. The full local workflow also needs the
+default-model configuration supplied by the lab or a separate model-wiring change.
+`WATSONX_MODEL_ID` is not read; vision/text tool IDs are fixed in `src/watsonx.py`.
 
 > Never commit `.env`. It is excluded by `.gitignore`.
 

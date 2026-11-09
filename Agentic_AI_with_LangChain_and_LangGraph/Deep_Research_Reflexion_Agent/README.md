@@ -11,6 +11,8 @@ conditional edge, Pydantic schemas for the model's structured output, and a
 fully offline test suite. The application lives in the importable
 `deep_research_agent` package under `src/`.
 
+**Status: Implemented guided-pattern research/refinement agent with offline tests.** [Course 7](../README.md) · [Certificate](../../README.md)
+
 > **Important — medical safety.** The system prompt casts the model as
 > "Dr. Paul 'Saladino MD'", a persona that advocates animal-based/carnivore
 > nutrition and challenges plant-centric dietary guidance. This one-sided
@@ -74,7 +76,7 @@ retrieval.
   on first use.
 - **Installable package** — a `src/` layout with a `pyproject.toml`; install
   with `pip install -e .`.
-- **Offline test suite** — 48 `pytest` tests covering schemas, configuration,
+- **Offline test suite** — 45 test functions across 8 modules (some parameterized), covering schemas, configuration,
   tool execution, chains, graph structure/routing, and a full mocked
   end-to-end run. No credentials or network required.
 
@@ -175,23 +177,23 @@ Deep_Research_Reflexion_Agent/
 
 ## Prerequisites
 
-- **Python 3.12** (developed and tested on 3.12.14).
+- **Python 3.12** (`pyproject.toml` requires `>=3.12,<3.13`).
 - An IBM Cloud account with a watsonx.ai project (for live runs only).
 - A Tavily account (for live runs only).
 - The default test suite needs **neither** credentials nor internet access.
 
 ## Installation
 
+From the repository root:
+
 ```bash
-git clone https://github.com/AlaaBadawii/IBM-RAG-Agentic-AI.git
-cd IBM-RAG-Agentic-AI/Agentic_AI_with_LangChain_and_LangGraph/Deep_Research_Reflexion_Agent
+cd Agentic_AI_with_LangChain_and_LangGraph/Deep_Research_Reflexion_Agent
 
 python3.12 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-pip install -r requirements.txt       # runtime dependencies
-pip install -r requirements-dev.txt   # ...plus test dependencies
-pip install -e .                      # install this package (editable)
+python -m pip install -r requirements-dev.txt   # runtime + test dependencies
+python -m pip install -e .                     # install this package (editable)
 ```
 
 `pip install -e .` installs the `deep_research_agent` package. Runtime
@@ -212,7 +214,6 @@ cp .env.example .env
 ```dotenv
 WATSONX_API_KEY=ADD_API_KEY_HERE
 WATSONX_PROJECT_ID=ADD_PROJECT_ID_HERE
-WATSONX_PROJECT_NAME=ADD_PROJECT_NAME_HERE
 WATSONX_URL=https://eu-de.ml.cloud.ibm.com
 WATSONX_MODEL_ID=ibm/granite-4-h-small
 TAVILY_API_KEY=ADD_TAVILY_API_KEY_HERE
@@ -224,13 +225,14 @@ TAVILY_API_KEY=ADD_TAVILY_API_KEY_HERE
 | `WATSONX_PROJECT_ID` | `deep_research_agent.llm` | Required. The watsonx.ai project ID. |
 | `WATSONX_URL` | `deep_research_agent.llm` | Required. Regional endpoint (e.g. `https://eu-de.ml.cloud.ibm.com`). |
 | `WATSONX_MODEL_ID` | `deep_research_agent.llm` | Required. Model that supports tool calling. |
-| `WATSONX_PROJECT_NAME` | *(informational)* | Present in the template for reference; not read by the code. |
 | `TAVILY_API_KEY` | `deep_research_agent.search` | Required for any run that executes research. |
 
 If a required watsonx variable is missing, `get_llm()` raises an `OSError` naming
 the missing variables and pointing at `.env.example`; importing
 `deep_research_agent.search` raises a similar `OSError` for a missing
 `TAVILY_API_KEY`.
+
+`WATSONX_PROJECT_NAME` appears in the template but is not read by this source.
 
 ## Getting watsonx.ai and Tavily credentials
 
@@ -254,7 +256,7 @@ the missing variables and pointing at `.env.example`; importing
 
 Activate the virtual environment, install the package (`pip install -e .`), and
 make sure `.env` is populated first. Run modules with `python -m` from the
-repository root:
+**project root** (`Agentic_AI_with_LangChain_and_LangGraph/Deep_Research_Reflexion_Agent`):
 
 ```bash
 # Full reflection workflow (live watsonx.ai + Tavily calls)
@@ -281,10 +283,13 @@ and the watsonx client booby-trapped) that importing the project does not touch
 the network. Pytest is configured in `pyproject.toml` with `testpaths = ["tests"]`.
 
 ```bash
-pip install -r requirements-dev.txt
-pip install -e .
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
 python -m pytest -q
 ```
+
+The source contains eight test modules and 45 test functions; parameterization
+adds cases. No new pass count or measured coverage percentage is claimed.
 
 Coverage areas:
 

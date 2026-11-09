@@ -4,6 +4,8 @@ A ChromaDB-based demonstration of semantic similarity search and metadata filter
 
 This project is part of **Course 3 — Vector Databases for RAG: An Introduction** (IBM RAG and Agentic AI Professional Certificate), providing hands-on experience with ChromaDB collections, embeddings, and retrieval.
 
+**Status: Implemented guided lab.** [Course 3](../README.md) · [Certificate](../../README.md)
+
 ---
 
 ## 1. What this project does
@@ -101,10 +103,10 @@ Similarity_Search_on_Employee_Records/
 **Requirements:** Python 3.10+, internet access for downloading the embedding model on first run.
 
 ```bash
-cd Similarity_Search_on_Employee_Records
+cd Vector_Databases_for_RAG_An_Introduction/Similarity_Search_on_Employee_Records
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install chromadb sentence-transformers torch
+python -m pip install chromadb sentence-transformers torch
 ```
 
 ---
@@ -134,9 +136,9 @@ The script will:
 
 ## 8. Key concepts practiced
 
-- **ChromaDB collections** — creating, ingesting, and querying a persistent vector store
+- **ChromaDB collections** — creating, ingesting, and querying an in-memory vector store
 - **SentenceTransformer embeddings** — converting text to vectors with `SentenceTransformerEmbeddingFunction`
-- **Cosine distance** — the distance metric used; 0 = identical, 1 = opposite
+- **Cosine distance** — explicitly selected in the collection configuration; 0 = identical direction, 1 = orthogonal, 2 = opposite
 - **Metadata filtering** — using `where` clauses in `collection.get()` for structured filtering
 - **Combined search** — using `where` in `collection.query()` to filter semantic results
 - **Document construction** — combining multiple fields into an effective searchable text string
@@ -163,3 +165,9 @@ The script will:
 - Add persistence by using `chromadb.PersistentClient` instead of `chromadb.Client()`
 - Implement update and delete operations on the collection
 - Add evaluation with test queries and relevance judgments
+
+## Implementation Notes
+
+- Run the setup block from the repository root. No dependency manifest, `.env.example`, or automated test suite is tracked here, and no API key is read.
+- The source uses Chroma's collection `configuration` API for cosine distance and the embedding function; an older Chroma release may not support that signature.
+- Six demonstration searches are source examples, not an evaluated retrieval benchmark.

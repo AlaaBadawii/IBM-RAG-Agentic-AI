@@ -8,6 +8,8 @@ Course project: **Agentic AI with LangChain and LangGraph** (IBM RAG and
 Agentic AI Professional Certificate). Rebuilt locally from the
 `LangGraph101-v1` lab notebook.
 
+**Status: Implemented toy state workflows; notebook counter exercise remains a stub.** [Course 7](../README.md) · [Certificate](../../README.md)
+
 ## Overview
 
 LangGraph models an agent as a **graph of nodes that read and write a shared
@@ -142,12 +144,12 @@ Prerequisites: Python 3.11+ and your own IBM watsonx.ai access (API key +
 project) for the QA workflow. The auth workflow needs no credentials.
 
 ```bash
-cd LangGraph_Stateful_AI_Workflows
+cd Agentic_AI_with_LangChain_and_LangGraph/LangGraph_Stateful_AI_Workflows
 
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env with your own values (QA workflow only)
@@ -163,8 +165,9 @@ Required variables for the QA workflow (see `.env.example`):
 - `WATSONX_MODEL_ID` — model ID, e.g.
   `meta-llama/llama-4-maverick-17b-128e-instruct-fp8`
 
-Never commit a filled-in `.env` — it is git-ignored. The notebook needs no
-`.env` by itself; only importing `llm.py` / running `QAState.py` does.
+The five variables are required by `llm.py` at import time. The auth workflow
+does not import that client and needs no IBM API configuration. Notebook cells
+that invoke watsonx still require the runtime authentication described in the lab.
 
 ## Configuration
 
@@ -261,6 +264,9 @@ the watsonx.ai cells need credentials configured as shown in the notebook's
 - Minor lab-code quirks preserved as-is: the `"Failuer"` node name in
   `graph.py`, and `QAState.py`'s validation node returning `valid`/`error`
   keys that are not part of the `QAState` schema.
+- QA validation has no conditional edge that stops invalid input; the emitted `valid`/`error` keys are not declared state channels. The no-context fallback avoids a model invocation, but the client has already been constructed on import.
+- The auth demo prints entered credentials to the console; it is a routing exercise, not a real authentication implementation.
+- No automated tests are tracked for these workflows.
 
 ## Learning-project disclaimer
 

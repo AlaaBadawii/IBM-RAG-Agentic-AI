@@ -1,8 +1,10 @@
 # BeeAI Framework Lab
 
-Hands-on examples for building **agentic AI systems** with the [BeeAI Framework](https://github.com/BeeAI-devs/BeeAI), an open-source framework from IBM for developing, observing, and evaluating AI agents.
+Hands-on examples for building **agentic AI systems** with the [BeeAI Framework](https://github.com/i-am-bee/beeai-framework), using its Python agents, tools, requirements, and middleware APIs.
 
-This repository is a laboratory of working patterns for LLM-powered agents: tool use, reasoning, orchestration, human-in-the-loop approval, structured output, prompt templates, and multi-agent coordination.
+**Status: Educational pattern implementations with experimental APIs and a broken standalone factory demo.** [Course 8](../README.md) · [Certificate](../../README.md)
+
+The lab explores tool use, reasoning, orchestration, human-in-the-loop approval, structured output, prompt templates, and multi-agent coordination. Source presence is not a claim that every script was executed successfully.
 
 ## Table of Contents
 
@@ -33,7 +35,7 @@ The lab contains independent, runnable Python scripts that each demonstrate a si
 ## Technologies
 
 - [Python](https://www.python.org/) 3.12+
-- [BeeAI Framework](https://github.com/BeeAI-devs/BeeAI) (`beeai-framework`) — agents, tools, memory, middleware, emitters
+- [BeeAI Framework](https://github.com/i-am-bee/beeai-framework) (`beeai-framework==0.1.35`) — agents, tools, memory, middleware, emitters
 - LLM providers via BeeAI:
   - IBM watsonx.ai (`watsonx:ibm/granite-4-h-small`)
   - Google Gemini (`gemini:gemini-3.5-flash-lite`)
@@ -67,31 +69,44 @@ BeeAI-Framework-Lab/
 
 ## Installation
 
+From the repository root:
+
 ```bash
-git clone <repository-url>
-cd BeeAI-Framework-Lab
+cd Agentic_AI_with_LangGraph_CrewAI_AutoGen_and_BeeAI/BeeAI-Framework-Lab
 
 python -m venv .venv
 source .venv/bin/activate      # Linux/macOS
 # .venv\Scripts\activate       # Windows
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in your credentials:
+Copy `.env.example` to `.env` and configure the provider used by the chosen script:
 
 | Variable | Purpose |
 |---|---|
-| `WATSONX_API_KEY` | IBM watsonx.ai API key |
-| `WATSONX_PROJECT_ID` | watsonx project ID |
-| `WATSONX_PROJECT_NAME` | watsonx project name |
-| `WATSONX_URL` | watsonx endpoint URL |
-| `WATSONX_MODEL_ID` | watsonx model id (e.g. `ibm/granite-4-h-small`) |
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `GEMINI_CHAT_MODEL` | Gemini chat model id |
+| `WATSONX_API_KEY` | Local watsonx key, consumed by BeeAI's watsonx adapter; ambient lab auth is also supported |
+| `WATSONX_PROJECT_ID` | Consumed by the watsonx adapter for project-scoped requests |
+| `WATSONX_URL` | Optional endpoint override consumed by the watsonx adapter |
+| `GEMINI_API_KEY` | Consumed by BeeAI's Gemini adapter for `minimal_agent.py` and `structure_output.py` |
+| `OPENROUTER_API_KEY` | Read directly by the independent `text.py` experiment; not listed in `.env.example` |
+
+Provider consumption was checked against the pinned framework's
+[watsonx adapter](https://github.com/i-am-bee/beeai-framework/blob/python_v0.1.35/python/beeai_framework/adapters/watsonx/backend/chat.py)
+and [Gemini adapter](https://github.com/i-am-bee/beeai-framework/blob/python_v0.1.35/python/beeai_framework/adapters/gemini/backend/chat.py).
+The adapters, rather than this repo's `llm.py`, read those provider credentials.
+
+Model IDs are hardcoded in `llm.py` and `multi_agent/llm.py`.
+`WATSONX_MODEL_ID`, `WATSONX_PROJECT_NAME`, and `GEMINI_CHAT_MODEL` in the template
+do not select models for these examples. BeeAI supports a Gemini default-model
+variable, but the explicit model identifier supplied here takes precedence.
+
+Scripts importing the factory load `.env` with `override=True`. `basic_chat.py`
+does not load `.env`, so its provider variables must already be in the process
+environment. `text.py` explicitly loads `.env` from the current directory.
 
 ## Running the Examples
 
@@ -99,7 +114,6 @@ All commands are run from the project root with the virtual environment activate
 
 ```bash
 python basic_chat.py
-python llm.py
 python minimal_agent.py
 python structure_output.py
 python dynamic_prompt_template.py
@@ -112,6 +126,12 @@ python test_wiki.py
 python test_wiki_agent.py
 python -m multi_agent.multi_agent_travel_planner
 ```
+
+`python llm.py` is not listed as a working demo: its `main()` passes
+`"gemini:gemini-3.5-flash-lite"` to a factory that only accepts `"watsonx"` or
+`"gemini"`, causing a `KeyError` before inference. The duplicate standalone
+`multi_agent/llm.py` demo has the same mismatch. Other scripts pass the short
+provider keys. No script execution is claimed by this documentation update.
 
 The multi-agent travel planner lives in the `multi_agent` package and must be run from the project root with module syntax:
 
@@ -126,7 +146,7 @@ python -m multi_agent.multi_agent_travel_planner
 - **Human-in-the-loop**: `human_in_the_loop.py` uses `AskPermissionRequirement` for approval-gated tool execution.
 - **Structured output**: `structure_output.py` uses `create_structure` with a Pydantic schema.
 - **Prompt templates**: `dynamic_prompt_template.py` renders reusable templates.
-- **Custom tools**: `simple_calculator_tool.py` implements a tool with input schema and safe evaluation.
+- **Custom tools**: `simple_calculator_tool.py` implements an input schema and character-allowlisted arithmetic using `eval` with empty builtins; this is different from the ReAct project's bounded AST evaluator.
 - **Multi-agent system** (`multi_agent/`): coordinator agent with handoff tools (`HandoffTool`) to destination, weather, and language experts, plus conditional requirements and ask-permission approval.
 
 ## Current Status & Known Limitations
@@ -134,9 +154,11 @@ python -m multi_agent.multi_agent_travel_planner
 - Requires Python 3.12 and valid provider credentials (see [Configuration](#configuration)).
 - Examples that call LLMs require working watsonx/Gemini credentials and incur usage costs.
 - The multi-agent travel planner pauses for human approval before delegated tool use.
-- No automated test suite is included; verification is currently done by running the examples.
+- No offline automated test suite is included; the `test_wiki*.py` files are live example scripts, not evidence of a passed pytest suite.
 - `text.py` is an experimental script that calls OpenRouter and is not integrated into the core lab configuration.
+- The calculator's allowed characters also permit `**` and very long expressions; it has no explicit exponent/complexity bound.
+- Credential presence does not prove that hardcoded model IDs are available to the account/provider.
 
 ## License
 
-This project does not currently declare a license. A license will be added upon your approval.
+No license file is tracked in this lab.

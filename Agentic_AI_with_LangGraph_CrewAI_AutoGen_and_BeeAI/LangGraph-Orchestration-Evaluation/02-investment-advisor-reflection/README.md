@@ -4,7 +4,9 @@ Implementation of the *Reflection Pattern* section (cells 62–105) of
 `../Agentic Design Patterns in LangGraph-v1.ipynb`: an investment advisory system
 that generates a portfolio plan, evaluates it against a target risk grade, and
 iteratively refines it through feedback (see
-[Current Status / Remaining Work](#current-status--remaining-work) for caveats)..
+[Current Status / Remaining Work](#current-status--remaining-work) for caveats).
+
+**Status: Implemented guided evaluator-optimizer workflow with termination caveats.** [Lab overview](../README.md) · [Course 8](../../README.md) · [Certificate](../../../README.md)
 
 Model provider: **IBM watsonx.ai** (`ChatWatsonx` from the shared root
 `../llm.py`, configured via the `WATSONX_*` environment variables). The notebook
@@ -48,8 +50,9 @@ itself uses OpenAI; this deviation is intentional and preserved everywhere in th
 - **`prompt.py`** — `grade_prompt`, `cathie_wood_prompt`, `ray_dalio_prompt`,
   `evaluator_prompt` (texts taken verbatim from the notebook).
 
-All standalone tests require valid watsonx.ai credentials; without them `llm.py`
-raises a clear `OSError` on import.
+Live standalone examples require valid watsonx.ai credentials. Their imported
+`pipe.py` calls the otherwise-lazy `get_llm()` factory during import, which
+validates configuration and raises `OSError` for missing values.
 
 ## Current Status / Remaining Work
 
@@ -60,7 +63,7 @@ in source:
 
 - `pipe.py` — `buffett_evaluator_pipe = evaluator_prompt | llm.with_structured_output(Feedback)`
 - `evaluate_plan.py` — evaluator node returning `grade`, `feedback`, and incrementing `n`
-- `route_investment.py` — grade-match routing with an iteration limit (5) and graceful stop
+- `route_investment.py` — grade-match routing or termination when `n > 5`; both use the `Accepted` branch
 - `graph.py` — `optimizer_workflow`:
   `START → determine_target_grade → investment_plan_generator → evaluate_plan`,
   conditional edge `Accepted → END` / `Rejected + Feedback → investment_plan_generator`
@@ -72,6 +75,7 @@ Remaining work / caveats:
   grade and the loop will run to the iteration limit before stopping gracefully.
 - The workflow has not been re-verified with a live model call during this fix;
   a live `agent.py` run requires valid watsonx.ai credentials.
+- Starting from a zero/default counter, the strict `n > 5` check allows six evaluations. A limit stop is labeled `Accepted` even if the evaluated grade differs from the target; termination is not proof of successful optimization.
 - `schemas.py` keeps a non-notebook placeholder value (`"MISSING"`) inside the
   `grades` Literal to accommodate the `"MISSING"` defaults used by routing.
 
@@ -93,29 +97,33 @@ Remaining work / caveats:
 ## Execution
 
 From this lab's root directory (`LangGraph-Orchestration-Evaluation/`), with
-`.env` configured, using the shared interpreter
-`/home/alaabadawii/LLMs/IBM/Agentic_AI_with_LangChain_and_LangGraph/DocChat_Multi_Agent_RAG/venv/bin/python`:
+`.env` configured and the project-local environment activated (see [lab setup](../README.md#python-environment)):
 
 ```bash
-/home/alaabadawii/LLMs/IBM/Agentic_AI_with_LangChain_and_LangGraph/DocChat_Multi_Agent_RAG/venv/bin/python 02-investment-advisor-reflection/agent.py
+python 02-investment-advisor-reflection/agent.py
 ```
 
 `agent.py` is the end-to-end runner (live watsonx.ai calls; fails without valid
 credentials). Standalone component tests that also make live calls:
 
 ```bash
-/home/alaabadawii/LLMs/IBM/Agentic_AI_with_LangChain_and_LangGraph/DocChat_Multi_Agent_RAG/venv/bin/python 02-investment-advisor-reflection/determine_target_grade.py
-/home/alaabadawii/LLMs/IBM/Agentic_AI_with_LangChain_and_LangGraph/DocChat_Multi_Agent_RAG/venv/bin/python 02-investment-advisor-reflection/investment_plan_generator.py
+python 02-investment-advisor-reflection/determine_target_grade.py
+python 02-investment-advisor-reflection/investment_plan_generator.py
 ```
 
 Offline validation uses the root test suite instead — run from the lab root:
 
 ```bash
-/home/alaabadawii/LLMs/IBM/Agentic_AI_with_LangChain_and_LangGraph/DocChat_Multi_Agent_RAG/venv/bin/python -m pytest
+python -m pytest
 ```
 
 Regenerate the graph image (writes `graph.png` in this directory):
 
 ```bash
-/home/alaabadawii/LLMs/IBM/Agentic_AI_with_LangChain_and_LangGraph/DocChat_Multi_Agent_RAG/venv/bin/python 02-investment-advisor-reflection/graph.py
+python 02-investment-advisor-reflection/graph.py
 ```
+
+The shared offline suite contains five test modules with 44 functions/methods
+across both sections. No new live-model run, test-pass count, or measured coverage
+is claimed here. This is a workflow-pattern example, not a validated investment
+recommendation system.

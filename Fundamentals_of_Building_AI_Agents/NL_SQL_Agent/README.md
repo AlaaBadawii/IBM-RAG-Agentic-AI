@@ -1,5 +1,7 @@
 # NL_SQL_Agent (Natural Language SQL Agent)
 
+**Status: Implemented guided database-agent lab.** [Course 6](../README.md) · [Certificate](../../README.md)
+
 ## Project Overview
 
 This is a small learning project from my IBM AI Agents learning journey. Its purpose was to get hands-on practice building a natural-language SQL agent that answers questions about a MySQL database.
@@ -33,10 +35,16 @@ The user passes a question with `--prompt`. The SQL agent in `sql_agent.py` send
 - `sql_agent.py` — Imports `llm`, validates the MySQL variables, builds the connection URL, connects to the database, creates the SQL agent, and runs the `--prompt` question.
 - `.env` — Holds Watsonx and MySQL configuration. It is not committed as shared code and its values are never printed.
 - `.env.example` — Safe template listing the required variable names with placeholder values. Copy it to `.env` and fill in your own values.
-- `requirements.txt` — Pinned direct dependencies matching the verified local environment.
+- `requirements.txt` — Pinned direct dependencies retained with the project.
 - `chinook-mysql.sql` — SQL dump that creates and populates the Chinook sample database used for questions.
 
 ## Setup and Configuration
+
+Start in `Fundamentals_of_Building_AI_Agents/NL_SQL_Agent` relative to the repository root:
+
+```bash
+cd Fundamentals_of_Building_AI_Agents/NL_SQL_Agent
+```
 
 1. Create and activate a virtual environment:
 
@@ -48,10 +56,14 @@ The user passes a question with `--prompt`. The SQL agent in `sql_agent.py` send
 2. Install the dependencies from the pinned requirements file:
 
    ```bash
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
    ```
 
 3. Copy `.env.example` to `.env` and fill in your own values for:
+
+   ```bash
+   cp .env.example .env
+   ```
 
    ```text
    WATSONX_API_KEY
@@ -75,7 +87,7 @@ Ask a natural-language question with `--prompt`:
 python sql_agent.py --prompt "How many albums are there in the database?"
 ```
 
-The script prints the available tables, runs the agent with verbose output, and prints the final answer. A verified run of the example above returned `347` albums from the `Album` table.
+The script prints the available tables, runs the agent with verbose output, and prints the final answer. The earlier project notes recorded `347` albums for the Chinook sample; that historical run was not repeated during this documentation update.
 
 ## Lessons Learned
 
@@ -88,3 +100,5 @@ The script prints the available tables, runs the agent with verbose output, and 
 ## Limitations and Future Improvements
 
 Implemented behavior is limited to single `--prompt` questions against the configured database with basic missing-variable checks. Not implemented, but relevant next steps would be automated tests, stronger error handling around database and model failures, and SQL safety controls such as read-only permissions and query limits.
+
+Both the watsonx client and MySQL connection are initialized before prompt execution. Help/CLI parsing therefore does not isolate configuration or database connectivity. No automated test suite is tracked.

@@ -1,8 +1,10 @@
-# AutoGen Lab
+# AG2 Lab — AutoGen-Style Conversational Agents
 
-Hands-on examples for building **agentic AI systems** with [Microsoft AutoGen](https://github.com/microsoft/autogen) (AutoGen 2 / `autogen-agentchat`), an open-source framework for orchestrating multi-agent conversations.
+Hands-on examples for building **agentic AI systems** with [AG2](https://github.com/ag2ai/ag2), the maintained AutoGen lineage that exposes the `autogen` import API (`ConversableAgent`, `GroupChat`, `GroupChatManager`, and code executors).
 
-This lab is part of the **IBM RAG & Agentic AI** engineering portfolio — the AutoGen companion to the LangGraph, CrewAI, and BeeAI labs from Course 8 of the IBM RAG and Agentic AI Professional Certificate.
+**Status: Implemented educational scripts; provider/API compatibility is not validated by this documentation update.** [Course 8](../README.md) · [Certificate](../../README.md)
+
+This is the AG2 companion to the LangGraph, CrewAI, and BeeAI labs in **Course 8 — Agentic AI with LangGraph, CrewAI, AutoGen and BeeAI**. The official course title uses AutoGen; these scripts use the AG2/`autogen` conversational API, not Microsoft's `autogen_agentchat`/`autogen_core` API.
 
 The lab contains independent, runnable Python scripts that each demonstrate a single, focused agent capability with AutoGen: coding assistants with local code execution, tool calling, structured output, human-in-the-loop approval, conversational tutoring, specialized-agent teams, and multi-agent group chat.
 
@@ -21,7 +23,7 @@ The lab contains independent, runnable Python scripts that each demonstrate a si
 
 ## Overview
 
-The lab contains independent, runnable Python scripts that each demonstrate a single, focused agent capability with AutoGen. The most advanced examples are multi-agent systems built with `GroupChat` and `GroupChatManager`:
+The source contains independent agent examples. The coding assistant is an agent pair; the healthcare example uses `GroupChat` and `GroupChatManager`:
 
 - **Coding assistant** (`built_in_agents.py`) — an assistant agent with a Python coding expert system message pairs with a user proxy agent that writes and executes code locally (matplotlib sine wave) via `LocalCommandLineCodeExecutor`.
 - **Healthcare consultation** (`AutoMed_Healthcare_bot/automed.py`) — a patient → diagnosis → pharmacy → consultation group chat for symptom triage.
@@ -39,10 +41,15 @@ Supporting single-agent examples cover tool use, structured output, human-in-the
 ## Technologies
 
 - [Python](https://www.python.org/) 3.12+
-- [Microsoft AutoGen](https://github.com/microsoft/autogen) (`autogen`, `autogen-agentchat`, `autogen-core`, `pyautogen`) — agents, group chat, tool registration, code execution
+- AG2's `autogen` import API — agents, group chat, tool registration, code execution
 - LLM provider: IBM watsonx.ai via the shared AutoGen LLM configuration (`llm_config`)
 - Tools demonstrated: `LocalCommandLineCodeExecutor` (matplotlib sine wave), `register_function` (primality check)
 - `python-dotenv` for environment configuration, `pydantic` for structured output
+
+The committed manifest pins `autogen==0.14.1` and `pyautogen==0.10.0`. It also
+lists `autogen-agentchat==0.7.5` and `autogen-core==0.7.5`; none of these scripts
+imports `autogen_agentchat` or `autogen_core`. The mixed manifest is retained,
+but these are distinct package/API names, not interchangeable framework versions.
 
 ## Repository Structure
 
@@ -68,15 +75,16 @@ AG2-Lab/
 
 ## Installation
 
+From the repository root:
+
 ```bash
-git clone <repository-url>
-cd AG2-Lab
+cd Agentic_AI_with_LangGraph_CrewAI_AutoGen_and_BeeAI/AG2-Lab
 
 python -m venv .venv
 source .venv/bin/activate      # Linux/macOS
 # .venv\Scripts\activate       # Windows
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
@@ -88,9 +96,14 @@ Copy `.env.example` to `.env` and fill in your credentials:
 |---|---|
 | `WATSONX_API_KEY` | IBM watsonx.ai API key |
 | `WATSONX_PROJECT_ID` | watsonx project ID |
-| `WATSONX_PROJECT_NAME` | watsonx project name |
 | `WATSONX_URL` | watsonx endpoint URL |
 | `WATSONX_MODEL_ID` | watsonx model id (e.g. `ibm/granite-4-h-small`) |
+
+These four variables are read directly by `llm_config.py` at import time.
+`WATSONX_PROJECT_NAME` is in the example file but is not consumed. The config
+uses `WATSONX_URL + "/ml/v1"` as an OpenAI-compatible base URL and sends
+`project_id` through `extra_body`; compatibility of that path and credential
+format with the selected watsonx endpoint is not established by a static review.
 
 ## Running the Examples
 
@@ -129,9 +142,9 @@ Notes:
 - Requires Python 3.12 and valid IBM watsonx.ai credentials (see [Configuration](#configuration)).
 - Examples that call LLMs require working credentials and incur usage costs.
 - The coding-assistant example executes generated code locally with a 30s timeout in `coding/`.
-- The healthcare consultation group chat ends when the consultation agent signals completion via the `CONSULTATION_COMPLETE` marker.
-- No automated test suite is included; verification is currently done by running the examples.
+- The healthcare group chat uses round-robin selection and `max_round=5`. `CONSULTATION_COMPLETE` is requested in a prompt, but no explicit termination predicate consumes that marker.
+- No automated test suite or recorded result from this documentation update is included. Some scripts construct agents and start chats at import time.
 
 ## License
 
-This project does not currently declare a license. A license will be added upon your approval.
+No license file is tracked in this lab.

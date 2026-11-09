@@ -9,6 +9,8 @@ retrieval, agent orchestration, and answer verification fit together in a
 practical RAG application. It is intended for learning and experimentation, not
 as a production service.
 
+**Status: Implemented experimental multi-agent RAG app with offline workflow tests.** [Course 7](../README.md) · [Certificate](../../README.md)
+
 ## Learning outcomes
 
 Building the project provided hands-on practice with:
@@ -149,20 +151,21 @@ pure-PyTorch path if an optional custom CUDA kernel is unavailable.
 
 ## Setup
 
+From the repository root:
+
 ```bash
-git clone <your-repository-url>
-cd DocChat_Multi_Agent_RAG
+cd Agentic_AI_with_LangChain_and_LangGraph/DocChat_Multi_Agent_RAG
 
 python3.12 -m venv .venv
 source .venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 For tests, install the development requirements:
 
 ```bash
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 ```
 
 ### Configuration
@@ -188,14 +191,12 @@ Optional application variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `WATSONX_PROJECT_NAME` | unset | Declared in settings but not used by the application |
 | `CHROMA_DB_PATH` | `./chroma_db` | Chroma persistence directory |
 | `CHROMA_COLLECTION_NAME` | `documents` | Chroma collection name |
 | `VECTOR_SEARCH_K` | `10` | Number of dense-retrieval results |
 | `HYBRID_RETRIEVER_WEIGHTS` | `[0.4, 0.6]` | BM25 and vector weights |
 | `LOG_LEVEL` | `INFO` | Minimum level for the `app.log` file handler |
 | `CACHE_DIR` | `document_cache` | Converted-document cache |
-| `CACHE_EXPIRE_DAYS` | `7` | Declared in settings; the processor currently uses a fixed 24-hour cache TTL |
 | `DOCLING_DO_OCR` | `false` | Enable OCR for scanned PDFs |
 | `DOCLING_DO_TABLE_STRUCTURE` | `false` | Enable table-structure extraction |
 | `DOCLING_DOCUMENT_TIMEOUT` | `300.0` | Per-document Docling timeout in seconds |
@@ -203,6 +204,9 @@ Optional application variables:
 The model and embedding identifiers are configured in code:
 `ibm/slate-125m-english-rtrvr-v2` is used for embeddings, while the chat model
 comes from `WATSONX_MODEL_ID`.
+
+`WATSONX_PROJECT_NAME` and `CACHE_EXPIRE_DAYS` are declared in settings but do not
+affect inference or cache expiry; they are not advertised as effective settings.
 
 ## Run the application
 
@@ -219,12 +223,6 @@ answer and verification report are shown in separate panels.
 ## Run the tests
 
 ```bash
-pytest
-```
-
-or:
-
-```bash
 python -m pytest
 ```
 
@@ -232,6 +230,10 @@ The suite is designed to run offline: Docling is mocked for PDF-style
 conversions, and the watsonx agents are replaced with fakes. One integration
 check performs a small real Markdown conversion. The tests do not make live
 watsonx API calls.
+
+Six test modules contain 108 test functions/methods (excluding `conftest.py`).
+These cover behavior with fakes, not measured retrieval quality or a newly
+executed pass/coverage result.
 
 ## Project structure
 
@@ -288,6 +290,7 @@ pytest.ini                     Test discovery configuration
   settings are not part of the cache key.
 - **The cache TTL is fixed.** `CACHE_EXPIRE_DAYS` is declared but not used;
   `DocumentProcessor.CACHE_TTL` is fixed at 24 hours.
+- **Embedding input is heavily truncated.** `RetrieverBuilder` sets `TRUNCATE_INPUT_TOKENS` to `3`, limiting how much chunk content reaches the embedding model. Meaningful dense-retrieval quality needs a separate configuration/code review.
 - **No authentication or multi-user isolation.** The app is a local learning
   tool and should not be exposed as a public service.
 - **The dependency set is large.** The pinned requirements include CUDA-related

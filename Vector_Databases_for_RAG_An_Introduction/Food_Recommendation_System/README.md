@@ -2,13 +2,15 @@
 
 A hands-on learning project exploring the progression from traditional semantic similarity search to filtered retrieval and RAG-based conversational food recommendations using **ChromaDB** and **SentenceTransformers** (`all-MiniLM-L6-v2`).
 
+**Status: Experimental lab implementation; execution blockers remain.** [Course 3](../README.md) · [Certificate](../../README.md)
+
 This project is part of the IBM RAG and Agentic AI learning path. It demonstrates three approaches to food recommendation — from simple vector search to a full retrieval-augmented generation (RAG) pipeline.
 
 ---
 
 ## Project Overview
 
-The project contains three food search systems of increasing sophistication:
+The source contains three approaches of increasing sophistication. Their presence does not imply that every entry point currently completes successfully; see [Known Implementation Limitations](#known-implementation-limitations).
 
 | System | Approach | Description |
 |---|---|---|
@@ -48,7 +50,7 @@ The project contains three food search systems of increasing sophistication:
 
 ## Features
 
-### Implemented
+### Present in Source
 
 - **Semantic similarity search** — find food by meaning using `all-MiniLM-L6-v2` embeddings (384 dimensions)
 - **Metadata filtering** — filter results by cuisine type and calorie count using ChromaDB `where` clauses
@@ -57,7 +59,7 @@ The project contains three food search systems of increasing sophistication:
 - **Calorie budget checker** — interactive tool to find foods within a calorie budget
 - **Result limiter** — tool to test how different result limits affect search quality
 - **RAG pipeline** — retrieve relevant food items and generate conversational recommendations
-- **System comparison** — side-by-side benchmark of all three approaches
+- **System comparison** — a demonstration of three response styles; its "RAG" response is formatted in Python and does not call an LLM
 
 ---
 
@@ -67,17 +69,16 @@ Only libraries actually imported in the source code:
 
 - **Python 3.10+**
 - **chromadb** — vector database for all three systems
-- **sentence-transformers** (`all-MiniLM-L6-v2`) — 384-dimensional embeddings with cosine distance
-- **numpy** — numerical operations
+- **sentence-transformers** (`all-MiniLM-L6-v2`) — 384-dimensional embeddings; the collection metric is not explicitly configured
 
 Optional (for RAG chatbot):
-- **ibm-watsonx** — IBM Granite LLM integration
+- **ibm-watsonx-ai** — `ModelInference` integration with `ibm/granite-4-h-small`
 
 ---
 
 ## Dataset
 
-The project uses `data/FoodDataSet.json`, containing **5081 food items** across multiple cuisines. Each record includes:
+The committed [`data/FoodDataSet.json`](data/FoodDataSet.json) contains **185 food records** across multiple cuisines. This is the count of the tracked JSON array, not the size of a separate upstream dataset. Each record includes:
 
 | Field | Description |
 |---|---|
@@ -145,112 +146,73 @@ Generate conversational recommendation
 **Requirements:** Python 3.10+, internet access for downloading the embedding model on first run.
 
 ```bash
-cd Food_Recommendation_System
+cd Vector_Databases_for_RAG_An_Introduction/Food_Recommendation_System
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install chromadb sentence-transformers torch numpy
+python -m pip install chromadb sentence-transformers torch
 ```
 
-> **Note:** The `ibm_watsonx_ai` package is required for the RAG chatbot. Install with `pip install ibm-watsonx` if needed.
+> No dependency manifest is tracked. The RAG source additionally imports `ibm_watsonx_ai`, provided by `ibm-watsonx-ai`. Its fixed Skills Network authentication and the source blockers below prevent this from being a portable local RAG setup.
 
 ## Environment Variables
 
-Create a `.env` file in the project root:
-
-```env
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_MODEL=deepseek/deepseek-v4-flash
-```
-
-> **Never commit your `.env` file.** It is ignored by `.gitignore`.
+The tracked Python source reads **no environment variables** and does not load
+`.env`. `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` do not configure this project.
+`enhanced_rag_chatbot.py` fixes the watsonx URL, `project_id="skills-network"`, and
+model ID in code, without a normal local API-key configuration path.
 
 ---
 
 ## Running the Project
 
+The entries below identify real source entry points and the working directory
+needed for their existing dataset-path assumptions. They are **not successful
+execution results**; several require the code corrections listed below.
+
+| Entry point | Working directory (within this project) | Invocation | Role |
+|---|---|---|---|
+| `app/interactive_search.py` | Project root | `python app/interactive_search.py` | Semantic CLI with history |
+| `app/system_comparison.py` | Project root | `python app/system_comparison.py` | Response-style/timing demonstration, no live LLM |
+| `app/calorie_checker.py` | `data` | `python ../app/calorie_checker.py` | Calorie-budget exercise |
+| `app/result_limiter.py` | `data` | `python ../app/result_limiter.py` | Result-limit exercise |
+| `app/advanced_search.py` | `data` | `python ../app/advanced_search.py` | Filtering menu; missing helper and metadata mismatch |
+| `app/enhanced_rag_chatbot.py` | `data` | `python ../app/enhanced_rag_chatbot.py` | watsonx RAG experiment; unresolved annotation/configuration |
+
 ### System Comparison (all three systems)
 
-```bash
-cd app
-python system_comparison.py
-```
-
-Tests all three systems with the query "chocolate dessert" and reports response times.
+The comparison script queries three collections with "chocolate dessert" and reports timings. Its third response is assembled from retrieved fields in Python, so those timings are not LLM/RAG latency measurements.
 
 ### Calorie Checker
-
-```bash
-cd app
-python calorie_checker.py
-```
 
 Interactive tool that asks for a calorie budget, then searches for foods within that budget using metadata filtering. Shows which foods fit and which are over budget.
 
 ### Result Limiter
 
-```bash
-cd app
-python result_limiter.py
-```
-
 Tool to test how different result limits affect search quality. Compares results for limits of 1, 3, 5, and 10, and allows interactive testing with custom queries.
 
 ### Interactive Search Chatbot
-
-```bash
-cd app
-python interactive_search.py
-```
 
 Provides a command-line chatbot interface. Type food queries and get instant results. Type `history` to view the last 10 searches. Type `quit` to exit.
 
 ### Advanced Search Interface
 
-```bash
-cd app
-python advanced_search.py
-```
-
 Interactive menu with basic search, cuisine filtering, calorie filtering, and combined filters.
 
 ### RAG Chatbot
 
-```bash
-cd app
-python enhanced_rag_chatbot.py
-```
-
-Conversational chatbot with LLM integration. Requires LLM configuration in `.env`.
+Conversational RAG source with watsonx integration. It is not configured by `.env` and currently has the blockers below.
 
 ---
 
-## Example Results
+## Known Implementation Limitations
 
-Running `system_comparison.py` with the query "chocolate dessert" produces:
-
-```text
-🔬 FOOD SEARCH SYSTEMS COMPARISON
-==================================================
-Successfully loaded 5081 food items from data/FoodDataSet.json
-
-1️⃣ INTERACTIVE SEARCH APPROACH:
-   1. Chocolate Lava Cake (61.9% match)
-   2. Chocolate Cake (56.0% match)
-   3. Chocolate Lava Cake (55.5% match)
-⏱️ Response time: 0.035 seconds
-
-2️⃣ ADVANCED SEARCH APPROACH:
-   📋 Basic results: Chocolate Lava Cake, Chocolate Cake...
-   🌶️ Filtered for Indian cuisine: Paneer Butter Masala, Chicken Dum Biryani
-⏱️ Response time: 0.054 seconds
-
-3️⃣ RAG CHATBOT APPROACH:
-   🤖 Bot: Perfect! I found some excellent chocolate dessert options...
-⏱️ Response time: 0.032 seconds
-```
-
-> **Note:** Results may vary depending on system load, embedding model cache status, and ChromaDB version. These are local run results, not formal benchmarks.
+- **Dataset paths differ.** Interactive search and comparison use `data/FoodDataSet.json`; the other scripts use `FoodDataSet.json`. Running everything from `app/` does not resolve the committed dataset.
+- **Metadata contracts differ.** `shared_functions.py` stores `name`, `description`, and `calories`; the advanced population helper retains original dataset keys. Shared result formatting expects the former names. Nested dictionaries in advanced metadata also need normalization for Chroma's supported value types.
+- **Calorie-filter mismatch.** The shared filter helper queries `food_calories_per_serving`, while shared ingestion stores `calories`; calorie filtering is therefore not reliable as written.
+- **Missing helper.** `advanced_search.py` calls `perform_filtered_similarity_search`, but no tracked definition exists; the shared function is named `perform_similarity_search_with_metadata`.
+- **RAG import-time blocker.** `enhanced_rag_chatbot.py` annotates `conversation_history` with `List[str]` without importing `List`, and initializes a Skills Network model at import time.
+- **Similarity scores are heuristic.** `1 - distance` is presented as a percentage even though cosine distance is not configured. It is not a calibrated relevance probability.
+- No automated test suite or validated benchmark is committed. The comparison's response formatting is not proof of hosted-LLM generation.
 
 ---
 
@@ -258,14 +220,12 @@ Successfully loaded 5081 food items from data/FoodDataSet.json
 
 ```text
 Food_Recommendation_System/
-├── .env                     # LLM configuration (never committed)
 ├── .gitignore               # Git ignore rules
 ├── PLAN.md                  # Learning lab plan
 ├── README.md                # This file
 ├── data/
-│   └── FoodDataSet.json     # Food dataset (5081 items)
+│   └── FoodDataSet.json     # Committed food dataset (185 records)
 └── app/
-    ├── __pycache__/         # Python bytecode (not committed)
     ├── shared_functions.py  # Core functions: data loading, collection creation, search
     ├── interactive_search.py     # Interactive CLI chatbot with search history
     ├── advanced_search.py        # Advanced search with filtering
@@ -280,6 +240,10 @@ Food_Recommendation_System/
 ## Learning Roadmap
 
 See **[PLAN.md](PLAN.md)** for a detailed step-by-step learning lab that covers:
+
+The retained plan is a lab roadmap with historical examples, not an authoritative
+record of the current dataset size, measured timings, or completed functionality.
+Use the tracked JSON and source limitations above for the current implementation.
 
 1. Preparing the Dataset
 2. Understanding Embeddings
@@ -301,7 +265,7 @@ The following features are **planned but not yet implemented**:
 
 - Hybrid search (keyword + semantic)
 - More advanced filtering (taste profile, ingredients, cooking method)
-- Full dataset validation (all 5081 items)
+- Full dataset validation and consistent ingestion/filter/result contracts for the 185 committed records
 - Personalization and user preference learning
 - Conversation memory for multi-turn dialogue
 - Query caching and pre-computed embeddings
@@ -320,11 +284,15 @@ See **[PLAN.md](PLAN.md)** for detailed descriptions.
 
 ## ChromaDB `where` Filter Operators
 
+These reference examples use the **shared ingestion schema** (`calories`). The
+current calorie helper still queries the inconsistent original field name, as
+documented above; the examples do not imply that helper is fixed.
+
 | Operator | Example | Description |
 |---|---|---|
 | Exact match | `{"cuisine_type": "Indian"}` | Equal to value |
-| Greater than or equal | `{"food_calories_per_serving": {"$gte": 400}}` | Greater than or equal |
-| Less than or equal | `{"food_calories_per_serving": {"$lte": 500}}` | Less than or equal |
+| Greater than or equal | `{"calories": {"$gte": 400}}` | Greater than or equal |
+| Less than or equal | `{"calories": {"$lte": 500}}` | Less than or equal |
 | In list | `{"cuisine_type": {"$in": ["Italian", "French"]}}` | Value in list |
 | And | `{"$and": [cond1, cond2]}` | All conditions must match |
 

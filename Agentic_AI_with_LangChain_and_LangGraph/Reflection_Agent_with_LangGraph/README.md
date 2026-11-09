@@ -8,6 +8,8 @@ Course project: **Agentic AI with LangChain and LangGraph** (IBM RAG and
 Agentic AI Professional Certificate). Built locally from the reflection-agent
 lab pattern (generation chain + reflection chain wired into a message graph).
 
+**Status: Implemented guided reflection-pattern demo.** [Course 7](../README.md) · [Certificate](../../README.md)
+
 ## Overview
 
 Instead of generating once, the agent alternates between two roles that share
@@ -103,8 +105,7 @@ Reflection_Agent_with_LangGraph/
   `MessagesPlaceholder`, `AIMessage`/`HumanMessage`.
 - **LangChain IBM integration** (`langchain-ibm==0.3.10`) — `ChatWatsonx`
   chat model.
-- **IBM watsonx.ai** — hosted LLM inference (this project uses
-  `ibm/granite-4-h-small`; any model your project can access works).
+- **IBM watsonx.ai** — hosted LLM inference selected by `WATSONX_MODEL_ID`; the template uses `ibm/granite-4-h-small`, and the selected model must support the chat interface.
 - **ibm-watsonx-ai** (`==1.8.0`) — underlying SDK (transitive dependency).
 - **python-dotenv** (`==1.2.4`) — loads `.env` for local runs.
 
@@ -116,12 +117,12 @@ whole agent is the two-node loop above.
 Prerequisites: Python 3.11+ and IBM watsonx.ai access (API key + project).
 
 ```bash
-cd Reflection_Agent_with_LangGraph
+cd Agentic_AI_with_LangChain_and_LangGraph/Reflection_Agent_with_LangGraph
 
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env with your own values
@@ -189,7 +190,7 @@ inputs = HumanMessage(
 
 ## Key concepts and takeaways
 
-- **Reflection beats single-shot generation.** A cheap critique pass
+- **Reflection adds explicit feedback.** A critique pass
   (structure, tone, engagement, CTA) gives the generator concrete revision
   targets instead of hoping the first draft is good.
 - **Message types are control flow.** Returning critique as `HumanMessage`
@@ -220,6 +221,7 @@ inputs = HumanMessage(
   (`draw_mermaid_png`); it fails offline.
 - Minor lab-code quirk preserved: the `# Complining the workflow` comment
   typo in `graph.py`.
+- No automated test suite or quality benchmark is tracked. Four drafts and three critiques describe the demo's control flow, not proven improvement or factual verification.
 
 ## Learning-project disclaimer
 

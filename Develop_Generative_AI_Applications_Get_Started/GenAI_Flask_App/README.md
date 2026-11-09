@@ -1,8 +1,13 @@
 # GenAI Playground — Flask + LangChain + OpenRouter
 
-A small web app that lets you send a message to one of three LLMs (Llama, Granite,
-or Mistral) and get back a **structured JSON response** — not just plain text, but
-a summary, a sentiment score, and a suggested reply, all validated against a schema.
+A small web app that lets you send a message to one of three configured LLMs
+(Llama, DeepSeek R1, or Mistral) and get back a **schema-guided JSON response**:
+a summary, a sentiment score, and a suggested reply.
+
+**Status: Implemented guided-project rebuild.** [Course 1](../README.md) · [Certificate](../../README.md)
+
+The UI and function names retain a `granite` slot, but `GRANITE_MODEL_ID` in
+[`config.py`](config.py) is `deepseek/deepseek-r1`. This slot does not call IBM Granite.
 
 This is a rebuild of the IBM "Develop Generative AI Applications: Get Started"
 guided project, with one change: it calls models through **OpenRouter** instead of
@@ -18,8 +23,8 @@ design, the JSON-parsing approach — follows the same ideas taught in the cours
 3. Flask builds a prompt (a system instruction + your message + formatting
    instructions), sends it through a **LangChain chain**, and asks the model to
    reply in a specific JSON shape.
-4. LangChain's `JsonOutputParser` checks the model's reply against that shape and
-   converts it into a Python dict.
+4. LangChain's `JsonOutputParser` parses the reply into a Python dict. The Pydantic
+   schema provides format instructions; there is no separate Pydantic validation call.
 5. Flask sends that dict back to the browser as JSON, and the page renders it.
 
 The point of the exercise (from the course) is to practice three things:
@@ -47,7 +52,7 @@ for `:free` models. It's also **OpenAI-API-compatible**, meaning LangChain's
 
 | File | Course (watsonx) | This project (OpenRouter) |
 |---|---|---|
-| `config.py` | `Credentials(url=..., project_id=...)` | `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL` read from `.env` |
+| `config.py` | `Credentials(url=..., project_id=...)` | `OPENROUTER_API_KEY` read from `.env`; base URL is a code constant; optional `OPENROUTER_SITE_URL`/`OPENROUTER_SITE_NAME` supply attribution headers |
 | `model.py` | `ChatWatsonx(...)` | `ChatOpenAI(base_url="https://openrouter.ai/api/v1", ...)` |
 | `model.py` prompts | 3 separate raw-text templates, one per model, each hand-written with that model's special tokens (`<\|begin_of_text\|>` for Llama, `[INST]` for Mistral, `<\|system\|>` for Granite) | **1 shared `ChatPromptTemplate`** with normal `system`/`human` roles |
 | `app.py` | unchanged | unchanged |
@@ -57,13 +62,16 @@ for `:free` models. It's also **OpenAI-API-compatible**, meaning LangChain's
 
 This is the part worth actually understanding, not just copying.
 
-watsonx's `ModelInference`/`ChatWatsonx` (in the course's raw-text examples) is
-close to a **text-completion** interface: you hand it one long string, and if you
+The course's raw-text `ModelInference` examples use a **text-completion**
+interface: you hand it one long string, and if you
 want the model to behave like a chat assistant, *you* have to wrap your message in
 that model's special tokens so it recognizes "this is the system prompt" vs "this
 is the user turn." That's why the lab had you memorize `<|start_header_id|>` for
 Llama, `[INST]...[/INST]` for Mistral, and `<|system|>` for Granite — three
 different formats for the same idea.
+
+`ChatWatsonx` also supports chat messages; manual special-token wrapping is a
+property of those raw-text lab examples, not a requirement of every watsonx client.
 
 OpenRouter (like OpenAI) exposes a real **chat-completions** API: you send
 structured messages —
@@ -88,7 +96,7 @@ and all three model-specific response functions (`llama_response`,
 ## 3. Project structure
 
 ```
-genai_flask_app/
+GenAI_Flask_App/
 ├── app.py              # Flask routes: GET / and POST /generate
 ├── config.py            # Env vars, model IDs, generation params
 ├── model.py              # LangChain: prompt template, models, JSON schema, chain
@@ -125,21 +133,24 @@ how the model knows what JSON shape to reply in. The chain is:
 chain = prompt_template | model | json_parser
 ```
 
-Read as: format the prompt → send it to the model → parse the model's reply into
-the schema. If the model doesn't return valid JSON matching the schema, this step
-raises an error, which `app.py`'s `try/except` catches and returns as a `500`.
+Read as: format the prompt → send it to the model → parse JSON. JSON parsing
+errors are caught by `app.py` and returned as `500`. The current code does not
+independently enforce required fields, field types, or the sentiment range;
+`Field(description=...)` describes a range but does not validate it.
 
 ---
 
 ## 5. Setup
 
-**Requirements:** Python 3.10+, a free OpenRouter account.
+**Requirements:** Python 3.10+, an OpenRouter API key and access to the configured models. The configured IDs are not all `:free` models; availability and pricing depend on the provider.
+
+From the repository root:
 
 ```bash
-cd genai_flask_app
+cd Develop_Generative_AI_Applications_Get_Started/GenAI_Flask_App
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
@@ -147,15 +158,19 @@ cp .env.example .env
    create a key.
 2. Paste it into `.env` as `OPENROUTER_API_KEY`.
 
+The API base URL is fixed in `config.py`; setting `OPENROUTER_BASE_URL` in `.env`
+does not change it. Optional `OPENROUTER_SITE_URL` and `OPENROUTER_SITE_NAME` are read.
+
 ### Sanity check (no Flask, no browser)
 
 ```bash
 python llm_test.py
 ```
 
-This calls all three models directly and prints their parsed JSON responses. If
-this fails, the problem is in your key or model IDs — fix it here before touching
-Flask.
+This calls all three models directly and prints their parsed JSON responses. The
+"Granite Response" heading is a legacy label for the DeepSeek R1 call. It is a
+live-API smoke check, not an automated test suite. Failures can originate in
+credentials, model availability, network access, dependencies, or JSON parsing.
 
 ### Run the app
 

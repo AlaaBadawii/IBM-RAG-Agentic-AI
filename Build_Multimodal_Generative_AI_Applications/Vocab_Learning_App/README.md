@@ -1,5 +1,7 @@
 # Vocabulary Audio Storyteller
 
+**Status: Implemented independent vocabulary-learning extension.** [Course 5](../README.md) · [Certificate](../../README.md)
+
 Paste a list of English vocabulary words and get a complete audio lesson: a
 simple definition for each word, two practical example sentences, one story that
 uses every word in context, and a single MP3 you can listen to while walking,
@@ -102,7 +104,7 @@ challenge
 confident
 ```
 
-Output (excerpt from a real run):
+Illustrative lesson excerpt (not a verification run from this documentation update):
 
 > **1. achieve**
 > **Definition:** To achieve something means to succeed in doing it or reaching a
@@ -125,14 +127,15 @@ examples, and finally the story.
 
 ## Setup
 
+From the repository root:
+
 ```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd Vocab_Learning_App
+cd Build_Multimodal_Generative_AI_Applications/Vocab_Learning_App
 
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 Configure your credentials:
@@ -151,6 +154,11 @@ LLM_MODEL=your_model
 
 `.env` is git-ignored. No credentials are stored anywhere else in the project.
 
+`LLM_API_KEY` is required. `LLM_BASE_URL` and `LLM_MODEL` have defaults in
+[`src/config.py`](src/config.py). The code also reads optional
+`MAX_VOCABULARY_ITEMS` (15 by default), `LLM_REQUEST_TIMEOUT` (120 seconds), and
+`GRADIO_SHARE` for the public-link setting.
+
 ## Running
 
 ```bash
@@ -160,7 +168,9 @@ python app.py
 Gradio prints a local URL (by default <http://127.0.0.1:7860>). Paste your words,
 press **Generate Lesson**, and the lesson, story and audio player appear.
 
-Set `GRADIO_SHARE=1` in `.env` to also expose a temporary public link.
+Set `GRADIO_SHARE=1` in the **process environment before launch** to expose a
+temporary public link. `main()` reads it before the request-time `load_config()`
+loads `.env`, so adding it only to `.env` does not reliably configure startup sharing.
 
 ## Tests
 
@@ -168,10 +178,12 @@ Set `GRADIO_SHARE=1` in `.env` to also expose a temporary public link.
 python -m pytest
 ```
 
-84 tests cover the deterministic parts — input parsing, JSON extraction,
+Five test modules contain **77 test functions** (some are parameterized), covering input parsing, JSON extraction,
 structured-response validation, vocabulary coverage, retry policy and
 audio-script construction. The LLM and the TTS engine are replaced with fakes, so
 the suite needs no network access.
+
+This is a source inventory, not a newly executed pass count or a coverage percentage.
 
 ## Architecture
 

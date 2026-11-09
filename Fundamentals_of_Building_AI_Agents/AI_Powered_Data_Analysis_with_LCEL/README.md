@@ -4,7 +4,12 @@ A LangChain agent that inspects local CSV files and tells you whether each
 dataset is a **classification** or **regression** task — with evidence
 (sample rows, `describe` stats, and a trained baseline model score).
 
-Course project: **Fundamentals of Building AI Agents** (IBM RAG and Agentic AI).
+**Status: Implemented data-tools agent and local tool tests.**
+
+Course 6: **Fundamentals of Building AI Agents** (IBM RAG and Agentic AI Professional Certificate). [Course overview](../README.md) · [Certificate](../../README.md)
+
+Despite the directory name, this implementation uses `create_openai_tools_agent`
+and `AgentExecutor`, not a simple LCEL `prompt | llm | parser` chain.
 
 ## Features
 
@@ -21,10 +26,8 @@ Course project: **Fundamentals of Building AI Agents** (IBM RAG and Agentic AI).
   - Multi-turn chat loop with `chat_history` (type `exit`/`quit` to stop)
   - One bad tool call can't kill the session — errors are returned to the
     model and the loop continues
-- Bundled datasets: `classification-dataset.csv` (Breast Cancer Wisconsin,
-  ~95% accuracy) and `regression-dataset.csv` (California Housing,
-  R² ~0.82)
-- Offline pytest suite in `tests/` (9 tests, no API key or network needed)
+- Bundled datasets: `classification-dataset.csv` (Breast Cancer Wisconsin) and `regression-dataset.csv` (California Housing). The tools calculate baseline scores; no measured accuracy/R² result is claimed here.
+- Pytest suite in `tests/` (9 test functions in one module; no hosted-model call, but the import check requires a nonempty API-key setting)
 
 ## Project structure
 
@@ -45,22 +48,23 @@ AI_Powered_Data_Analysis_with_LCEL/
 ## Setup
 
 ```bash
-cd AI_Powered_Data_Analysis_with_LCEL
+cd Fundamentals_of_Building_AI_Agents/AI_Powered_Data_Analysis_with_LCEL
 
 python3 -m venv venv
 source venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env with your own key
 ```
 
-Required variables (see `.env.example`):
+Variables actually read by `llm.py` (see `.env.example`):
 
 - `OPENROUTER_API_KEY` — your OpenRouter API key (**required**)
-- `OPENROUTER_BASE_URL` (or `BASE_URL`) — e.g. `https://openrouter.ai/api/v1`
-- `OPENROUTER_MODEL` — default `deepseek/deepseek-v4-flash`
+- `OPENROUTER_BASE_URL` — optional; falls back to `BASE_URL`, then `https://openrouter.ai/api/v1`
+- `BASE_URL` — supported fallback name for the base URL
+- `OPENROUTER_MODEL` — optional; defaults to `deepseek/deepseek-v4-flash`
 
 ## Run the agent
 
@@ -71,7 +75,7 @@ python llm.py
 ```
 📊 Ask questions about your dataset (type 'exit' to quit):
  You: tell me about the datasets
-my Agent: <summaries, head/describe output, 95%+ accuracy / 0.82 R², ...>
+my Agent: <dataset summaries, sample rows, statistics, and calculated baseline metrics>
  You: exit
 see ya later
 ```
@@ -79,12 +83,15 @@ see ya later
 ## Run tests
 
 ```bash
-python -m pytest tests/ -v
+OPENROUTER_API_KEY=offline-test-key python -m pytest tests/ -v
 ```
 
-No API key or network access needed — tool tests run locally with
-pandas/scikit-learn. (`test_llm_*` only imports `llm.py`; the chat loop is
-guarded by `if __name__ == "__main__"`.)
+The dataset-tool tests run locally with pandas/scikit-learn. The ninth test
+imports `llm.py`, which rejects a missing key at import time and asserts that
+`OPENROUTER_API_KEY` is nonempty. The dummy setting above satisfies that offline
+configuration check; it is not a real credential or a provider connectivity test.
+The interactive chat loop is guarded by `__main__`. No pass result or measured
+coverage is reported by this documentation update.
 
 ## Notes
 

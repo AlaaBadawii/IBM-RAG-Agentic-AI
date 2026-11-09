@@ -5,7 +5,9 @@ Instead of using a prebuilt agent executor, this project wires the agent loop by
 the model is bound to a set of YouTube tools, its `tool_calls` are executed in plain
 Python, and the results are fed back to the model until it produces a final answer.
 
-Course project: **Fundamentals of Building AI Agents** (IBM RAG and Agentic AI).
+**Status: Implemented manual tool-calling lab; no automated test suite.**
+
+Course 6: **Fundamentals of Building AI Agents** (IBM RAG and Agentic AI Professional Certificate). [Course overview](../README.md) · [Certificate](../../README.md)
 
 ## Learning objectives
 
@@ -88,7 +90,7 @@ Tool_calling_Agent/
 
 ## Technology stack
 
-- Python (3.12 verified)
+- Python 3.10+ (source uses union type syntax)
 - `langchain`, `langchain-core` — messages, `@tool` decorator, tool binding
 - `langchain-ibm` (`ChatWatsonx`), `ibm-watsonx-ai` — IBM watsonx.ai model access
 - `pydantic` — `SecretStr` handling for credentials
@@ -100,18 +102,18 @@ Tool_calling_Agent/
 
 ## Prerequisites
 
-- Python 3.10+ (developed and checked with Python 3.12).
+- Python 3.10+ and dependencies compatible with the committed pinned manifest.
 - An IBM watsonx.ai account with an API key and a project (to obtain the project ID).
 
 ## Installation
 
 ```bash
-cd Tool_calling_Agent
+cd Fundamentals_of_Building_AI_Agents/Tool_calling_Agent
 
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env with your own credentials
@@ -135,16 +137,16 @@ belongs in the repository.
 
 ## Usage
 
-There is no CLI entry point — `src/run_agent.py` exposes `run_agent(user_input)`,
-and the modules use flat imports (`import tools`, `from llm import ...`), so run
-everything from inside `src/`:
+`src/run_agent.py` exposes `run_agent(user_input)` and a simple interactive
+`__main__` entry point. The modules use flat imports (`import tools`,
+`from llm import ...`), so start from the project root and run inside `src/`:
 
 ```bash
 cd src
-python -c "from run_agent import run_agent; print(run_agent('Search YouTube for LangChain tutorials and summarize the top result.'))"
+python run_agent.py
 ```
 
-Example session:
+Illustrative tool-call flow (not a newly executed session):
 
 ```
 > Search YouTube for LangChain tutorials and get the transcript of the first result.
@@ -155,7 +157,7 @@ Tool  → "welcome back in this video we will..."
 Agent → (final answer summarizing the video for the user)
 ```
 
-Smoke-test just the model/tool binding without running tools:
+From the project root in a separate shell, smoke-check just the model/tool binding without running tools:
 
 ```bash
 cd src
@@ -223,7 +225,7 @@ useful for testing a single tool in isolation.
 ## Current limitations
 
 - **Iteration cap:** at most 10 LLM ↔ tool round-trips per query (`MAX_ITERATIONS`).
-- **Network-dependent:** every tool call (and every LLM call) needs internet access;
+- **Network-dependent:** hosted-model calls and YouTube fetching need internet access; `extract_video_id` is local parsing.
   YouTube scraping via `pytube`/`yt-dlp` can break if YouTube changes its pages.
 - **Transcript availability:** `fetch_transcript` fails for videos with captions
   disabled; the error is reported back to the model rather than retried another way.
@@ -231,8 +233,7 @@ useful for testing a single tool in isolation.
   `youtu.be/` URLs with 11-character IDs (e.g. no Shorts/embed variants).
 - **Fixed decoding params:** temperature `0.7` and `max_output_tokens` 512 are
   hard-coded in `src/llm.py`.
-- **No CLI, persistence, streaming, or tests:** interaction is via the
-  `run_agent()` function; there is no test suite yet.
+- **Minimal CLI, no persistence/streaming/tests:** `run_agent.py` prompts once for input; it has no argument-based CLI or automated test suite.
 
 ## Disclaimer
 

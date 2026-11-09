@@ -1,6 +1,8 @@
 # Gradio UI Experiments
 
-Two hands-on Gradio demonstrations for practicing the Gradio component model: a **sentence builder** and an **image captioning** demo using a vision-language model.
+Two Gradio exercises for practicing the component model: an **implemented sentence builder** and an **experimental image-interface script** using a vision-language model.
+
+**Status:** Sentence builder implemented; image inference needs a code correction. [Course 2](../README.md) · [Certificate](../../README.md)
 
 This project is part of **Course 2 — Build RAG Applications: Get Started** (IBM RAG and Agentic AI Professional Certificate), used as practice with Gradio's interface components before building the LinkedIn Icebreaker Bot UI.
 
@@ -31,7 +33,7 @@ A single sentence combining all inputs, e.g.:
 
 ## 2. Image Captioning
 
-A `gr.Interface` that takes an image as input and returns the top predicted labels with confidence scores. Uses **BLIP (Bootstrapping Language-Image Pre-training)** from Salesforce for image understanding.
+The intended interface takes an image and displays top labels with confidence scores. The source loads **BLIP (Bootstrapping Language-Image Pre-training)**, a caption-generation model, but applies a classification-style inference and ImageNet label mapping. These contracts are incompatible; this is not a working caption-generation or ImageNet-classification pipeline as written.
 
 ### Inputs
 
@@ -39,14 +41,14 @@ A `gr.Interface` that takes an image as input and returns the top predicted labe
 
 ### Outputs
 
-- `gr.Label` — top predicted ImageNet labels with confidence scores
+- `gr.Label(num_top_classes=3)` — intended top-label display; the current model flow does not produce suitable ImageNet class probabilities
 
 ### How it works
 
 1. The image is preprocessed (resize to 256, center crop to 224, normalize with ImageNet stats).
-2. `BlipForConditionalGeneration` generates predictions.
-3. Predictions are mapped to human-readable ImageNet labels (downloaded from a public URL).
-4. The top-3 labels by confidence are displayed.
+2. The script calls `BlipForConditionalGeneration` directly, then applies `softmax` as if its output were classifier logits.
+3. It attempts to map that output to ImageNet labels downloaded from a public URL.
+4. BLIP needs its own processor and a caption-generation/decode path; alternatively, the intended label UI needs an actual image classifier. This requires an implementation change.
 
 ---
 
@@ -62,13 +64,15 @@ Gradio/
 
 ## 4. Setup
 
-**Requirements:** Python 3.10+, internet access for downloading the ImageNet labels and the BLIP model.
+**Requirements:** Python 3.10+. The sentence builder needs only Gradio. The image experiment additionally imports `requests`, `torch`, `torchvision`, `transformers`, and Pillow, and downloads external assets.
+
+From the repository root:
 
 ```bash
-cd Gradio
+cd Build_RAG_Applications_Get_Started/Gradio
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install gradio transformers torch requests
+python -m pip install gradio
 ```
 
 ---
@@ -85,11 +89,11 @@ Open <http://127.0.0.1:7860>, adjust the inputs, and submit to see the generated
 
 ### Image Captioning
 
-```bash
-python main.py
-```
-
-Open the browser, upload an image or click an example, and see the top predicted labels with confidence scores. The model (`Salesforce/blip-image-captioning-base`) is downloaded automatically on first run.
+The retained entry point is [`main.py`](main.py). Its imports would require
+`gradio transformers torch torchvision requests pillow`, but installing those
+packages does not fix the incompatible inference path described above. No
+successful image-inference run or test suite is claimed here. The script uses
+Gradio's default launch configuration, unlike the explicit port in `app.py`.
 
 ---
 
@@ -100,12 +104,13 @@ Open the browser, upload an image or click an example, and see the top predicted
 - **Example inputs** — built-in demos that users can click to test the interface
 - **Server configuration** — `server_name` and `server_port` settings
 - **Transformers inference** — preprocessing pipeline, model loading, and post-processing predictions
-- **Confidence-based labeling** — converting raw model logits to probability distributions via `softmax`
+- **Output-contract debugging** — caption token/logit output cannot be treated as ImageNet class probabilities
 
 ---
 
 ## 7. Notes
 
-- The image captioning demo downloads ImageNet labels from a public URL on startup. If offline, you can cache them locally and load from a local file.
+- The image experiment fetches ImageNet labels on every startup and has no implemented local-cache path for that request.
 - The BLIP model is downloaded automatically on first run. Subsequent runs use the cached version.
 - Both demos are single-file applications — no separate template or static directories needed.
+- No application environment variables, `.env.example`, dependency manifest, or automated tests are committed in this directory.

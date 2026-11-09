@@ -1,18 +1,25 @@
 # Job Description Matcher — Semantic Search with ChromaDB
 
-A Python application that stores job descriptions in **ChromaDB**, generates embeddings using **SentenceTransformers**, and enables natural-language semantic search with metadata filtering and evaluation.
+**Status: Plan only — no Python implementation or job dataset is tracked.**
+
+[Course 3](../README.md) · [Certificate](../../README.md)
+
+A proposed Python application for job-description search with **ChromaDB** and
+**SentenceTransformers**. This README preserves the intended design and retrieval
+concepts; it does not describe completed functionality.
 
 This project is part of **Course 3 — Vector Databases for RAG: An Introduction** (IBM RAG and Agentic AI Professional Certificate). It follows the IBM lab progression from document storage through similarity search with metadata filtering and evaluation.
 
 ---
 
-## 1. What this project does
+## 1. Intended Functionality (Not Implemented)
 
-1. **Stores** ~30 job descriptions in ChromaDB with rich metadata (title, company, location, category, description)
-2. **Generates** embeddings using `all-MiniLM-L6-v2` (SentenceTransformers)
-3. **Enables** natural-language semantic search with similarity scoring
-4. **Provides** metadata filtering (category, location) combined with semantic search
-5. **Supports** experimentation and evaluation metrics (Hit@K, Precision@K)
+1. Store a proposed dataset of ~30 job descriptions with rich metadata.
+2. Generate embeddings using `all-MiniLM-L6-v2`.
+3. Search natural-language queries and combine results with category/location filters.
+4. Evaluate retrieval with Hit@K and Precision@K.
+
+None of these components or evaluation results exists in the tracked project yet.
 
 ### Core philosophy
 
@@ -20,11 +27,11 @@ This project is part of **Course 3 — Vector Databases for RAG: An Introduction
 
 ---
 
-## 2. How it works
+## 2. Proposed Design
 
 ### Data model
 
-Each job record has these fields:
+Each proposed job record would have these fields:
 
 | Field | Purpose |
 |---|---|
@@ -58,24 +65,21 @@ Chroma's `collection.query()` accepts `query_texts`, `n_results`, `where` (metad
 
 ---
 
-## 3. Project structure
+## 3. Actual Tracked Contents
 
 ```
 job_description_matcher/
-├── config.py          # Configuration constants (embedding model, Chroma settings)
-├── data.py            # Job dataset (~30 records across 8 categories)
-├── vector_store.py    # ChromaDB operations (ingest, query)
-├── search.py          # Semantic search logic (with metadata filtering)
-├── cli.py             # Command-line interface (ingest, search)
+├── README.md           # Proposed design and current status
 ├── requirements.txt
-├── .gitignore
-├── .env.example
 └── plan.md            # Detailed 12-task implementation plan
 ```
 
+[`plan.md`](plan.md) is the implementation roadmap. The proposed configuration,
+dataset, vector store, search service, CLI, and evaluation still need to be built.
+
 ---
 
-## 4. Key configuration
+## 4. Proposed Configuration (Not Consumed by Code)
 
 | Constant | Value | Purpose |
 |---|---|---|
@@ -83,65 +87,27 @@ job_description_matcher/
 | `COLLECTION_NAME` | `"jobs"` | Chroma collection name |
 | `PERSISTENCE_DIRECTORY` | `"./data/chroma"` | Persistent storage (survives restarts) |
 | `DEFAULT_NUM_RESULTS` | `5` | Default number of results to return |
-| `DISTANCE_METRIC` | `"cosine"` | Cosine distance (0 = identical, 1 = opposite) |
+| `DISTANCE_METRIC` | `"cosine"` | Cosine distance (0 identical, 1 orthogonal, 2 opposite) |
 
 ---
 
-## 5. Setup
+## 5. Dependencies and Execution State
 
-**Requirements:** Python 3.10+, internet access for downloading the embedding model on first run.
-
-```bash
-cd job_description_matcher
-python3 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-`requirements.txt`:
-```
-chromadb
-sentence-transformers
-torch
-```
+[`requirements.txt`](requirements.txt) lists dependencies for the proposed
+implementation. Installing them does not create an application. No entry point,
+environment-variable reader, ingestion command, test suite, or dataset is tracked.
 
 ---
 
-## 6. Usage
+## 6. Remaining Implementation Work
 
-### Ingest job descriptions
+- Supply the job dataset and validate searchable text and metadata.
+- Implement collection creation, ingestion, search, and metadata filtering.
+- Build a real command-line interface before documenting usage commands.
+- Add labeled queries, metric calculations, and assertion-based tests.
+- Consider an optional LLM summary only after retrieval is implemented.
 
-```bash
-python cli.py ingest
-```
-
-Creates the Chroma collection and inserts all job records. Prints a summary with the document count.
-
-### Search
-
-```bash
-python cli.py search "Python backend engineer with FastAPI and PostgreSQL"
-```
-
-Returns the top 5 matching jobs with titles, companies, locations, categories, and cosine distances.
-
-### Search with metadata filters
-
-```bash
-python cli.py search "engineer" --category Backend
-python cli.py search "engineer" --location Cairo
-python cli.py search "engineer" --category Backend --location Cairo
-```
-
-Combines semantic similarity with structured metadata filtering.
-
-### Multiple queries
-
-```bash
-python cli.py search "Python backend engineer" "Kubernetes DevOps engineer" "AI engineer with RAG experience"
-```
-
-Each query independently returns its top matches, grouped by query in the output.
+The previously described `cli.py` commands are unavailable because that file does not exist.
 
 ---
 
@@ -172,7 +138,7 @@ Each query independently returns its top matches, grouped by query in the output
 
 1. **Combine title + description** for the searchable text — this ensures the job title influences semantic similarity while the description provides detail.
 2. **Use metadata for filtering**, not semantic similarity — metadata filters narrow the search space while semantic search ranks by similarity.
-3. **Expect distance 0–1** — lower is better, but the exact meaning depends on the model. `all-MiniLM-L6-v2` is a general-purpose model.
+3. **Check the configured distance metric** — lower is better for distance, but range and interpretation depend on the metric. Cosine distance can range from 0 to 2; the model does not choose the Chroma collection metric.
 4. **Different models behave differently** — try `all-MiniLM-L12-v2` or `MPNet` for comparison.
 5. **Metadata filtering + semantic search** = most powerful combination — "Find AI jobs in Cairo" works best with both.
 

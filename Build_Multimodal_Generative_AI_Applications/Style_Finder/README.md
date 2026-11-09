@@ -4,6 +4,8 @@ A multimodal generative AI web application that analyzes fashion images: it enco
 
 Built with **Gradio** and powered by **IBM watsonx.ai** (`meta-llama/llama-4-maverick-17b-128e-instruct-fp8`) + **ResNet50** image embeddings.
 
+**Status: Implemented guided lab; external dataset and IBM runtime required.** [Course 5](../README.md) · [Certificate](../../README.md)
+
 ## Features
 
 - **Fashion image analysis** — Upload an outfit photo or use one of the built-in example images.
@@ -30,7 +32,6 @@ Style_Finder/
 ├── app.py                      # StyleFinderApp orchestration + Gradio interface
 ├── config.py                   # Model ID, project/region, image + similarity settings
 ├── requirements.txt
-├── swift-style-embeddings.pkl  # Precomputed outfit embeddings dataset (untracked/large)
 ├── examples/                   # test-1.png … test-6.png sample outfit images
 ├── models/
 │   ├── image_processor.py      # ImageProcessor: encode_image, find_closest_match
@@ -51,20 +52,20 @@ Style_Finder/
 ## Prerequisites
 
 - Python 3.10+
-- IBM watsonx.ai access (project ID; API key if outside the Skills Network lab)
-- `swift-style-embeddings.pkl` dataset in the project root (expected columns include `Item Name`, `Price`, `Link`, `Image URL`, `Embedding`)
+- IBM Skills Network authentication compatible with the configured watsonx project, or a separate code change to pass normal local credentials.
+- The externally supplied `swift-style-embeddings.pkl` dataset in the project root (expected columns include `Item Name`, `Price`, `Link`, `Image URL`, `Embedding`). It is not tracked and is unavailable in a fresh clone.
 
 ## Installation
 
 ```bash
-cd Style_Finder
+cd Build_Multimodal_Generative_AI_Applications/Style_Finder
 
 # (Recommended) Create and activate a virtual environment
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ## Configuration
@@ -84,7 +85,7 @@ SIMILARITY_THRESHOLD = 0.8
 DEFAULT_ALTERNATIVES_COUNT = 5
 ```
 
-`LlamaVisionService` also accepts `temperature=0.2`, `top_p=0.6`, `max_tokens=2000`, and an optional `api_key` (passed through to `Credentials`).
+`LlamaVisionService` also accepts `temperature=0.2`, `top_p=0.6`, `max_tokens=2000`, and an optional `api_key`. However, the app does **not** pass that key, read credential environment variables, or load `.env`; adding `WATSONX_*` variables alone does not configure local authentication.
 
 ## Usage
 
@@ -100,10 +101,11 @@ Then open the local Gradio URL (default `http://127.0.0.1:5000`, plus a public `
 
 ## Notes & Limitations
 
-- `swift-style-embeddings.pkl` (~6 MB) is required at runtime as `StyleFinderApp("swift-style-embeddings.pkl")`; keep it out of version control if it is regenerated per environment (currently untracked).
+- `StyleFinderApp("swift-style-embeddings.pkl")` raises a file-not-found error before model/UI initialization if the external dataset is absent.
 - Match quality depends on image clarity and the `SIMILARITY_THRESHOLD` (0.8); scores below threshold are reported as similar, not exact.
 - LLM output is for catalog/informational purposes; prices/links come from the dataset snapshot and may be stale.
 - Gradio launches with `share=True` — set to `False` if you don't want a public link.
+- Temporary uploads are removed only after the successful processing path; early returns can leave files behind. No automated tests or upload-size policy are tracked.
 
 ## License
 

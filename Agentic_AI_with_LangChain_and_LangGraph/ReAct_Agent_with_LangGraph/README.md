@@ -6,6 +6,8 @@ An educational, offline-testable **ReAct** agent built with
 and IBM [watsonx.ai](https://www.ibm.com/products/watsonx-ai) (`ChatWatsonx`).
 Web search is provided by [Tavily](https://tavily.com/).
 
+**Status: Implemented educational ReAct workflow with offline tests.** [Course 7](../README.md) · [Certificate](../../README.md)
+
 The project is deliberately small: a two-node `StateGraph` with one conditional
 edge, a handful of tools, and a fully offline `pytest` suite. It exists to make
 the ReAct loop explicit and to show how the pieces of a modern agent fit
@@ -87,7 +89,7 @@ Two details are easy to get wrong and are handled deliberately here:
   `The Json field 'type' is required`.
 - **Lazy, import-safe design**: the watsonx.ai client, the Tavily client, and
   the ReAct chain are all created on first use.
-- **Five registered tools**:
+- **Four registered tools** (the list in `src/react_agent/tools/__init__.py`):
 
   | Tool | Purpose | External calls |
   |---|---|---|
@@ -96,7 +98,7 @@ Two details are easy to get wrong and are handled deliberately here:
   | `calculator` | Safe arithmetic (AST-restricted) | No |
   | `news_summarizer` | Grounded summary of search results | Uses watsonx.ai |
 
-- **Offline test suite** -- 83 `pytest` tests, no credentials or network.
+- **Offline test suite** — 56 test functions across 11 test modules, with additional parameterized cases; provider/search dependencies are mocked.
 
 ## Execution flow
 
@@ -140,9 +142,10 @@ validates that arguments are an object, runs the tool, and serializes any
 non-string result to JSON text.
 
 **Termination** (`react_agent.should_continue`) ends the run when the last
-message has no tool calls. Otherwise it counts completed tool rounds
-(`ToolMessage`s in the history) and stops once `REACT_MAX_ITERATIONS` is
-reached -- the guarantee that the loop always terminates.
+message has no tool calls. Otherwise it counts individual `ToolMessage`s in
+the history and stops once `REACT_MAX_ITERATIONS` is reached. Multiple tools in
+one model turn therefore count more than once. A limit exit can retain an
+unexecuted tool-call message; it is not necessarily a final answered query.
 
 ## Technology stack
 
@@ -162,7 +165,7 @@ reached -- the guarantee that the loop always terminates.
 ## Repository structure
 
 ```text
-ReAct_Agent_with_LangChain_and_LangGraph/
+ReAct_Agent_with_LangGraph/
 ├── src/
 │   └── react_agent/
 │       ├── __init__.py
@@ -212,7 +215,7 @@ differ from their tool **function** names. Importing a function into
 
 ## Prerequisites
 
-- **Python 3.12** (developed and verified on 3.12.14).
+- **Python 3.12** (`pyproject.toml` requires `>=3.12,<3.13`).
 - An IBM Cloud account with a watsonx.ai project (live runs only).
 - A Tavily account (live runs only).
 - The default test suite needs **neither** credentials nor internet.
@@ -225,8 +228,8 @@ cd Agentic_AI_with_LangChain_and_LangGraph/ReAct_Agent_with_LangGraph
 python3.12 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-pip install -r requirements-dev.txt   # runtime + test dependencies
-pip install -e .                      # install the react_agent package (editable)
+python -m pip install -r requirements-dev.txt   # runtime + test dependencies
+python -m pip install -e .                     # install the react_agent package (editable)
 ```
 
 `pyproject.toml` reads runtime dependencies from `requirements.txt`, so they
@@ -248,7 +251,6 @@ cp .env.example .env
 ```dotenv
 WATSONX_API_KEY=ADD_API_KEY_HERE
 WATSONX_PROJECT_ID=ADD_PROJECT_ID_HERE
-WATSONX_PROJECT_NAME=ADD_PROJECT_NAME_HERE
 WATSONX_URL=https://eu-de.ml.cloud.ibm.com
 WATSONX_MODEL_ID=ibm/granite-4-h-small
 TAVILY_API_KEY=ADD_TAVILY_API_KEY_HERE
@@ -260,7 +262,6 @@ TAVILY_API_KEY=ADD_TAVILY_API_KEY_HERE
 | `WATSONX_PROJECT_ID` | `react_agent.llm` | Required. The watsonx.ai project ID. |
 | `WATSONX_URL` | `react_agent.llm` | Required. Regional endpoint. |
 | `WATSONX_MODEL_ID` | `react_agent.llm` | Required. A tool-calling-capable model. |
-| `WATSONX_PROJECT_NAME` | *(informational)* | Present in the template; not read by the code. |
 | `TAVILY_API_KEY` | `react_agent.tools.web_search` | Required to run `search_tool`. |
 | `REACT_MAX_ITERATIONS` | `react_agent.should_continue` | Optional. Tool-round limit (default 6). |
 
@@ -268,6 +269,8 @@ A missing watsonx variable makes `get_llm()` raise an `OSError` naming the
 variable(s) and pointing at `.env.example`. A missing `TAVILY_API_KEY` makes
 `search_tool` raise a similar `OSError` **when invoked**; importing the package
 never requires it.
+
+The template also contains `WATSONX_PROJECT_NAME`, but this project does not read it.
 
 ## Getting watsonx.ai and Tavily credentials
 
@@ -290,7 +293,7 @@ never requires it.
 ## Running the agent
 
 Activate the environment, install the package, and populate `.env`, then run
-from the repository root:
+from the **project root** (`Agentic_AI_with_LangChain_and_LangGraph/ReAct_Agent_with_LangGraph`):
 
 ```bash
 # Main demo: streams each graph step (live watsonx.ai + Tavily)
@@ -327,11 +330,13 @@ credentials before importing the package, the model and Tavily are mocked, and
 watsonx client booby-trapped) that importing the project touches no network.
 
 ```bash
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Result in this repository: **83 passed**.
+Source inventory: **11 test modules, 56 test functions**; some functions are
+parameterized. This is not a collected-case count, a newly executed pass result,
+or a measured coverage percentage.
 
 | File | Covers |
 |---|---|
@@ -416,6 +421,7 @@ never to invent facts, dates, or sources.
   LangSmith tracing.
 - **Live edges depend on the model.** Because a live model chooses the tools,
   end-to-end tool sequences are not deterministic.
+- **Limit exits need interpretation.** The router stops on a count of tool-result messages, not an explicit success status. Inspect the final message before treating a terminated graph as an answered question.
 
 Possible future work: parallelize tool calls with retries; migrate the
 summarizer to a structured tool schema; add optional checkpointing; add an

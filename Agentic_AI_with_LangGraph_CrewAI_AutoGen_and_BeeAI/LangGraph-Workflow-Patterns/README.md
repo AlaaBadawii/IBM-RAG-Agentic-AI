@@ -9,12 +9,14 @@ An educational project demonstrating three foundational agent workflow patterns 
 
 This is a course lab / learning aid, **not** a production-ready agent platform.
 
+**Status: Implemented guided-pattern workflows; no automated test suite.** [Course 8](../README.md) · [Certificate](../../README.md)
+
 ## Learning objectives
 
 - Build and compile `StateGraph` workflows in LangGraph.
 - Understand `set_entry_point` / `set_finish_point`, `add_edge`, and `add_conditional_edges`.
 - Fan work out from `START` to parallel nodes and merge results back in a single aggregator node.
-- Use `ChatWatsonx` from `langchain-ibm` as the LLM for every node.
+- Use `ChatWatsonx` from `langchain-ibm` for the model-backed nodes; routing and aggregation also use ordinary Python functions.
 - Inspect and visualize compiled workflow structure (`graph.png` per workflow).
 
 ## The three workflow patterns
@@ -112,7 +114,7 @@ LangGraph-Workflow-Patterns/
 
 ## Prerequisites
 
-- Python **3.12** (the environment this project was developed and tested in).
+- Python **3.12** for the documented lab setup; use compatible versions from the retained manifest.
 - An IBM Cloud account with a **watsonx.ai** project and API key/model access.
 - For graph rendering only: **Graphviz** (system package, e.g. `sudo apt install graphviz`) and
   the `pygraphviz` Python package (listed as an optional, commented entry in `requirements.txt`).
@@ -120,13 +122,13 @@ LangGraph-Workflow-Patterns/
 ## Setup
 
 ```bash
-cd LangGraph-Workflow-Patterns
+cd Agentic_AI_with_LangGraph_CrewAI_AutoGen_and_BeeAI/LangGraph-Workflow-Patterns
 
 # create and activate a virtual environment (Python 3.12)
 python3.12 -m venv venv
 source venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ## IBM watsonx.ai configuration
@@ -143,12 +145,15 @@ cp .env.example .env
 |---------------------|------------------------------------------------------|--------------------------------------------------|
 | `WATSONX_API_KEY`   | IBM Cloud IAM API key                                | `your-watsonx-api-key`                           |
 | `WATSONX_PROJECT_ID`| watsonx.ai project GUID                              | `your-watsonx-project-id`                        |
-| `WATSONX_URL`       | watsonx.ai endpoint for your region                  | `https://your-region.ml.cloud.ibm.com`           |
-| `WATSONX_MODEL_ID`  | Model identifier                                     | `ibm/granite-3-8b-instruct`                      |
+| `WATSONX_URL`       | watsonx.ai endpoint for your region                  | `https://us-south.ml.cloud.ibm.com`              |
+| `WATSONX_MODEL_ID`  | Model identifier available to your project          | `ibm/granite-4-h-small`                          |
 
 `llm.py` validates these variables on first use and calls `load_dotenv()`, so a project-root
 `.env` file is picked up automatically. The `ChatWatsonx` client is constructed lazily and cached
-(`lru_cache`); importing modules does not call the LLM.
+(`lru_cache`). Several node modules call `get_llm()` at import time, so importing
+those workflows requires configuration and constructs a client, even before a
+model invocation. The factory itself is lazy; the full workflow import is not
+credential-free.
 
 ## Running the workflows
 
@@ -196,9 +201,10 @@ python render_graphs.py
 ```
 
 PNG files are written next to each workflow's `graph.py` and are referenced from this README.
-Rendering is fully local (Graphviz/`pygraphviz`) and does **not** call the LLM; however, importing
-the workflow 01 and 02 node modules *does* require the watsonx environment variables to be set
-(no requests are made — client construction only).
+Rendering itself uses local Graphviz/`pygraphviz`, not an external image service.
+Importing workflow 01 and 02 nodes constructs watsonx clients, however, so
+credentials and any SDK initialization requirements still apply. A source review
+does not establish that the complete render/import path works offline.
 
 ## Troubleshooting
 
@@ -228,16 +234,9 @@ the workflow 01 and 02 node modules *does* require the watsonx environment varia
 
 ## Testing and validation status
 
-- ✅ All three workflow graphs compile successfully.
-- ✅ Workflows 01 and 02 were executed end-to-end against a live watsonx.ai account
-  (`ibm/granite-4-h-small`); outputs matched the expected formats above.
-- ✅ Workflows 03's graph was compiled and rendered; a full end-to-end run has **not** been
-  re-verified as part of repository preparation.
-- ✅ All three `graph.png` files were rendered from the compiled graphs using
-  `pygraphviz`/Graphviz (local rendering, no external image service).
-- ❌ There are no automated unit tests in this repository; validation was performed manually.
-- The pinned dependency versions were validated against the development environment
-  (Python 3.12.14); other versions are untested.
+- Three workflow implementations and their `graph.png` artifacts are tracked.
+- Earlier project notes reported live runs for workflows 01 and 02 and compilation/rendering for 03; these are historical notes, not runs repeated during this documentation update.
+- No automated unit-test suite is tracked for this project. Source/command review does not establish clean-environment installation or live-model behavior.
 
 ## Acknowledgments
 

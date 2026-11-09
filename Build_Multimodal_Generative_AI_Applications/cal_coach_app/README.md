@@ -4,6 +4,8 @@ A multimodal generative AI web application that analyzes food images and provide
 
 Built with **Flask** and powered by **IBM watsonx.ai** (`meta-llama/llama-4-maverick-17b-128e-instruct-fp8` vision-language model).
 
+**Status: Implemented guided lab with Skills Network configuration and web-handling limitations.** [Course 5](../README.md) · [Certificate](../../README.md)
+
 ## Features
 
 - **Food image analysis** — Upload a photo of a meal; the app identifies each food item.
@@ -47,34 +49,27 @@ cal_coach_app/
 ## Prerequisites
 
 - Python 3.9+
-- IBM watsonx.ai access (URL + API key / credentials, and a project ID)
+- An IBM Skills Network runtime compatible with the script's fixed watsonx configuration. Normal local credentials are not wired through environment variables.
 
 ## Installation
 
 ```bash
 # 1. Clone / navigate to the project
-cd cal_coach_app
+cd Build_Multimodal_Generative_AI_Applications/cal_coach_app
 
 # 2. (Recommended) Create and activate a virtual environment
 python3 -m venv my_env
 source my_env/bin/activate  # Windows: my_env\Scripts\activate
 
 # 3. Install dependencies
-pip install Flask ibm_watsonx_ai Pillow requests
+python -m pip install Flask ibm-watsonx-ai Pillow requests
 ```
 
-You can also pin the versions used during development:
-
-```
-Flask==3.1.3
-ibm_watsonx_ai==1.1.20
-pillow==12.3.0
-requests==2.32.0
-```
+No dependency manifest or reproducible version pin set is tracked for this app.
 
 ## Configuration
 
-Edit the watsonx.ai client setup at the top of `app.py`:
+The watsonx.ai client setup in `app.py` is fixed in source:
 
 ```python
 credentials = Credentials(
@@ -86,9 +81,11 @@ model_id = "meta-llama/llama-4-maverick-17b-128e-instruct-fp8"
 project_id = "skills-network"
 ```
 
-Set your own API key and project ID before running outside of Skills Network environments.
+The script reads no credential environment variables and does not load `.env`.
+Running outside the lab requires a separate implementation change to supply local
+authentication; setting `WATSONX_*` variables alone is not a documented working setup.
 
-> **Note:** `app.py` currently sets a Flask app without a `secret_key`. Flash messages (`flash(...)`) require one — add `app.secret_key = "your-secret-key"` (or load from an environment variable) before production use.
+> `app.py` has no Flask `secret_key`. The missing/empty-upload paths call `flash(...)`, which requires one; those error paths need a code correction.
 
 ## Usage
 
@@ -132,6 +129,9 @@ The assistant prompt instructs the model to return:
 - Calorie and nutrient values are **estimates** based on general food data; actual values vary by portion, ingredients, and preparation.
 - This app is for informational purposes only — not medical or dietary advice.
 - Requires network access to IBM watsonx.ai; image analysis quality depends on image clarity and the underlying model.
+- Upload bytes are labeled `image/jpeg` regardless of their actual format, and no upload-size or content-validation policy is implemented.
+- The report is model-generated and regex-formatted as HTML, not independently verified nutrition data or sanitized structured output.
+- No automated tests are tracked.
 
 ## License
 
