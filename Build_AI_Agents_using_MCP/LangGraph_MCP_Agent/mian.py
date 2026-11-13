@@ -45,7 +45,7 @@ async def main():
         )
 
         # Initialize the language model
-        openai_model = ChatOpenAI(model="gpt-5.4-mini", temperature=0)
+        openai_model = ChatOpenAI(model="gpt-5.4-mini")
 
         # Retrieve tools from all configured MCP servers
         tools = await client.get_tools()
