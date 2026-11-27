@@ -1,0 +1,16 @@
+[2026-11-26T21:08:40.748432] TOOL: read_file - Decision: ALLOWED - Reason: Policy: allow
+[2026-11-26T21:09:03.818755] TOOL: read_file - Decision: ALLOWED - Reason: Policy: allow
+[2026-11-26T21:09:16.381403] TOOL: write_file - Decision: ASK - Reason: Awaiting approval
+[2026-11-26T21:09:34.156119] TOOL: write_file - Decision: ALLOWED - Reason: Policy: ask
+[2026-11-26T21:10:06.305077] TOOL: write_file - Decision: ASK - Reason: Awaiting approval
+[2026-11-26T21:10:10.102562] TOOL: write_file - Decision: ALLOWED - Reason: Policy: ask
+[2026-11-26T21:10:37.298697] TOOL: write_file - Decision: ASK - Reason: Awaiting approval
+[2026-11-26T21:10:39.369560] TOOL: write_file - Decision: ALLOWED - Reason: Policy: ask
+[2026-11-26T21:10:39.373285] WRITE: test_file.txt
+[2026-11-26T21:11:43.517543] TOOL: delete_file - Decision: DENIED - Reason: Policy: deny
+[2026-11-26T21:11:47.206422] TOOL: delete_file - Decision: DENIED - Reason: Policy: deny
+[2026-11-26T21:11:48.704925] TOOL: delete_file - Decision: DENIED - Reason: Policy: deny
+[2026-11-26T21:11:54.057130] TOOL: execute_command - Decision: DENIED - Reason: Policy: deny
+[2026-11-26T21:14:01.620976] TOOL: delete_file - Decision: ALLOWED - Reason: Policy: allow
+[2026-11-26T21:14:22.241298] TOOL: delete_file - Decision: ALLOWED - Reason: Policy: allow
+[2026-11-26T21:14:22.247451] DELETE: test_file.txt
