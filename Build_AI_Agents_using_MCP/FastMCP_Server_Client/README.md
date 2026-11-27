@@ -1,168 +1,215 @@
 # FastMCP Server & Client
 
-A minimal Model Context Protocol (MCP) project built with [FastMCP](https://gofastmcp.com/). It exposes a simple calculator MCP server (add/subtract tools, document resources, and a code-review prompt) alongside several client examples: in-memory, HTTP (Streamable HTTP), STDIO, and LangChain multi-server integration.
+A FastMCP calculator project that pairs a small MCP server with several client
+examples: in-memory, Streamable HTTP, STDIO, and LangChain multi-server
+integration.
 
-## Purpose
+**Status: educational lab; client/server wiring is incomplete in places and is
+documented below.**
 
-Demonstrate how to:
+Course 9: **Build AI Agents using MCP** (IBM RAG and Agentic AI Professional
+Certificate). [Course overview](../README.md)
 
-- Build and run an MCP server with FastMCP.
-- Call MCP tools, read resources, and fetch prompts from different client transports.
-- Integrate MCP servers with LangChain/LangGraph agents using stdio and Streamable HTTP.
-- Aggregate tools from multiple MCP servers (stdio + HTTP) with `MultiServerMCPClient`.
+## Overview
+
+The project was built to practise:
+
+- Defining an MCP server with FastMCP.
+- Registering tools, file resources, and a prompt.
+- Calling MCP capabilities from different transports.
+- Loading MCP tools into LangGraph ReAct agents with `langchain-mcp-adapters`.
+- Aggregating tools from a STDIO server and an HTTP server in one agent.
+
+The intended server is a calculator named `CalculatorMCPServer`, serving
+`add`/`subtract`, two file-resource templates, and a `review_code` prompt.
+
+## Important: current wiring status
+
+The modules are present, but `app/mcp/server.py` does **not** import the modules
+that register capabilities. As committed:
+
+- `python -m app.mcp.server` starts an HTTP server on `127.0.0.1:8000` with
+  **no tools, resources, or prompts registered**.
+- `app/mcp/tools.py` registers `add` and `subtract` when imported. Verified by
+  importing it before creating an in-memory client.
+- `app/mcp/resources.py` and `app/mcp/prompts.py` use `from server import mcp`.
+  That import fails with `ModuleNotFoundError: No module named 'server'` unless a
+  top-level `server` module is placed on `sys.path`; it does not resolve from the
+  `app` package. Consequently those two modules cannot register their
+  capabilities in the current layout.
+
+To register the tools in a session, import `app.mcp.tools` explicitly, for
+example:
+
+```python
+import app.mcp.tools  # registers add/subtract on app.mcp.server.mcp
+from app.mcp.server import mcp
+```
+
+No code changes are made by this documentation. Fixing the registration imports
+is a code task.
 
 ## Project structure
 
-```
+```text
 FastMCP_Server_Client/
-├── index.py                 # Simple HTTP client entry point
-├── README.md                # This file
-├── requirements.txt         # Python dependencies
-├── .env.example             # Example environment variables
-├── .env                     # Local environment variables (create from .env.example)
-├── .gitignore               # Git ignore rules
+├── index.py                     # Lists tools from a running HTTP server
+├── requirements.txt             # Python dependencies
+├── requiremnets.txt             # Empty, misspelled file; not used
+├── .env.example                 # OPENAI_API_KEY placeholder
+├── .gitignore
 ├── app/
-│   ├── __init__.py
-│   ├── config.py            # PORT and LLM_MODEL settings
-│   └── utils.py             # Helpers (make_dir, print_stream_info)
+│   ├── config.py                # PORT=8000, LLM_MODEL="openai:gpt-5-nano"
+│   ├── utils.py                 # make_dir(), print_stream_info()
 │   └── mcp/
-│       ├── __init__.py
-│       ├── server.py        # FastMCP Calculator MCP server (HTTP transport)
-│       ├── tools.py         # add / subtract tools
-│       ├── resources.py     # file:/// resources
-│       ├── prompts.py       # review_code prompt
+│       ├── server.py            # FastMCP instance + HTTP entry point
+│       ├── tools.py             # add / subtract tools
+│       ├── resources.py         # Intended file resources (broken import)
+│       ├── prompts.py           # Intended review_code prompt (broken import)
 │       └── clients/
-│           ├── __init__.py
-│           ├── in_memory_client.py   # In-memory FastMCP client
-│           ├── http_client.py        # Streamable HTTP client
-│           ├── langchain_http.py     # LangChain agent over HTTP
-│           ├── langchain_stdio.py    # LangChain agent over STDIO
-│           └── langchain_multi_server.py  # LangChain agent over stdio + HTTP
-├── path/                    # Documents served by the MCP server
+│           ├── in_memory_client.py    # In-process client functions
+│           ├── http_client.py         # Streamable HTTP client functions
+│           ├── langchain_http.py      # LangGraph agent over HTTP
+│           ├── langchain_stdio.py     # LangGraph agent over STDIO
+│           └── langchain_multi_server.py  # Agent over stdio + HTTP
+├── path/                        # Documents used by the file resource
 │   ├── README.txt
-│   └── examples.txt
+│   └── examples.txt             # Empty
 └── tests/
-    ├── __init__.py
-    ├── test_client_http.py  # HTTP client test helper
-    └── test_port.py         # Port availability check
+    ├── test_client_http.py      # Broken import; not a runnable test
+    └── test_port.py             # Prints port availability (inverted messages)
 ```
 
-## Prerequisites
+## Technologies
 
 - Python 3.10+
-- A virtual environment (recommended)
+- `fastmcp` (server, `Client`, transports)
+- `mcp` Python SDK (`ClientSession`, `StdioServerParameters`, stdio/HTTP clients)
+- `langchain`, `langchain-core`, `langchain-mcp-adapters`
+- `langgraph`, `langgraph-prebuilt`
+- `langchain-openai`, `openai`
+- `httpx`, `uvicorn`, `python-dotenv`, `pydantic`, `anyio`
+
+Exact pins are in `requirements.txt` (for example `fastmcp==2.12.2`,
+`mcp==1.30.0`, `langgraph==0.6.7`). Use `requirements.txt`; `requiremnets.txt`
+is empty.
 
 ## Setup
 
-1. Clone or open this folder.
-
-2. Create and activate a virtual environment:
-
 ```bash
+cd FastMCP_Server_Client
+
 python -m venv .venv
 source .venv/bin/activate      # Linux/macOS
 # .venv\Scripts\activate       # Windows
-```
 
-3. Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-4. Configure environment variables:
-
-```bash
+python -m pip install -r requirements.txt
 cp .env.example .env
-# Edit .env as needed (OPENAI_API_KEY, etc.)
+# edit .env and set OPENAI_API_KEY for the LangChain clients
 ```
 
-The project uses `OPENAI_API_KEY` for LangChain/LangGraph agent runs that call `openai:gpt-5-nano`. Set it in `.env` before running those clients.
+`OPENAI_API_KEY` is required by the LangChain/LangGraph clients. The model is
+hard-coded as `openai:gpt-5-nano` in `app/config.py`, so that model must be
+available to your key.
 
-## Dependencies
+## Run the server
 
-See `requirements.txt`. Core packages:
-
-- `fastmcp` — MCP server/framework
-- `mcp` — MCP Python SDK
-- `langchain-mcp-adapters` — LangChain MCP tool adapters
-- `langgraph`, `langgraph-prebuilt` — LangGraph agents
-- `langchain-openai`, `openai` — LLM model access
-- `httpx`, `uvicorn` — HTTP transport/server
-- `python-dotenv` — environment variable loading
-
-## Run the MCP server
-
-Start the HTTP (Streamable HTTP) server on `http://127.0.0.1:8000/mcp`:
+From the project root:
 
 ```bash
 python -m app.mcp.server
 ```
 
-The server exposes:
-- Tools: `add`, `subtract`
-- Resources: `file:///endpoint{name}`, `file:///endpoint2/{name}`
-- Prompt: `review_code`
+This serves Streamable HTTP at `http://127.0.0.1:8000/mcp`. Remember that, as
+committed, the server has no registered capabilities until the registration
+modules are imported (see the wiring note above). Keep it running in one terminal
+for the HTTP-based clients.
 
-Keep the server running in one terminal while running clients in another.
+## Clients
 
-## Run the clients
-
-### 1. In-memory client
-
-Connects directly to the in-process `mcp` object (no network):
-
-```bash
-python -m app.mcp.clients.in_memory_client
-```
-
-It provides `call_add_tool`, `call_subtract_tool`, `call_resource`, `call_resource2`, and `call_prompt`.
-
-### 2. HTTP client (Streamable HTTP)
-
-Connects to the running server at `http://127.0.0.1:8000/mcp`:
-
-```bash
-python -m app.mcp.clients.http_client
-```
-
-Requires the server to be running first.
-
-### 3. STDIO client (LangChain)
-
-Spawns the server as a subprocess over stdio and runs a LangGraph agent:
-
-```bash
-python -m app.mcp.clients.langchain_stdio
-```
-
-Requires `OPENAI_API_KEY` in `.env`.
-
-### 4. LangChain multi-server integration
-
-Aggregates tools from both a stdio server and an HTTP server, then runs a LangGraph agent:
-
-```bash
-python -m app.mcp.clients.langchain_multi_server
-```
-
-Requires the HTTP server running (for the `http-client`) and `OPENAI_API_KEY` in `.env`.
-
-### 5. Simple HTTP client (index.py)
-
-Lists tools from the running HTTP server:
+### `index.py` — tool discovery
 
 ```bash
 python index.py
 ```
 
-Requires the server to be running first.
+Connects to `http://127.0.0.1:8000/mcp`, pings the server, and prints each tool's
+name and input schema. Requires the server to be running. With the current
+registration gap it prints no tools.
 
-## Notes
+### In-memory client (`in_memory_client.py`)
 
-- `requiremnets.txt` is an empty, misspelled file left in the repo; use `requirements.txt` for installation.
-- `app/mcp/resources.py` and `app/mcp/prompts.py` import `mcp` via `from server import mcp`, which only resolves when those modules are imported from the project root with `server` on `sys.path`. They are not imported by `app.mcp.server`.
+A module of async helper functions (`call_add_tool`, `call_subtract_tool`,
+`call_resource`, `call_resource2`, `call_prompt`) that use `Client(mcp)`. It has
+**no `__main__` block**, so running it as a module does nothing. Import the
+functions from your own script. The tools are only available if
+`app.mcp.tools` has been imported first.
 
-## License
+### Streamable HTTP client (`http_client.py`)
 
-This project is provided as-is for learning and demonstration purposes.
+A module of async helper functions using `StreamableHttpTransport` against
+`http://127.0.0.1:8000/mcp`. It also has **no `__main__` block**. Requires the
+server to be running; import and call the helpers from your own script.
+
+### LangChain over HTTP (`langchain_http.py`)
+
+```bash
+python -m app.mcp.clients.langchain_http
+```
+
+The module runs `asyncio.run(fun())` at import time. It opens a Streamable HTTP
+session, loads MCP tools with `load_mcp_tools`, creates a ReAct agent, and asks
+the model to use the `add` tool. Requires the HTTP server and
+`OPENAI_API_KEY`.
+
+### LangChain over STDIO (`langchain_stdio.py`)
+
+The module defines `main()` but has **no `__main__` block and no
+`asyncio.run(...)`**, so running it directly does nothing. It is intended to
+spawn `python -m app.mcp.server` over STDIO, load tools, and run a ReAct agent.
+Call `asyncio.run(main())` yourself after importing it, with
+`OPENAI_API_KEY` set.
+
+### LangChain multi-server (`langchain_multi_server.py`)
+
+```bash
+python -m app.mcp.clients.langchain_multi_server
+```
+
+Builds a `MultiServerMCPClient` with a `stdio-client` (spawns
+`python -m app.mcp.server`) and an `http-client` (`http://127.0.0.1:8000/mcp`).
+Note that `asyncio.run(client.get_tools())` executes at module import, so the
+HTTP server must already be running before the module is imported. Requires
+`OPENAI_API_KEY`. The `__main__` block prints the human/AI/tool message
+sequence.
+
+## Expected behavior
+
+- With the server started and tools registered, `add` and `subtract` return
+  integer results and the LangChain clients ask the model to use `add`.
+- Without the registration imports, tool discovery returns an empty list and
+  tool calls fail with an unknown-tool error. This is the current state of the
+  committed entry point.
+- The resource/prompt clients refer to URI forms that do not all match the
+  decorators: `resources.py` declares `file:///endpoint{name}` and
+  `file:///endpoint2/{name}`, while the clients request `file:///endpoint{name}`,
+  `file:///endpoint/{name}`, and `file://endpoint2/{name}`. These are
+  inconsistent and are not a verified end-to-end resource path.
+
+## Limitations and notes
+
+- **Registration gap:** the server entry point does not import `tools.py`,
+  `resources.py`, or `prompts.py`.
+- **Broken imports:** `resources.py` and `prompts.py` import `mcp` from a
+  non-existent top-level `server` module.
+- **Library-only clients:** `in_memory_client.py`, `http_client.py`, and
+  `langchain_stdio.py` have no runnable entry point.
+- **Broken test helper:** `tests/test_client_http.py` imports `http_client` from
+  `app.mcp.clients.in_memory_client`, which does not define it.
+- **Port check message:** `tests/test_port.py` prints "not available" when the
+  bind succeeds and "available" on `OSError`, i.e. the messages are inverted.
+- **No automated test suite** is runnable as-is; the files in `tests/` are
+  helpers rather than a configured pytest suite.
+- The server instructions mention `get_average()`, but no such tool exists.
+- Never commit `.env` or real keys. This directory's `.gitignore` is empty, so
+  add `.env` to your ignore rules when using the project standalone.
